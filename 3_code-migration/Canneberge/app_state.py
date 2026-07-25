@@ -104,7 +104,8 @@ BS_LINES = [
     ("aoci",                    "Accumulated Other Comprehensive",         False, False),
     ("minority_interest",       "Minority Interest",                       False, False),
     ("retained_earnings",       "Retained Earnings",                       False, False),
-    ("common_equity",           "Common Equity",                           False, False),
+    ("placeholder2",            "PLACEHOLDER 2 positive (negative)",       False, False), 
+    ("placeholder",             "PLACEHOLDER positive (negative)",         False, False),
     ("total_equity",            "Total Shareholders' Equity",              True,  True),
     ("total_liab_equity",       "Total Liabilities & Shareholders' Equity", True, True),
 ]
@@ -231,19 +232,25 @@ class ProjectInputs:
         return year_from_date_text(self.nfy_2)
 
     @property
+    def historical_period_columns(self) -> List[str]:
+        """
+        Historical-only labels (LFY-N ... LFY), no TTM/forward/YTD.
+        Single source of truth for historical column generation —
+        do not duplicate this loop elsewhere.
+        """
+        hist = []
+        for i in range(self.historical_years - 1, 0, -1):
+            hist.append(f"LFY-{i}")
+        hist.append("LFY")
+        return hist
+
+    @property
     def period_columns(self) -> List[str]:
         """
         Ordered list of all period column labels for display.
-        Historical years (up to historical_years) + TTM + YTD + NFY + NFY+1 + NFY+2.
+        Historical years + TTM + YTD + NFY + NFY+1 + NFY+2.
         """
-        hist = []
-        for i in range(self.historical_years, 0, -1):
-            if i == 1:
-                hist.append("LFY-1")
-            else:
-                hist.append(f"LFY-{i}")
-        hist.append("LFY")
-        return hist + ["TTM", "YTD", "NFY", "NFY+1", "NFY+2"]
+        return self.historical_period_columns + ["TTM", "YTD", "NFY", "NFY+1", "NFY+2"]
 
     @property
     def active_public_tickers(self) -> List[str]:

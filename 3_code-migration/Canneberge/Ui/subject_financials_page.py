@@ -85,7 +85,8 @@ SA_KEY_MAP = {
     "aoci": "accumulated other comprehensive income",
     "minority_interest": "minority interest",
     "retained_earnings": "retained earnings",
-    "common_equity": "",  # no public equivalent; private-input only
+    "placeholder2": "",  # no public equivalent; private-input only
+    "placeholder": "",  # demo row only; no public equivalent, always shows "-"
     "total_equity": "shareholders' equity",
     "total_liab_equity": "total liabilities & equity",
 }
@@ -166,13 +167,10 @@ class SubjectFinancialsPage(QWidget):
 
         self._scroll.setWidget(widget)
 
+    # With:
     def _get_periods(self, inputs: ProjectInputs) -> List[str]:
         """Historical periods only for display (no projected in read-only view)."""
-        hist = []
-        for i in range(inputs.historical_years, 0, -1):
-            hist.append("LFY" if i == 1 else f"LFY-{i}")
-        hist.append("LFY")
-        return hist + ["TTM"]
+        return inputs.historical_period_columns + ["TTM"]
 
     def _build_public_view(self, inputs: ProjectInputs) -> QWidget:
         """Build read-only grid from StockAnalysis results."""
@@ -257,6 +255,34 @@ class SubjectFinancialsPage(QWidget):
         lines = IS_LINES if self._current_statement == "IS" else BS_LINES
         periods = self._visible_private_periods(inputs)
 
+        # total_equity/total_liab_equity are marked is_calc=True in BS_LINES,
+        # but PrivateFinancials only stores raw manually-entered values —
+        # nothing writes a correct total_equity into pf.bs_data upstream.
+        # Compute both here instead of doing a flat get_bs() lookup.
+        equity_component_keys = [
+            "preferred_stock", "common_stock", "apic",
+            "treasury_stock", "aoci", "minority_interest",
+            "retained_earnings", "common_equity", "placeholder",
+        ]
+
+        def _computed_bs_value(key: str, period: str):
+            if key == "total_equity":
+                total = 0.0
+                any_present = False
+                for k in equity_component_keys:
+                    v = pf.get_bs(k, period)
+                    if v is not None:
+                        total += v
+                        any_present = True
+                return total if any_present else None
+            if key == "total_liab_equity":
+                liab = pf.get_bs("total_liabilities", period)
+                equity = _computed_bs_value("total_equity", period)
+                if liab is None and equity is None:
+                    return None
+                return (liab or 0.0) + (equity or 0.0)
+            return pf.get_bs(key, period)
+
         # Header
         grid.addWidget(QLabel("Line Item"), 0, 0)
         for col_idx, period in enumerate(periods):
@@ -281,6 +307,8 @@ class SubjectFinancialsPage(QWidget):
             for col_idx, period in enumerate(periods):
                 if self._current_statement == "IS":
                     val = pf.get_is(key, period)
+                elif key in ("total_equity", "total_liab_equity"):
+                    val = _computed_bs_value(key, period)
                 else:
                     val = pf.get_bs(key, period)
 
@@ -301,10 +329,7 @@ class SubjectFinancialsPage(QWidget):
         from dateutil.relativedelta import relativedelta
         from datetime import datetime
 
-        hist = []
-        for i in range(inputs.historical_years, 0, -1):
-            hist.append(f"LFY-{i}")
-        hist.append("LFY")
+        hist = inputs.historical_period_columns
 
         forward = ["TTM", "NFY", "NFY+1", "NFY+2"]
 

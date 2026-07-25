@@ -485,7 +485,8 @@ class PrivateFinancialsInputPage(QDialog):
                     g("preferred_stock"), g("common_stock"),
                     g("apic"), g("treasury_stock"),
                     g("aoci"), g("minority_interest"),
-                    g("common_equity"),
+                    g("retained_earnings"), g("common_equity"),
+                    g("placeholder"),
                 )
                 self._set_calc("BS", "total_equity", period, te)
 
