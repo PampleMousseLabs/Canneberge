@@ -15,81 +15,10 @@ from PyQt6.QtCore import Qt
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-from Canneberge.app_state import PrivateFinancials
+from Canneberge.app_state import PrivateFinancials, IS_LINES, BS_LINES
 
 INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
 BOLD_STYLE = "font-weight: bold;"
-
-# IS line items: (key, display_label, is_calculated, bold)
-IS_LINES = [
-    ("revenue",                    "Revenue",                          False, True),
-    ("cogs",                       "COGS",                             False, False),
-    ("cogs_adjustment",            "Adjustment to Cost of Goods Sold", False, False),
-    ("cost_of_goods_sold",         "Cost of Goods Sold",               True,  False),
-    ("gross_profit",               "Gross Profit",                     True,  True),
-    ("sga",                        "Operating Expense (SG&A)",         False, False),
-    ("rd",                         "Research & Development",           False, False),
-    ("other_operating",            "Other Operating Expense",          False, False),
-    ("operating_expense_adj",      "Adjustment to Operating Expense",  False, False),
-    ("operating_expenses",         "Operating Expenses",               True,  True),
-    ("ebitda",                     "EBITDA",                           True,  True),
-    ("depreciation",               "Depreciation Expense",             False, False),
-    ("amortization",               "Amortization Expense",             False, False),
-    ("ebit",                       "EBIT",                             True,  True),
-    ("interest_expense",           "Interest Expense",                 False, False),
-    ("interest_income",            "Interest Income",                  False, False),
-    ("other_income",               "Other Income/(Expense)",           False, False),
-    ("pretax_income",              "Pretax Income",                    True,  True),
-    ("taxes",                      "Taxes",                            False, False),
-    ("income_before_nonrecurring", "Income Before Nonrecurring Items", True,  True),
-    ("nonrecurring",               "Nonrecurring Income/(Expense)",    False, False),
-    ("net_income",                 "Net Income",                       True,  True),
-    ("interest_expense_after_tax", "Interest Expense (After Tax)",     True,  False),
-    ("debt_free_net_income",       "Debt-free Net Income",             True,  True),
-    ("capex",                      "Capital Expenditures",             False, False),
-    ("acquisitions",               "Acquisitions",                     False, False),
-]
-
-# BS line items: (key, display_label, is_calculated, bold)
-BS_LINES = [
-    ("cash",                    "Cash and Cash Equivalents",               False, False),
-    ("st_investments",          "Short-Term Investments",                  False, False),
-    ("accounts_receivable",     "Accounts Receivable",                     False, False),
-    ("receivables",             "Receivables",                             False, False),
-    ("other_receivables",       "Other Receivables",                       False, False),
-    ("inventory",               "Inventory",                               False, False),
-    ("other_current_assets",    "Other Current Assets",                    False, False),
-    ("total_current_assets",    "Total Current Assets",                    True,  True),
-    ("ppe",                     "Net Property Plant & Equipment",          False, False),
-    ("intangible_assets",       "Intangible Assets",                       False, False),
-    ("goodwill",                "Goodwill",                                False, False),
-    ("lt_investments",          "Long-Term Investments",                   False, False),
-    ("other_lt_assets",         "Other Long-Term Assets",                  False, False),
-    ("total_assets",            "Total Assets",                            True,  True),
-    ("st_debt",                 "Short-Term Debt",                         False, False),
-    ("current_ltd",             "Current Portion of Long Term Debt",       False, False),
-    ("current_leases",          "Current Portion of Long Term Leases",     False, False),
-    ("accounts_payable",        "Accounts Payable",                        False, False),
-    ("accrued_expenses",        "Accrued Expenses",                        False, False),
-    ("unearned_revenue",        "Unearned Revenue",                        False, False),
-    ("other_current_liab",      "Other Current Liabilities",               False, False),
-    ("total_current_liab",      "Total Current Liabilities",               True,  True),
-    ("lt_debt",                 "Long-Term Debt",                          False, False),
-    ("lt_leases",               "Long-Term Leases",                        False, False),
-    ("lt_operating_leases",     "Long-Term Portion of Operating Leases",   False, False),
-    ("other_lt_liab",           "Other Long-Term Liabilities",             False, False),
-    ("total_liabilities",       "Total Liabilities",                       True,  True),
-    ("preferred_stock",         "Preferred Stock",                         False, False),
-    ("common_stock",            "Common Stock",                            False, False),
-    ("apic",                    "Additional Paid in Capital",              False, False),
-    ("treasury_stock",          "Treasury Stock",                          False, False),
-    ("aoci",                    "Accumulated Other Comprehensive",         False, False),
-    ("minority_interest",       "Minority Interest",                       False, False),
-    ("common_equity",           "Common Equity",                           False, False),
-    ("total_equity",            "Total Shareholders' Equity",              True,  True),
-    ("total_liab_equity",       "Total Liabilities & Shareholders' Equity", True, True),
-]
-
 
 def _parse_float(text: str) -> Optional[float]:
     text = str(text).strip().replace(",", "")

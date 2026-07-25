@@ -225,6 +225,30 @@ Phase 4 — Application Hardening
  Logging infrastructure (file-based, not console)
  Error recovery and retry logic
  Unit tests for calculation layer
+## Deferred: Post-Phase-3 Data Source Evaluation — EdgarTools
+
+**Status:** Not to be started until Phase 3 is complete. Noted here so it isn't lost, not because it's near-term work.
+
+`edgartools` (PyPI: `edgartools`, docs: https://edgartools.readthedocs.io/) is a Python library that pulls SEC EDGAR/XBRL filings directly and includes a built-in standardization layer that maps ~2,900 raw XBRL tags to a normalized set of financial statement concepts (92 distinct Balance Sheet concepts confirmed via direct inspection of the installed package's `gaap_mappings.json`, cross-referenced against `display_names.json`).
+
+**Why this is worth evaluating later:** StockAnalysis.com scraping is fragile by nature — no published schema, label text and structure can change without notice, and completeness has already been shown to vary silently by ticker (e.g., "Minority Interest" appears for SPCX but not ADBE; "Total Common Shareholders' Equity" is a real StockAnalysis label with no equivalent in EdgarTools' standard concept set, confirmed by direct comparison). EdgarTools would source data from the same XBRL filings companies submit to the SEC, with a maintained standardization layer, removing dependency on a third-party site's presentation layer.
+
+**Why this is NOT a straightforward swap:** EdgarTools' 92-concept Balance Sheet taxonomy is *coarser* than StockAnalysis's actual displayed line items in at least one confirmed case (Total Common Shareholders' Equity, distinct from Total Stockholders' Equity, has no EdgarTools standard concept). Switching would require rebuilding `SA_KEY_MAP`, `stockanalysis.py`, and the transform layer, and would trade "unreliable but granular" for "reliable but coarser" — not a strict upgrade. This needs a real evaluation pass against the full GPC/ticker set before any migration decision, not a default assumption that it's better.
+
+**Action when revisited:** Compare EdgarTools' actual BS/IS output against StockAnalysis's for the full ticker universe (not just SPCX/ADBE) before deciding whether to migrate any source client.
+
+---
+
+## Deferred: Full IS/BS Line-Item Audit (Final Review Phase)
+
+**Status:** Not a current priority. Current `IS_LINES`/`BS_LINES` in the Python migration are considered "good enough to get out of the starting blocks" — functional gaps will surface incrementally as new tickers are added (e.g., the Minority Interest / Retained Earnings mapping bug, caught only once a company with minority interest was checked) and will be patched as found.
+
+**Deferred work:** A full audit of `IS_LINES`/`BS_LINES` (in `private_financials_input_page.py`) against actual StockAnalysis output across a wide ticker sample (target: hundreds of tickers, not the current 9-GPC set) to confirm completeness and correct labeling. The `Line Item Needs` sheet (Excel, ~45-company empirical build) is the current best reference for expected line items and has already surfaced several gaps not yet reflected in the Python `BS_LINES` list (e.g., Total Trade Receivables, Total Long-Term Liabilities, current/long-term Unearned Revenue split, deferred tax asset/liability lines, Comprehensive Income & Other, multiple shares-outstanding variants, Working Capital).
+
+**Action when revisited:** Treat this as final-review-phase QA, not Phase 3 blocking work. Patch individual gaps opportunistically as they're discovered during normal use in the meantime.
+
+---
+
 Live Resources
 Resource	Link
 Excel Workbook	Project_Canneberge.xlsm

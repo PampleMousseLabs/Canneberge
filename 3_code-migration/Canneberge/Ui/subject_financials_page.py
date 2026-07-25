@@ -13,8 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from Canneberge.app_state import ProjectInputs, PrivateFinancials
-from Canneberge.Ui.private_financials_input_page import IS_LINES, BS_LINES
+from Canneberge.app_state import ProjectInputs, PrivateFinancials, IS_LINES, BS_LINES
 
 BOLD_STYLE = "font-weight: bold;"
 SECTION_STYLE = "font-weight: bold; font-size: 11px;"
@@ -84,10 +83,11 @@ SA_KEY_MAP = {
     "apic": "additional paid-in capital",
     "treasury_stock": "treasury stock",
     "aoci": "accumulated other comprehensive income",
-    "minority_interest": "retained earnings",
-    "common_equity": "minority interest",
-    "total_equity": "total shareholders' equity",
-    "total_liab_equity": "total liabilities & shareholders' equity",
+    "minority_interest": "minority interest",
+    "retained_earnings": "retained earnings",
+    "common_equity": "",  # no public equivalent; private-input only
+    "total_equity": "shareholders' equity",
+    "total_liab_equity": "total liabilities & equity",
 }
 
 

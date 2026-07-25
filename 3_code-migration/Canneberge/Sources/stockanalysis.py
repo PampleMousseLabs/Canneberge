@@ -11,7 +11,7 @@ class StockAnalysisClient:
         ticker_lower = ticker.lower()
 
         if statement_type == "IS":
-            url = f"https://stockanalysis.com/stocks/{ticker_lower}/financials/"
+            url = f"https://stockanalysis.com/stocks/{ticker_lower}/financials/income-statement/"
         elif statement_type == "BS":
             url = f"https://stockanalysis.com/stocks/{ticker_lower}/financials/balance-sheet/"
         elif statement_type == "CFS":
