@@ -9,7 +9,7 @@ from PyQt6.QtGui import QAction
 from Canneberge.Ui.home_page import HomePage
 from Canneberge.Ui.source_data_page import SourceDataPage
 from Canneberge.Ui.gt_page import GTPage
-from Canneberge.Ui.gpc_page import GPCPage
+from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.app_state import PrivateFinancials, Transaction
@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.gpc_page = GPCPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_marketscreener_results_callback=self._get_marketscreener_results,
             get_private_financials_callback=self._get_private_financials,
             get_subject_debt=self.get_subject_debt,
         )
@@ -124,6 +125,9 @@ class MainWindow(QMainWindow):
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
 
+    def _get_marketscreener_results(self) -> list:
+        return self.source_data_page.all_results.get("marketscreener", [])
+
     def _get_private_financials(self) -> PrivateFinancials:
         return self._private_financials
 
@@ -195,6 +199,72 @@ class MainWindow(QMainWindow):
         for i, checked in enumerate(state.get("excluded_rows", [])):
             if i < len(self.gt_page.tx_exclude_checks):
                 self.gt_page.tx_exclude_checks[i].setChecked(checked)
+
+    def _collect_gpc_page_state(self) -> dict:
+        """Read all green inputs from GPC page into a serializable dict."""
+        return {
+            "num_multiples": self.gpc_page.num_multiples_spin.value(),
+            "dloc": self.gpc_page.dloc_input.text(),
+            "control_premium": self.gpc_page.control_premium_input.text(),
+            "metric_selections": [
+                combo.currentText()
+                for combo in self.gpc_page.metric_combos
+            ],
+            "selected_low": [
+                inp.text()
+                for inp in self.gpc_page.selected_low_inputs
+            ],
+            "selected_high": [
+                inp.text()
+                for inp in self.gpc_page.selected_high_inputs
+            ],
+            "weights": [
+                inp.text()
+                for inp in self.gpc_page.weight_inputs
+            ],
+            "excluded_rows": [
+                chk.isChecked()
+                for chk in self.gpc_page.tick_exclude_checks
+            ],
+        }
+
+    def _apply_gpc_page_state(self, state: dict):
+        """Repopulate GPC page green inputs from a loaded state dict."""
+        if not state:
+            return
+
+        n = state.get("num_multiples", GPC_MAX_COLS)
+        self.gpc_page.num_multiples_spin.setValue(n)
+
+        dloc = state.get("dloc", "")
+        if dloc:
+            self.gpc_page.dloc_input.setText(dloc)
+
+        control_premium = state.get("control_premium", "")
+        if control_premium:
+            self.gpc_page.control_premium_input.setText(control_premium)
+
+        for i, text in enumerate(state.get("metric_selections", [])):
+            if i < len(self.gpc_page.metric_combos):
+                idx = self.gpc_page.metric_combos[i].findText(text)
+                if idx >= 0:
+                    self.gpc_page.metric_combos[i].setCurrentIndex(idx)
+
+        for i, text in enumerate(state.get("selected_low", [])):
+            if i < len(self.gpc_page.selected_low_inputs):
+                self.gpc_page.selected_low_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("selected_high", [])):
+            if i < len(self.gpc_page.selected_high_inputs):
+                self.gpc_page.selected_high_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("weights", [])):
+            if i < len(self.gpc_page.weight_inputs):
+                self.gpc_page.weight_inputs[i].setText(text)
+
+        for i, checked in enumerate(state.get("excluded_rows", [])):
+            if i < len(self.gpc_page.tick_exclude_checks):
+                self.gpc_page.tick_exclude_checks[i].setChecked(checked)
 
     def _apply_project_inputs_to_home(self, pi: dict):
         """Repopulate Home page fields from a loaded project_inputs dict."""
@@ -283,12 +353,14 @@ class MainWindow(QMainWindow):
     def _on_save_session(self):
         inputs = self.home_page.get_project_inputs()
         gt_state = self._collect_gt_page_state()
+        gpc_state = self._collect_gpc_page_state()
 
         try:
             path = save_session(
                 project_inputs=inputs,
                 private_financials=self._private_financials,
                 gt_page_state=gt_state,
+                gpc_page_state=gpc_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -315,12 +387,14 @@ class MainWindow(QMainWindow):
 
         inputs = self.home_page.get_project_inputs()
         gt_state = self._collect_gt_page_state()
+        gpc_state = self._collect_gpc_page_state()
 
         try:
             saved_path = save_session(
                 project_inputs=inputs,
                 private_financials=self._private_financials,
                 gt_page_state=gt_state,
+                gpc_page_state=gpc_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -370,10 +444,12 @@ class MainWindow(QMainWindow):
         self._apply_project_inputs_to_home(data["project_inputs_raw"])
         self._private_financials = data["private_financials"]
         self._apply_gt_page_state(data["gt_page_state"])
+        self._apply_gpc_page_state(data["gpc_page_state"])
 
         # Refresh dependent pages
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()
+        self.gpc_page._recalculate()
 
         self._current_session_path = filepath
         self.setWindowTitle(f"Canneberge — {filepath.stem}")

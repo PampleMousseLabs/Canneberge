@@ -213,7 +213,7 @@ class GTPage(QWidget):
         self._build_selected_multiples_section()
         self._build_subject_section()
         self._build_weighting_section()
-        self._build_equity_bridge_section()
+        self._build_bridge_section()
 
         # Push everything to the top
         self.grid.setRowStretch(self._current_row + 50, 1)
@@ -525,9 +525,9 @@ class GTPage(QWidget):
         self.grid.addWidget(_make_hrule(), self._current_row, COL_EXCLUDE, 1, 8)
         self._current_row += 1
 
-    def _build_equity_bridge_section(self):
+    def _build_bridge_section(self):
         self.grid.addWidget(
-            _make_section_label("Equity Bridge"),
+            _make_section_label("Bridge"),
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1

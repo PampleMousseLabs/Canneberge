@@ -22,6 +22,7 @@ def save_session(
     project_inputs: ProjectInputs,
     private_financials: PrivateFinancials,
     gt_page_state: dict,
+    gpc_page_state: dict,
     filepath: Optional[Path] = None,
 ) -> Path:
     """
@@ -32,6 +33,12 @@ def save_session(
         dloc, selected_low (list), selected_high (list),
         weights (list), num_multiples (int),
         metric_selections (list)
+
+    gpc_page_state dict keys:
+        num_multiples, dloc, control_premium,
+        metric_selections (list), selected_low (list),
+        selected_high (list), weights (list),
+        excluded_rows (list)
     """
     _ensure_dir()
 
@@ -88,6 +95,8 @@ def save_session(
         },
 
         "gt_page_state": gt_page_state,
+
+        "gpc_page_state": gpc_page_state,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -110,6 +119,7 @@ def load_session(filepath: Path) -> dict:
     pi_raw = payload.get("project_inputs", {})
     pf_raw = payload.get("private_financials", {})
     gt_raw = payload.get("gt_page_state", {})
+    gpc_raw = payload.get("gpc_page_state", {})
 
     # Reconstruct PrivateFinancials
     pf = PrivateFinancials(
@@ -121,6 +131,7 @@ def load_session(filepath: Path) -> dict:
         "project_inputs_raw": pi_raw,
         "private_financials": pf,
         "gt_page_state": gt_raw,
+        "gpc_page_state": gpc_raw,
     }
 
 

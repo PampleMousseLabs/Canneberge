@@ -1,3 +1,4 @@
+import math
 import statistics
 from typing import Optional, List, Dict
 
@@ -25,6 +26,7 @@ from Canneberge.Calculations.gpc_metrics import (
 from Canneberge.Calculations.gpc_multiples import (
     compute_all_gpc_multiples,
     get_ticker_bevs,
+    get_subject_cash,
 )
 
 MAX_COLS = 7          # matches MultipleCount named range
@@ -54,9 +56,12 @@ def _parse_float(text: str) -> Optional[float]:
     if not text:
         return None
     try:
-        return float(text)
+        val = float(text)
     except ValueError:
         return None
+    if math.isnan(val) or math.isinf(val):
+        return None
+    return val
 
 
 def _parse_pct(text: str) -> Optional[float]:
@@ -65,27 +70,31 @@ def _parse_pct(text: str) -> Optional[float]:
         return None
     try:
         if "%" in text:
-            return float(text.replace("%", "")) / 100
-        val = float(text)
-        return val / 100 if val > 1 else val
+            val = float(text.replace("%", "")) / 100
+        else:
+            val = float(text)
+            val = val / 100 if val > 1 else val
     except ValueError:
         return None
+    if math.isnan(val) or math.isinf(val):
+        return None
+    return val
 
 
 def _fmt_multiple(value: Optional[float]) -> str:
-    if value is None:
+    if value is None or math.isnan(value) or math.isinf(value):
         return "NA"
     return f"{value:.2f}x"
 
 
 def _fmt_currency(value: Optional[float]) -> str:
-    if value is None:
+    if value is None or math.isnan(value) or math.isinf(value):
         return "NA"
     return f"{value:,.0f}"
 
 
 def _fmt_pct_display(value: Optional[float]) -> str:
-    if value is None:
+    if value is None or math.isnan(value) or math.isinf(value):
         return "NA"
     return f"{value:.1%}"
 
@@ -105,14 +114,22 @@ def _quartile(values: list, q: float) -> float:
 
 
 def _weighted_sum(values: list, weights: list) -> Optional[float]:
-    if not values or not weights:
-        return None
+    """
+    Sums value*weight for every column where BOTH are present.
+    Columns missing either a value or a weight are skipped entirely —
+    NOT treated as zero, and remaining weights are NOT renormalized.
+    Weights don't need to sum to 100%; the user may intentionally
+    weight unevenly (e.g. 50/25/15/10/0). Returns None only if every
+    column is missing data, since a sum of nothing isn't a real answer.
+    """
     total = 0.0
+    any_present = False
     for v, w in zip(values, weights):
         if v is None or w is None:
-            return None
+            continue
         total += v * w
-    return total
+        any_present = True
+    return total if any_present else None
 
 
 def _make_hrule() -> QFrame:
@@ -201,18 +218,20 @@ class GPCPage(QWidget):
 
     def __init__(self, get_project_inputs_callback,
                  get_stockanalysis_results_callback,
+                 get_marketscreener_results_callback,
                  get_private_financials_callback,
                  get_subject_debt):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_stockanalysis_results_callback = get_stockanalysis_results_callback
+        self._get_marketscreener_results_callback = get_marketscreener_results_callback
         self._get_private_financials_callback = get_private_financials_callback
         self._get_subject_debt = get_subject_debt
 
         # Per-column Custom Multiple state, keyed by column index.
         # When True, that column's ticker cells + subject cell are
         # editable widgets instead of computed labels.
-        self._custom_mode = [False] * MAX_COLS
+        self._is_custom_multiple = [False] * MAX_COLS
 
         self._build_ui()
         self._recalculate()
@@ -242,7 +261,7 @@ class GPCPage(QWidget):
         self._build_selected_multiples_section()
         self._build_subject_section()
         self._build_weighting_section()
-        self._build_equity_bridge_section()
+        self._build_bridge_section()
 
         self.grid.setRowStretch(self._current_row + 50, 1)
 
@@ -594,9 +613,9 @@ class GPCPage(QWidget):
         )
         self._current_row += 1
 
-    def _build_equity_bridge_section(self):
+    def _build_bridge_section(self):
         self.grid.addWidget(
-            _make_section_label("Equity Bridge"),
+            _make_section_label("Bridge"),
             self._current_row, COL_EXCLUDE, 1, MAX_COLS + 4
         )
         self._current_row += 1
@@ -613,26 +632,86 @@ class GPCPage(QWidget):
         self.grid.addWidget(low_hdr, r, COL_M_START + 1)
         self._current_row += 1
 
-        # Same bridge structure as GT, plus a Control Premium step
-        # after the noncontrolling equity line — GPC values start
-        # noncontrolling (public market prices) and need a premium
-        # added to reach a controlling basis, opposite direction from
-        # GT's DLOC step. Both DLOC and Control Premium are exposed
-        # as inputs; only one is typically nonzero depending on the
-        # basis of value, but both are computed so the model doesn't
-        # silently assume which one applies.
-        bridge_rows = [
-            ("Plus: Control Premium",                                    "control_premium_pct"),
-            ("FMV of Equity (marketable, controlling)",                  "eq_ctrl"),
-            ("Less: Discount for Lack of Control",                       "dloc_pct"),
-            ("FMV of Equity (marketable, noncontrolling)",               "eq_nctrl"),
-            ("Plus: Total Debt",                                         "total_debt_add"),
-            ("FMV of Business Enterprise (marketable, noncontrolling)",  "bev_nctrl"),
+        # GPC starts on a marketable, noncontrolling basis (public
+        # market prices reflect minority stakes). Add the three
+        # invested-capital adjustments to get to Invested Capital,
+        # apply Control Premium there, then subtract the same three
+        # adjustments back out to land on BEV (marketable, controlling).
+        #
+        # NWC Surplus (Deficit) and Non-Operating Assets, Net have no
+        # data source yet — both are deliberately left as user-typed
+        # placeholder inputs until the NWC page exists. They default
+        # to None (shown as NA), not 0 — if either is unset, every row
+        # below it that depends on it should also show NA, not silently
+        # compute as if the missing value were zero.
+        self.bridge_computed_labels_low = {}
+        self.bridge_computed_labels_high = {}
+
+        computed_rows = [
+            ("FMV of Business Enterprise (marketable, noncontrolling)", "bev_nctrl"),
+        ]
+        for label_text, key in computed_rows:
+            r = self._current_row
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(BOLD_STYLE) if False else None
+            self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+            low_lbl = QLabel("NA")
+            high_lbl = QLabel("NA")
+            for l in (low_lbl, high_lbl):
+                l.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.grid.addWidget(high_lbl, r, COL_M_START)
+            self.grid.addWidget(low_lbl, r, COL_M_START + 1)
+            self.bridge_computed_labels_low[key] = low_lbl
+            self.bridge_computed_labels_high[key] = high_lbl
+            self._current_row += 1
+
+        # Plus: Cash — pulls from subject debt/cash callback the same
+        # way get_subject_debt already works; wired in _recalculate.
+        r = self._current_row
+        self.grid.addWidget(QLabel("Plus: Cash"), r, COL_EXCLUDE, 1, 4)
+        self.bridge_cash_low = QLabel("NA")
+        self.bridge_cash_high = QLabel("NA")
+        for l in (self.bridge_cash_low, self.bridge_cash_high):
+            l.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.grid.addWidget(self.bridge_cash_high, r, COL_M_START)
+        self.grid.addWidget(self.bridge_cash_low, r, COL_M_START + 1)
+        self._current_row += 1
+
+        # Plus: NWC Surplus (Deficit) — PLACEHOLDER, no data source yet
+        r = self._current_row
+        self.grid.addWidget(
+            QLabel("Plus: NWC Surplus (Deficit) — PLACEHOLDER"),
+            r, COL_EXCLUDE, 1, 4
+        )
+        self.nwc_input = CurrencyInputEdit(placeholder="e.g. 0")
+        self.nwc_input.editingFinished.connect(self._on_inputs_changed)
+        self.grid.addWidget(self.nwc_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
+        self._current_row += 1
+
+        # Plus: Non-Operating Assets, Net — PLACEHOLDER, no data source yet
+        r = self._current_row
+        self.grid.addWidget(
+            QLabel("Plus: Non-Operating Assets, Net — PLACEHOLDER"),
+            r, COL_EXCLUDE, 1, 4
+        )
+        self.non_op_assets_input = CurrencyInputEdit(placeholder="e.g. 0")
+        self.non_op_assets_input.editingFinished.connect(self._on_inputs_changed)
+        self.grid.addWidget(self.non_op_assets_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
+        self._current_row += 1
+
+        remaining_rows = [
+            ("FMV of Invested Capital (marketable, noncontrolling)", "ic_nctrl"),
+            ("Plus: Control Premium",                                "control_premium_pct"),
+            ("FMV of Invested Capital (marketable, controlling)",    "ic_ctrl"),
+            ("Less: Cash",                                           "less_cash"),
+            ("Less: NWC Surplus (Deficit) — PLACEHOLDER",            "less_nwc"),
+            ("Less: Non-Operating Assets, Net — PLACEHOLDER",        "less_non_op"),
+            ("FMV of Business Enterprise (marketable, controlling)", "bev_ctrl"),
         ]
 
         self.bridge_labels_low = {}
         self.bridge_labels_high = {}
-        for label_text, key in bridge_rows:
+        for label_text, key in remaining_rows:
             r = self._current_row
             self.grid.addWidget(QLabel(label_text), r, COL_EXCLUDE, 1, 4)
 
@@ -647,6 +726,10 @@ class GPCPage(QWidget):
             self.bridge_labels_low[key] = low_lbl
             self.bridge_labels_high[key] = high_lbl
             self._current_row += 1
+            self.grid.addWidget(low_lbl, r, COL_M_START + 1)
+            self.bridge_labels_low[key] = low_lbl
+            self.bridge_labels_high[key] = high_lbl
+            self._current_row += 1
 
     # ------------------------------------------------------------------
     # CUSTOM MULTIPLE MODE HANDLING
@@ -654,10 +737,10 @@ class GPCPage(QWidget):
 
     def _on_metric_combo_changed(self, _index=None):
         for i, combo in enumerate(self.metric_combos):
-            self._custom_mode[i] = (combo.currentText() == CUSTOM_MULTIPLE_LABEL)
+            self._is_custom_multiple[i] = (combo.currentText() == CUSTOM_MULTIPLE_LABEL)
         self._recalculate()
 
-    def _apply_custom_mode_visibility(self, n_cols: int):
+    def _apply_is_custom_multiple_visibility(self, n_cols: int):
         """
         Swap computed label <-> editable input visibility per column
         based on whether that column is in Custom Multiple mode.
@@ -665,7 +748,7 @@ class GPCPage(QWidget):
         hidden entirely by the existing visible/n_cols logic elsewhere.
         """
         for i in range(MAX_COLS):
-            is_custom = self._custom_mode[i] and i < n_cols
+            is_custom = self._is_custom_multiple[i] and i < n_cols
             for row in range(MAX_ROWS):
                 self.tick_mult_labels[row][i].setVisible(not is_custom and i < n_cols)
                 self.tick_mult_inputs[row][i].setVisible(is_custom)
@@ -702,26 +785,28 @@ class GPCPage(QWidget):
             self.weight_inputs[i].setVisible(visible)
             for row in range(MAX_ROWS):
                 self.tick_mult_labels[row][i].setVisible(
-                    visible and not self._custom_mode[i]
+                    visible and not self._is_custom_multiple[i]
                 )
                 self.tick_mult_inputs[row][i].setVisible(
-                    visible and self._custom_mode[i]
+                    visible and self._is_custom_multiple[i]
                 )
 
-        self._apply_custom_mode_visibility(n_cols)
+        self._apply_is_custom_multiple_visibility(n_cols)
 
         # Pull scraped data once
         sa_results = self._get_stockanalysis_results_callback() or {}
         is_rows = sa_results.get("IS", [])
         ratio_rows = sa_results.get("Ratios", [])
+        bs_rows = sa_results.get("BS", [])
+        ms_rows = self._get_marketscreener_results_callback() or []
 
         # Compute real multiples for every ticker (Custom columns are
         # simply not read from this — the user's typed value wins)
         all_multiples: Dict[str, Dict[str, Optional[float]]] = (
-            compute_all_gpc_multiples(is_rows, ratio_rows, tickers)
+            compute_all_gpc_multiples(is_rows, ms_rows, ratio_rows, bs_rows, tickers)
             if tickers else {}
         )
-        bevs = get_ticker_bevs(ratio_rows, tickers) if tickers else {}
+        bevs = get_ticker_bevs(ratio_rows, bs_rows, tickers) if tickers else {}
 
         multiples_per_col = [[] for _ in range(n_cols)]
 
@@ -744,7 +829,7 @@ class GPCPage(QWidget):
                     lbl.setStyleSheet(grey)
 
                 for col_idx in range(n_cols):
-                    if self._custom_mode[col_idx]:
+                    if self._is_custom_multiple[col_idx]:
                         # User-typed value — read directly, no computation
                         multiple = _parse_float(
                             self.tick_mult_inputs[row][col_idx].text()
@@ -755,10 +840,10 @@ class GPCPage(QWidget):
                         metric_name = self.metric_combos[col_idx].currentText()
                         multiple = (all_multiples.get(ticker, {}) or {}).get(metric_name)
 
-                    if excluded and not self._custom_mode[col_idx]:
+                    if excluded and not self._is_custom_multiple[col_idx]:
                         self.tick_mult_labels[row][col_idx].setText("NM")
                         self.tick_mult_labels[row][col_idx].setStyleSheet("color: grey;")
-                    elif not self._custom_mode[col_idx]:
+                    elif not self._is_custom_multiple[col_idx]:
                         self.tick_mult_labels[row][col_idx].setText(_fmt_multiple(multiple))
                         self.tick_mult_labels[row][col_idx].setStyleSheet("color: black;")
 
@@ -797,7 +882,7 @@ class GPCPage(QWidget):
         # Custom columns read the user-typed CurrencyInputEdit directly.
         subject_metrics = self._get_subject_metrics(inputs, n_cols)
         for col_idx in range(n_cols):
-            if self._custom_mode[col_idx]:
+            if self._is_custom_multiple[col_idx]:
                 continue  # value comes straight from the input widget, no label to set
             val = subject_metrics[col_idx]
             self.subject_metric_labels[col_idx].setText(
@@ -809,7 +894,7 @@ class GPCPage(QWidget):
         indicated_high = []
 
         for col_idx in range(n_cols):
-            if self._custom_mode[col_idx]:
+            if self._is_custom_multiple[col_idx]:
                 subj = _parse_float(self.subject_metric_inputs[col_idx].text())
             else:
                 subj = subject_metrics[col_idx]
@@ -842,75 +927,106 @@ class GPCPage(QWidget):
         self.fmv_low_label.setText(_fmt_currency(fmv_low) if fmv_low is not None else "NA")
         self.fmv_high_label.setText(_fmt_currency(fmv_high) if fmv_high is not None else "NA")
 
-        # Equity bridge — GPC direction: FMV BEV is already on a
-        # noncontrolling, marketable, minority basis (public market
-        # prices for a minority stake). To reach a controlling basis,
-        # ADD control premium; to reduce back to noncontrolling, apply
-        # DLOC. Both inputs exposed; each combination is computed but
-        # it's on the user to know which basis their conclusion needs.
-        dloc = _parse_pct(self.dloc_input.text())
+        # Bridge — GPC starts on a marketable, noncontrolling basis
+        # (public market prices reflect minority stakes). Add Cash,
+        # NWC Surplus/Deficit, and Non-Op Assets to reach Invested
+        # Capital, apply Control Premium there, then subtract the
+        # same three items back out to land on BEV controlling.
+        #
+        # Cash pulls from BS (public) or PrivateFinancials (private),
+        # the same "cash & equivalents" line already used in
+        # get_ticker_bev's net debt calc. NWC and Non-Op Assets have
+        # no data source yet and remain user-typed placeholders until
+        # the NWC page exists. Both default to None (NA) rather than
+        # 0, and any row depending on a None placeholder shows NA
+        # rather than silently computing through it.
+        bev_nctrl_low = fmv_low
+        bev_nctrl_high = fmv_high
+        self.bridge_computed_labels_low["bev_nctrl"].setText(
+            _fmt_currency(bev_nctrl_low) if bev_nctrl_low is not None else "NA"
+        )
+        self.bridge_computed_labels_high["bev_nctrl"].setText(
+            _fmt_currency(bev_nctrl_high) if bev_nctrl_high is not None else "NA"
+        )
+
+        if inputs.is_private:
+            pf = self._get_private_financials_callback()
+            cash = pf.get_bs("cash", "TTM") if pf else None
+        elif inputs.is_publicly_traded:
+            bs_rows = sa_results.get("BS", [])
+            cash = get_subject_cash(bs_rows, inputs.subject_ticker)
+        else:
+            cash = None
+        cash_str = _fmt_currency(cash) if cash is not None else "NA"
+        self.bridge_cash_low.setText(cash_str)
+        self.bridge_cash_high.setText(cash_str)
+
+        # Blank means "no adjustment" (0), not "unknown" (None) — an
+        # unset optional placeholder shouldn't propagate NA through
+        # every row below it. bev_nctrl/cash still use None-propagation
+        # since those genuinely can be unavailable; NWC/Non-Op Assets
+        # are optional adjustments that default to zero when blank.
+        nwc = _parse_float(self.nwc_input.text()) or 0.0
+        non_op = _parse_float(self.non_op_assets_input.text()) or 0.0
+
+        def _sum_or_na(*vals):
+            if any(v is None for v in vals):
+                return None
+            return sum(vals)
+
+        ic_nctrl_low = _sum_or_na(bev_nctrl_low, cash, nwc, non_op)
+        ic_nctrl_high = _sum_or_na(bev_nctrl_high, cash, nwc, non_op)
+        self.bridge_labels_low["ic_nctrl"].setText(
+            _fmt_currency(ic_nctrl_low) if ic_nctrl_low is not None else "NA"
+        )
+        self.bridge_labels_high["ic_nctrl"].setText(
+            _fmt_currency(ic_nctrl_high) if ic_nctrl_high is not None else "NA"
+        )
+
         control_premium = _parse_pct(self.control_premium_input.text())
-
-        try:
-            debt = self._get_subject_debt()
-        except Exception:
-            debt = None
-
         cp_str = _fmt_pct_display(control_premium)
         self.bridge_labels_low["control_premium_pct"].setText(cp_str)
         self.bridge_labels_high["control_premium_pct"].setText(cp_str)
 
-        eq_ctrl_low = (
-            fmv_low * (1 + control_premium)
-            if fmv_low is not None and control_premium is not None else None
+        ic_ctrl_low = (
+            ic_nctrl_low * (1 + control_premium)
+            if ic_nctrl_low is not None and control_premium is not None else None
         )
-        eq_ctrl_high = (
-            fmv_high * (1 + control_premium)
-            if fmv_high is not None and control_premium is not None else None
+        ic_ctrl_high = (
+            ic_nctrl_high * (1 + control_premium)
+            if ic_nctrl_high is not None and control_premium is not None else None
         )
-        self.bridge_labels_low["eq_ctrl"].setText(
-            _fmt_currency(eq_ctrl_low) if eq_ctrl_low is not None else "NA"
+        self.bridge_labels_low["ic_ctrl"].setText(
+            _fmt_currency(ic_ctrl_low) if ic_ctrl_low is not None else "NA"
         )
-        self.bridge_labels_high["eq_ctrl"].setText(
-            _fmt_currency(eq_ctrl_high) if eq_ctrl_high is not None else "NA"
-        )
-
-        dloc_str = _fmt_pct_display(dloc)
-        self.bridge_labels_low["dloc_pct"].setText(dloc_str)
-        self.bridge_labels_high["dloc_pct"].setText(dloc_str)
-
-        eq_nctrl_low = (
-            eq_ctrl_low * (1 - dloc)
-            if eq_ctrl_low is not None and dloc is not None else None
-        )
-        eq_nctrl_high = (
-            eq_ctrl_high * (1 - dloc)
-            if eq_ctrl_high is not None and dloc is not None else None
-        )
-        self.bridge_labels_low["eq_nctrl"].setText(
-            _fmt_currency(eq_nctrl_low) if eq_nctrl_low is not None else "NA"
-        )
-        self.bridge_labels_high["eq_nctrl"].setText(
-            _fmt_currency(eq_nctrl_high) if eq_nctrl_high is not None else "NA"
+        self.bridge_labels_high["ic_ctrl"].setText(
+            _fmt_currency(ic_ctrl_high) if ic_ctrl_high is not None else "NA"
         )
 
-        debt_str = _fmt_currency(debt) if debt is not None else "NA"
-        self.bridge_labels_low["total_debt_add"].setText(debt_str)
-        self.bridge_labels_high["total_debt_add"].setText(debt_str)
+        self.bridge_labels_low["less_cash"].setText(cash_str)
+        self.bridge_labels_high["less_cash"].setText(cash_str)
 
-        bev_nctrl_low = (
-            eq_nctrl_low + debt
-            if eq_nctrl_low is not None and debt is not None else None
+        nwc_str = _fmt_currency(nwc)
+        self.bridge_labels_low["less_nwc"].setText(nwc_str)
+        self.bridge_labels_high["less_nwc"].setText(nwc_str)
+
+        non_op_str = _fmt_currency(non_op)
+        self.bridge_labels_low["less_non_op"].setText(non_op_str)
+        self.bridge_labels_high["less_non_op"].setText(non_op_str)
+
+        bev_ctrl_low = (
+            ic_ctrl_low - cash - nwc - non_op
+            if None not in (ic_ctrl_low, cash, nwc, non_op) else None
         )
-        bev_nctrl_high = (
-            eq_nctrl_high + debt
-            if eq_nctrl_high is not None and debt is not None else None
+        bev_ctrl_high = (
+            ic_ctrl_high - cash - nwc - non_op
+            if None not in (ic_ctrl_high, cash, nwc, non_op) else None
         )
-        self.bridge_labels_low["bev_nctrl"].setText(
-            _fmt_currency(bev_nctrl_low) if bev_nctrl_low is not None else "NA"
+        self.bridge_labels_low["bev_ctrl"].setText(
+            _fmt_currency(bev_ctrl_low) if bev_ctrl_low is not None else "NA"
         )
-        self.bridge_labels_high["bev_nctrl"].setText(
-            _fmt_currency(bev_nctrl_high) if bev_nctrl_high is not None else "NA"
+        self.bridge_labels_high["bev_ctrl"].setText(
+            _fmt_currency(bev_ctrl_high) if bev_ctrl_high is not None else "NA"
         )
 
     def _get_subject_metrics(self, inputs, n_cols) -> list:
@@ -927,7 +1043,7 @@ class GPCPage(QWidget):
         results = []
 
         for col_idx in range(n_cols):
-            if self._custom_mode[col_idx]:
+            if self._is_custom_multiple[col_idx]:
                 results.append(None)
                 continue
 
