@@ -9,6 +9,7 @@ from PyQt6.QtGui import QAction
 from Canneberge.Ui.home_page import HomePage
 from Canneberge.Ui.source_data_page import SourceDataPage
 from Canneberge.Ui.gt_page import GTPage
+from Canneberge.Ui.gpc_page import GPCPage
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.app_state import PrivateFinancials, Transaction
@@ -48,6 +49,13 @@ class MainWindow(QMainWindow):
             get_subject_debt=self.get_subject_debt,
         )
 
+        self.gpc_page = GPCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_private_financials_callback=self._get_private_financials,
+            get_subject_debt=self.get_subject_debt,
+        )
+
         self.subject_financials_page = SubjectFinancialsPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
@@ -57,6 +65,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
         self.tabs.addTab(self.gt_page, "GT")
+        self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -96,6 +105,8 @@ class MainWindow(QMainWindow):
             self.subject_financials_page.refresh()
         if self.tabs.widget(index) is self.gt_page:
             self.gt_page._recalculate()
+        if self.tabs.widget(index) is self.gpc_page:
+            self.gpc_page._recalculate()
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()
@@ -108,6 +119,7 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
+            self.gpc_page._recalculate()
 
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
