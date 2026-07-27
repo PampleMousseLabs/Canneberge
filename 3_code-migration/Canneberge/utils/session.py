@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from Canneberge.app_state import (
-    ProjectInputs, Transaction, PrivateFinancials
+    ProjectInputs, Transaction, PrivateFinancials, ProjectionData
 )
 
 SESSION_DIR = Path(os.environ.get(
@@ -23,22 +23,21 @@ def save_session(
     private_financials: PrivateFinancials,
     gt_page_state: dict,
     gpc_page_state: dict,
+    projection_page_state: dict,
     filepath: Optional[Path] = None,
 ) -> Path:
     """
     Serialize all current inputs to a JSON file.
     Returns the path written to.
 
-    gt_page_state dict keys:
-        dloc, selected_low (list), selected_high (list),
-        weights (list), num_multiples (int),
-        metric_selections (list)
-
-    gpc_page_state dict keys:
-        num_multiples, dloc, control_premium,
-        metric_selections (list), selected_low (list),
-        selected_high (list), weights (list),
-        excluded_rows (list)
+    projection_page_state dict keys:
+        revenue              {period: float | null}
+        revenue_growth       {period: float | null}
+        gp_improvement       {period: float | null}
+        ebitda_improvement   {period: float | null}
+        da_pct               {period: float | null}
+        capex_pct            {period: float | null}
+        last_edited_revenue  {period: "revenue" | "growth" | null}
     """
     _ensure_dir()
 
@@ -94,9 +93,9 @@ def save_session(
             "bs_data": private_financials.bs_data,
         },
 
-        "gt_page_state": gt_page_state,
-
-        "gpc_page_state": gpc_page_state,
+        "gt_page_state":         gt_page_state,
+        "gpc_page_state":        gpc_page_state,
+        "projection_page_state": projection_page_state,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -109,29 +108,32 @@ def load_session(filepath: Path) -> dict:
     """
     Load a session JSON file.
     Returns a dict with keys:
-        project_inputs_raw (dict)
-        private_financials (PrivateFinancials)
-        gt_page_state (dict)
+        project_inputs_raw      (dict)
+        private_financials      (PrivateFinancials)
+        gt_page_state           (dict)
+        gpc_page_state          (dict)
+        projection_page_state   (dict)
     """
     with open(filepath, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
-    pi_raw = payload.get("project_inputs", {})
-    pf_raw = payload.get("private_financials", {})
-    gt_raw = payload.get("gt_page_state", {})
-    gpc_raw = payload.get("gpc_page_state", {})
+    pi_raw   = payload.get("project_inputs", {})
+    pf_raw   = payload.get("private_financials", {})
+    gt_raw   = payload.get("gt_page_state", {})
+    gpc_raw  = payload.get("gpc_page_state", {})
+    proj_raw = payload.get("projection_page_state", {})
 
-    # Reconstruct PrivateFinancials
     pf = PrivateFinancials(
         is_data=pf_raw.get("is_data", {}),
         bs_data=pf_raw.get("bs_data", {}),
     )
 
     return {
-        "project_inputs_raw": pi_raw,
-        "private_financials": pf,
-        "gt_page_state": gt_raw,
-        "gpc_page_state": gpc_raw,
+        "project_inputs_raw":    pi_raw,
+        "private_financials":    pf,
+        "gt_page_state":         gt_raw,
+        "gpc_page_state":        gpc_raw,
+        "projection_page_state": proj_raw,
     }
 
 

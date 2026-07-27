@@ -119,21 +119,20 @@ class PrivateFinancialsInputPage(QDialog):
     def _get_periods(self) -> list:
         """
         Returns ordered period column labels.
-        Historical: LFY-N ... LFY-1, LFY
-        Then: TTM (calculated), NFY, NFY+1, NFY+2
+        Historical: LFY-N ... LFY
+        Then: TTM (calculated)
         Then: YTD prior, YTD current (far right)
+        NFY/NFY+1/NFY+2 removed — those live in the Projection Module popup.
         """
         hist = []
-        for i in range(self._hist_years, 0, -1):
+        for i in range(self._hist_years - 1, 0, -1):
             hist.append(f"LFY-{i}")
         hist.append("LFY")
-
-        forward = ["TTM", "NFY", "NFY+1", "NFY+2"]
 
         ytd_prior, ytd_current = self._get_ytd_labels()
         ytd = [ytd_prior, ytd_current]
 
-        return hist + forward + ytd
+        return hist + ["TTM"] + ytd
 
     def _get_ytd_labels(self) -> tuple:
         """Returns (ytd_prior_label, ytd_current_label)."""

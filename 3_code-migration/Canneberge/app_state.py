@@ -104,7 +104,7 @@ BS_LINES = [
     ("aoci",                    "Accumulated Other Comprehensive",         False, False),
     ("minority_interest",       "Minority Interest",                       False, False),
     ("retained_earnings",       "Retained Earnings",                       False, False),
-    ("placeholder2",            "PLACEHOLDER 2 positive (negative)",       False, False), 
+    ("placeholder2",            "PLACEHOLDER 2 positive (negative)",       False, False),
     ("placeholder",             "PLACEHOLDER positive (negative)",         False, False),
     ("total_equity",            "Total Shareholders' Equity",              True,  True),
     ("total_liab_equity",       "Total Liabilities & Shareholders' Equity", True, True),
@@ -171,6 +171,45 @@ class PrivateFinancials:
 
 
 @dataclass
+class ProjectionData:
+    """
+    Stores all user-typed Projection Module inputs, keyed by projection
+    period label (NFY, NFY+1, NFY+2, ..., NFY+N).
+
+    Primary driver fields (user-editable inputs):
+      revenue          — $ amount (may be back-computed from growth %)
+      revenue_growth   — decimal, e.g. 0.09 = 9% (may be back-computed from revenue $)
+      gp_improvement   — decimal; GP margin improvement vs prior year
+      ebitda_improvement — decimal; EBITDA margin improvement vs prior year
+      da_pct           — decimal; D&A as % of revenue
+      capex_pct        — decimal; CapEx as % of revenue
+
+    last_edited_revenue — per period: "revenue" | "growth" | None
+      Tracks which of {revenue $, revenue growth %} was typed last so
+      two-way binding knows which direction to recompute.
+
+    last_edited_ebitda — per period: "ebitda" | "improvement" | None
+      Same pattern for EBITDA $ vs EBITDA improvement %.
+      (EBITDA $ is not directly typed — it's computed — but this tracks
+      whether improvement % was user-typed or computed from source data,
+      which determines whether the cell is editable.)
+    """
+    revenue:               Dict[str, Optional[float]] = field(default_factory=dict)
+    revenue_growth:        Dict[str, Optional[float]] = field(default_factory=dict)
+    gp_improvement:        Dict[str, Optional[float]] = field(default_factory=dict)
+    ebitda_improvement:    Dict[str, Optional[float]] = field(default_factory=dict)
+    da_pct:                Dict[str, Optional[float]] = field(default_factory=dict)
+    capex_pct:             Dict[str, Optional[float]] = field(default_factory=dict)
+    last_edited_revenue:   Dict[str, Optional[str]]   = field(default_factory=dict)
+
+    def get(self, field_name: str, period: str):
+        return getattr(self, field_name, {}).get(period)
+
+    def set(self, field_name: str, period: str, value):
+        getattr(self, field_name)[period] = value
+
+
+@dataclass
 class ProjectInputs:
     # General
     client: str = "Ted & Co."
@@ -205,6 +244,11 @@ class ProjectInputs:
     # Private company financials (populated via private input dialog)
     private_financials: PrivateFinancials = field(
         default_factory=PrivateFinancials
+    )
+
+    # Projection module inputs (populated via projection module dialog)
+    projection_data: ProjectionData = field(
+        default_factory=ProjectionData
     )
 
     @property
@@ -243,6 +287,18 @@ class ProjectInputs:
             hist.append(f"LFY-{i}")
         hist.append("LFY")
         return hist
+
+    @property
+    def projection_period_columns(self) -> List[str]:
+        """
+        Ordered projection period labels: NFY, NFY+1, ..., NFY+(N-1).
+        Count driven by projection_years spinbox on Home page.
+        Single source of truth — do not duplicate this loop elsewhere.
+        """
+        cols = ["NFY"]
+        for i in range(1, self.projection_years):
+            cols.append(f"NFY+{i}")
+        return cols
 
     @property
     def period_columns(self) -> List[str]:

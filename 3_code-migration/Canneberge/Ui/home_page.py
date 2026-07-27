@@ -25,12 +25,17 @@ class HomePage(QWidget):
     def __init__(self):
         super().__init__()
         self._private_financials_callback = None
+        self._projection_module_callback = None   # ADD THIS LINE
         self._build_ui()
 
     def set_private_financials_callback(self, callback):
         """Called by MainWindow to wire the private financials dialog opener."""
         self._private_financials_callback = callback
 
+    def set_projection_module_callback(self, callback):
+        """Called by MainWindow to wire the projection module dialog opener."""
+        self._projection_module_callback = callback
+    
     def _build_ui(self):
         main_layout = QVBoxLayout()
         top_layout = QHBoxLayout()
@@ -123,9 +128,24 @@ class HomePage(QWidget):
             self._open_private_financials
         )
 
+        # Projection module link button (shown when Private Company,
+        # positioned below Enter Financial Data)
+        self.projection_module_btn = QPushButton("Projection Module →")
+        self.projection_module_btn.setStyleSheet(
+            "border: none; color: #1a4a8a; text-decoration: underline; "
+            "text-align: left; background: transparent;"
+        )
+        self.projection_module_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
+        self.projection_module_btn.clicked.connect(
+            self._open_projection_module
+        )
+
         subject_form.addRow("Company Status", self.company_status_combo)
         subject_form.addRow("Subject Ticker", self.subject_ticker_input)
         subject_form.addRow("", self.private_financials_btn)
+        subject_form.addRow("", self.projection_module_btn)
         subject_form.addRow("Tax Rate", self.tax_rate_input)
         subject_form.addRow("Last Fiscal Year", self.lfy_input)
         subject_form.addRow("Last Fiscal Quarter", self.fq_input)
@@ -339,6 +359,11 @@ class HomePage(QWidget):
         is_private = status.strip().lower() == "private company"
         self.subject_ticker_input.setVisible(not is_private)
         self.private_financials_btn.setVisible(is_private)
+        self.projection_module_btn.setVisible(True)  
+
+    def _open_projection_module(self):
+        if self._projection_module_callback:
+            self._projection_module_callback()
 
     def _open_private_financials(self):
         if self._private_financials_callback:

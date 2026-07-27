@@ -12,7 +12,8 @@ from Canneberge.Ui.gt_page import GTPage
 from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
-from Canneberge.app_state import PrivateFinancials, Transaction
+from Canneberge.Ui.projection_module_page import ProjectionModulePage
+from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
 from Canneberge.utils.session import (
     save_session, load_session, list_sessions, SESSION_DIR
 )
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
 
         # Shared state
         self._private_financials = PrivateFinancials()
+        self._projection_data = ProjectionData()
         self._stockanalysis_results = {}
         self._current_session_path: Optional[Path] = None
 
@@ -36,6 +38,9 @@ class MainWindow(QMainWindow):
         self.home_page = HomePage()
         self.home_page.set_private_financials_callback(
             self._open_private_financials_dialog
+        )
+        self.home_page.set_projection_module_callback(
+            self._open_projection_module_dialog
         )
 
         self.source_data_page = SourceDataPage(
@@ -72,7 +77,6 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self.tabs)
 
-        # File menu
         self._build_menu()
 
     def _build_menu(self):
@@ -122,6 +126,19 @@ class MainWindow(QMainWindow):
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
 
+    def _open_projection_module_dialog(self):
+        dialog = ProjectionModulePage(
+            projection_data=self._projection_data,
+            get_project_inputs=self.home_page.get_project_inputs,
+            get_marketscreener_results=self._get_marketscreener_results,
+            get_subject_historical_line=self._get_subject_historical_line,
+            parent=self,
+        )
+        if dialog.exec():
+            self.subject_financials_page.refresh()
+            self.gt_page._recalculate()
+            self.gpc_page._recalculate()
+
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
 
@@ -133,14 +150,15 @@ class MainWindow(QMainWindow):
 
     def get_subject_debt(self) -> float:
         return self.subject_financials_page.get_subject_debt()
-    
+
+    def _get_subject_historical_line(self, key: str) -> dict:
+        return self.subject_financials_page.get_historical_line_values(key)
 
     # ------------------------------------------------------------------
     # SAVE / LOAD
     # ------------------------------------------------------------------
 
     def _collect_gt_page_state(self) -> dict:
-        """Read all green inputs from GT page into a serializable dict."""
         return {
             "num_multiples": self.gt_page.num_multiples_spin.value(),
             "dloc": self.gt_page.dloc_input.text(),
@@ -167,7 +185,6 @@ class MainWindow(QMainWindow):
         }
 
     def _apply_gt_page_state(self, state: dict):
-        """Repopulate GT page green inputs from a loaded state dict."""
         if not state:
             return
 
@@ -201,7 +218,6 @@ class MainWindow(QMainWindow):
                 self.gt_page.tx_exclude_checks[i].setChecked(checked)
 
     def _collect_gpc_page_state(self) -> dict:
-        """Read all green inputs from GPC page into a serializable dict."""
         return {
             "num_multiples": self.gpc_page.num_multiples_spin.value(),
             "dloc": self.gpc_page.dloc_input.text(),
@@ -229,7 +245,6 @@ class MainWindow(QMainWindow):
         }
 
     def _apply_gpc_page_state(self, state: dict):
-        """Repopulate GPC page green inputs from a loaded state dict."""
         if not state:
             return
 
@@ -266,8 +281,31 @@ class MainWindow(QMainWindow):
             if i < len(self.gpc_page.tick_exclude_checks):
                 self.gpc_page.tick_exclude_checks[i].setChecked(checked)
 
+    def _collect_projection_page_state(self) -> dict:
+        pd = self._projection_data
+        return {
+            "revenue":             dict(pd.revenue),
+            "revenue_growth":      dict(pd.revenue_growth),
+            "gp_improvement":      dict(pd.gp_improvement),
+            "ebitda_improvement":  dict(pd.ebitda_improvement),
+            "da_pct":              dict(pd.da_pct),
+            "capex_pct":           dict(pd.capex_pct),
+            "last_edited_revenue": dict(pd.last_edited_revenue),
+        }
+
+    def _apply_projection_page_state(self, state: dict):
+        if not state:
+            return
+        pd = self._projection_data
+        pd.revenue             = {k: v for k, v in state.get("revenue", {}).items()}
+        pd.revenue_growth      = {k: v for k, v in state.get("revenue_growth", {}).items()}
+        pd.gp_improvement      = {k: v for k, v in state.get("gp_improvement", {}).items()}
+        pd.ebitda_improvement  = {k: v for k, v in state.get("ebitda_improvement", {}).items()}
+        pd.da_pct              = {k: v for k, v in state.get("da_pct", {}).items()}
+        pd.capex_pct           = {k: v for k, v in state.get("capex_pct", {}).items()}
+        pd.last_edited_revenue = {k: v for k, v in state.get("last_edited_revenue", {}).items()}
+
     def _apply_project_inputs_to_home(self, pi: dict):
-        """Repopulate Home page fields from a loaded project_inputs dict."""
         hp = self.home_page
 
         def _set(widget, value):
@@ -302,13 +340,11 @@ class MainWindow(QMainWindow):
         _set(hp.historical_years_spin, pi.get("historical_years"))
         _set(hp.projection_years_spin, pi.get("projection_years"))
 
-        # Tax rate
         tax = pi.get("subject_tax_rate")
         if tax is not None:
             pct = tax * 100 if tax <= 1 else tax
             hp.tax_rate_input.setText(f"{pct:.0f}%")
 
-        # GPC tickers
         tickers = pi.get("gpc_tickers", [])
         for i, edit in enumerate(hp.gpc_ticker_edits):
             if i < len(tickers):
@@ -320,7 +356,6 @@ class MainWindow(QMainWindow):
                 edit.clear()
                 hp.gpc_name_edits[i].clear()
 
-        # GT transactions
         transactions = pi.get("gt_transactions", [])
         for i, row_widgets in enumerate(hp.gt_rows):
             if i < len(transactions):
@@ -347,13 +382,13 @@ class MainWindow(QMainWindow):
                 for widget in row_widgets.values():
                     widget.clear()
 
-        # Trigger company status visibility update
         hp._on_company_status_changed(pi.get("company_status", ""))
 
     def _on_save_session(self):
         inputs = self.home_page.get_project_inputs()
-        gt_state = self._collect_gt_page_state()
-        gpc_state = self._collect_gpc_page_state()
+        gt_state   = self._collect_gt_page_state()
+        gpc_state  = self._collect_gpc_page_state()
+        proj_state = self._collect_projection_page_state()
 
         try:
             path = save_session(
@@ -361,6 +396,7 @@ class MainWindow(QMainWindow):
                 private_financials=self._private_financials,
                 gt_page_state=gt_state,
                 gpc_page_state=gpc_state,
+                projection_page_state=proj_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -386,8 +422,9 @@ class MainWindow(QMainWindow):
             path = path.with_suffix(".json")
 
         inputs = self.home_page.get_project_inputs()
-        gt_state = self._collect_gt_page_state()
-        gpc_state = self._collect_gpc_page_state()
+        gt_state   = self._collect_gt_page_state()
+        gpc_state  = self._collect_gpc_page_state()
+        proj_state = self._collect_projection_page_state()
 
         try:
             saved_path = save_session(
@@ -395,6 +432,7 @@ class MainWindow(QMainWindow):
                 private_financials=self._private_financials,
                 gt_page_state=gt_state,
                 gpc_page_state=gpc_state,
+                projection_page_state=proj_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -407,30 +445,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Save Failed", f"Could not save session:\n{e}"
             )
-        
+
     def _on_load_session(self):
         sessions = list_sessions()
 
-        if not sessions:
-            # No saved sessions — open file picker as fallback
-            path_str, _ = QFileDialog.getOpenFileName(
-                self, "Load Session",
-                str(SESSION_DIR),
-                "JSON files (*.json)"
-            )
-            if not path_str:
-                return
-            filepath = Path(path_str)
-        else:
-            # Show file picker starting at session dir
-            path_str, _ = QFileDialog.getOpenFileName(
-                self, "Load Session",
-                str(SESSION_DIR),
-                "JSON files (*.json)"
-            )
-            if not path_str:
-                return
-            filepath = Path(path_str)
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Load Session",
+            str(SESSION_DIR),
+            "JSON files (*.json)"
+        )
+        if not path_str:
+            return
+        filepath = Path(path_str)
 
         try:
             data = load_session(filepath)
@@ -440,13 +466,12 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Apply to UI
         self._apply_project_inputs_to_home(data["project_inputs_raw"])
         self._private_financials = data["private_financials"]
         self._apply_gt_page_state(data["gt_page_state"])
         self._apply_gpc_page_state(data["gpc_page_state"])
+        self._apply_projection_page_state(data.get("projection_page_state", {}))
 
-        # Refresh dependent pages
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()
         self.gpc_page._recalculate()

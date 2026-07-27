@@ -1,5 +1,7 @@
 from typing import Optional, List, Dict
 
+import math
+
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -33,6 +35,17 @@ def _make_hrule() -> QFrame:
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
     return line
+
+def _parse_val(value) -> Optional[float]:
+    if value is None or str(value).strip().lower() in ("", "-", "nan", "none"):
+        return None
+    try:
+        v = float(str(value).replace(",", ""))
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    except (ValueError, TypeError):
+        return None
 
 # Map our IS/BS keys to StockAnalysis line item names
 SA_KEY_MAP = {
@@ -167,7 +180,6 @@ class SubjectFinancialsPage(QWidget):
 
         self._scroll.setWidget(widget)
 
-    # With:
     def _get_periods(self, inputs: ProjectInputs) -> List[str]:
         """Historical periods only for display (no projected in read-only view)."""
         return inputs.historical_period_columns + ["TTM"]
@@ -372,3 +384,49 @@ class SubjectFinancialsPage(QWidget):
                         try: res += float(str(r.get("TTM")).replace(",",""))
                         except: pass
         return res
+
+    def get_historical_line_values(self, key: str, statement: str = "IS") -> Dict[str, Optional[float]]:
+        """
+        Returns {period_label: float_or_None} for the given line-item key,
+        across historical periods + TTM (LFY-N ... LFY, TTM).
+
+        Resolves via StockAnalysis (public) or PrivateFinancials (private) —
+        the exact same branching used by _build_public_view/_build_private_view.
+
+        This is the single source of truth for other pages (Projection Module,
+        GT, GPC, future NWC/DCF) needing subject company historicals as raw
+        floats rather than display strings. Don't duplicate the public/private
+        resolution logic elsewhere — call this instead.
+        """
+        inputs = self.get_project_inputs()
+        periods = inputs.historical_period_columns + ["TTM"]
+        result: Dict[str, Optional[float]] = {}
+
+        if inputs.is_publicly_traded:
+            results = self.get_stockanalysis_results()
+            stmt_results = results.get(statement, []) if results else []
+            ticker = inputs.subject_ticker.lower()
+            subject_rows = [
+                r for r in stmt_results
+                if str(r.get("Ticker", "")).lower() == ticker
+            ]
+            sa_key = SA_KEY_MAP.get(key, "").lower()
+            row_data = {}
+            for row in subject_rows:
+                if str(row.get("Line Item", "")).strip().lower() == sa_key:
+                    row_data = {
+                        k: v for k, v in row.items()
+                        if k not in ("Ticker", "Key", "Line Item")
+                    }
+                    break
+            for period in periods:
+                result[period] = _parse_val(row_data.get(period, ""))
+        else:
+            pf = self.get_private_financials()
+            for period in periods:
+                if statement == "IS":
+                    result[period] = pf.get_is(key, period)
+                else:
+                    result[period] = pf.get_bs(key, period)
+
+        return result    
