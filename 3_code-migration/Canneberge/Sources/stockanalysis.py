@@ -35,6 +35,7 @@ class StockAnalysisClient:
             return None
 
         raw_table = None
+        header_signature = None
 
         for table in tables:
             rows = table.find_all("tr")
@@ -42,12 +43,34 @@ class StockAnalysisClient:
 
             if len(rows) > 5 and len(cols) > 2:
                 raw_table = table
+                header_signature = self._table_header(table)
                 break
 
         if raw_table is None:
             return None
 
-        df = self._parse_table_to_dataframe(raw_table)
+        # The statement can be split across multiple <table> elements on
+        # the same page — confirmed live: ADBE's balance sheet page
+        # returns 4 <table> tags, with assets in one and liabilities/
+        # equity in another. Union rows from every table sharing the
+        # SAME header row as the first match, so we merge in the rest of
+        # the same statement without pulling in an unrelated table (e.g.
+        # a quarterly-view table with different column headers).
+        matching_tables = [
+            t for t in tables
+            if self._table_header(t) == header_signature
+        ]
+
+        dfs = []
+        for t in matching_tables:
+            df_part = self._parse_table_to_dataframe(t)
+            if not df_part.empty:
+                dfs.append(df_part)
+
+        if not dfs:
+            return None
+
+        df = pd.concat(dfs, ignore_index=True)
 
         if df.empty:
             return None
@@ -63,6 +86,13 @@ class StockAnalysisClient:
         df["Key"] = df["Ticker"] + "|" + df["Line Item"].str.lower()
 
         return df
+
+    def _table_header(self, table):
+        tr = table.find("tr")
+        if not tr:
+            return None
+        cells = tr.find_all(["th", "td"])
+        return tuple(c.get_text(strip=True) for c in cells)
 
     def _parse_table_to_dataframe(self, table):
         html_rows = table.find_all("tr")

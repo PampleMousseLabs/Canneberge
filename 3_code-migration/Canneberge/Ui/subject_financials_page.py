@@ -15,6 +15,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Calculations.subject_is_bs_calc import (
+    compute_is_calculated,
+    compute_bs_calculated,
+    BS_DIRECT_PULL_KEYS,
+)
 from Canneberge.app_state import ProjectInputs, PrivateFinancials, IS_LINES, BS_LINES
 
 BOLD_STYLE = "font-weight: bold;"
@@ -25,9 +30,10 @@ def _fmt(value) -> str:
     if value is None or str(value).lower() in ("nan", "none", "-"):
         return "-"
     try:
-        f = float(str(value).replace(",",""))
+        f = float(str(value).replace(",", ""))
         return f"{f:,.0f}"
-    except: return "-"
+    except Exception:
+        return "-"
 
 
 def _make_hrule() -> QFrame:
@@ -35,6 +41,7 @@ def _make_hrule() -> QFrame:
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
     return line
+
 
 def _parse_val(value) -> Optional[float]:
     if value is None or str(value).strip().lower() in ("", "-", "nan", "none"):
@@ -46,6 +53,7 @@ def _parse_val(value) -> Optional[float]:
         return v
     except (ValueError, TypeError):
         return None
+
 
 # Map our IS/BS keys to StockAnalysis line item names
 SA_KEY_MAP = {
@@ -99,7 +107,7 @@ SA_KEY_MAP = {
     "minority_interest": "minority interest",
     "retained_earnings": "retained earnings",
     "placeholder2": "",  # no public equivalent; private-input only
-    "placeholder": "",  # demo row only; no public equivalent, always shows "-"
+    "placeholder": "",   # demo row only; no public equivalent, always shows "-"
     "total_equity": "shareholders' equity",
     "total_liab_equity": "total liabilities & equity",
 }
@@ -111,6 +119,14 @@ class SubjectFinancialsPage(QWidget):
     - If Publicly Traded: shows StockAnalysis data pulled for subject ticker
     - If Private: shows data entered in PrivateFinancialsInputPage
     Always reflects current state — no editing here.
+
+    Calculated rows (is_calc=True in IS_LINES/BS_LINES) are computed
+    locally via compute_is_calculated/compute_bs_calculated from raw
+    component values — never read pre-computed from either source.
+    Exception: total_current_liab, total_liabilities, total_equity,
+    total_liab_equity are is_calc=True for bolding purposes only —
+    their raw components don't scrape reliably from StockAnalysis, so
+    those four are pulled directly (see BS_DIRECT_PULL_KEYS).
     """
 
     def __init__(self, get_project_inputs_callback,
@@ -127,7 +143,6 @@ class SubjectFinancialsPage(QWidget):
     def _build_ui(self):
         outer = QVBoxLayout()
 
-        # Top bar: IS / BS toggle
         top_bar = QHBoxLayout()
 
         self.stmt_group = QButtonGroup(self)
@@ -151,7 +166,6 @@ class SubjectFinancialsPage(QWidget):
         top_bar.addWidget(self.status_label)
         outer.addLayout(top_bar)
 
-        # Scroll area
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         outer.addWidget(self._scroll)
@@ -184,6 +198,80 @@ class SubjectFinancialsPage(QWidget):
         """Historical periods only for display (no projected in read-only view)."""
         return inputs.historical_period_columns + ["TTM"]
 
+    # ------------------------------------------------------------------
+    # Shared row-building helpers
+    # ------------------------------------------------------------------
+
+    def _gather_raw_public(self, lines, periods, lookup) -> Dict[str, Dict[str, Optional[float]]]:
+        """Raw (non-calc) values per period, from StockAnalysis rows.
+        BS_DIRECT_PULL_KEYS are pulled here too even though is_calc=True,
+        since those four are direct SA pulls, not local sums."""
+        raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
+        for key, label, is_calc, bold in lines:
+            if is_calc and not (self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS):
+                continue
+            sa_key = SA_KEY_MAP.get(key, "").lower()
+            row_data = lookup.get(sa_key, {})
+            for period in periods:
+                raw_by_period[period][key] = _parse_val(row_data.get(period, ""))
+        return raw_by_period
+
+    def _gather_raw_private(self, lines, periods, pf) -> Dict[str, Dict[str, Optional[float]]]:
+        raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
+        for key, label, is_calc, bold in lines:
+            if is_calc and not (self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS):
+                continue
+            for period in periods:
+                if self._current_statement == "IS":
+                    raw_by_period[period][key] = pf.get_is(key, period)
+                else:
+                    raw_by_period[period][key] = pf.get_bs(key, period)
+        return raw_by_period
+
+    def _resolve_value(self, key, is_calc, period, raw_by_period, calc_by_period):
+        if is_calc and self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS:
+            return raw_by_period[period].get(key)
+        elif is_calc:
+            return calc_by_period[period].get(key)
+        else:
+            return raw_by_period[period].get(key)
+
+    def _build_header(self, grid, periods):
+        grid.addWidget(QLabel("Line Item"), 0, 0)
+        for col_idx, period in enumerate(periods):
+            lbl = QLabel(period)
+            lbl.setStyleSheet(BOLD_STYLE)
+            lbl.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            grid.addWidget(lbl, 0, col_idx + 1)
+        grid.setColumnStretch(0, 2)
+        for i in range(len(periods)):
+            grid.setColumnMinimumWidth(i + 1, 90)
+
+    def _build_rows(self, grid, lines, periods, raw_by_period, calc_by_period):
+        for row_idx, (key, label, is_calc, bold) in enumerate(lines):
+            row = row_idx + 1
+            name_lbl = QLabel(label)
+            if bold:
+                name_lbl.setStyleSheet(BOLD_STYLE)
+            grid.addWidget(name_lbl, row, 0)
+
+            for col_idx, period in enumerate(periods):
+                val = self._resolve_value(key, is_calc, period, raw_by_period, calc_by_period)
+                val_lbl = QLabel(_fmt(val) if val is not None else "-")
+                val_lbl.setAlignment(
+                    Qt.AlignmentFlag.AlignRight |
+                    Qt.AlignmentFlag.AlignVCenter
+                )
+                if bold:
+                    val_lbl.setStyleSheet(BOLD_STYLE)
+                grid.addWidget(val_lbl, row, col_idx + 1)
+
+    # ------------------------------------------------------------------
+    # View builders
+    # ------------------------------------------------------------------
+
     def _build_public_view(self, inputs: ProjectInputs) -> QWidget:
         """Build read-only grid from StockAnalysis results."""
         container = QWidget()
@@ -198,7 +286,6 @@ class SubjectFinancialsPage(QWidget):
 
         ticker = inputs.subject_ticker.lower()
 
-        # Filter to subject ticker only
         subject_rows = [
             r for r in stmt_results
             if str(r.get("Ticker", "")).lower() == ticker
@@ -207,21 +294,6 @@ class SubjectFinancialsPage(QWidget):
         lines = IS_LINES if self._current_statement == "IS" else BS_LINES
         periods = self._get_periods(inputs)
 
-        # Header
-        grid.addWidget(QLabel("Line Item"), 0, 0)
-        for col_idx, period in enumerate(periods):
-            lbl = QLabel(period)
-            lbl.setStyleSheet(BOLD_STYLE)
-            lbl.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            grid.addWidget(lbl, 0, col_idx + 1)
-
-        grid.setColumnStretch(0, 2)
-        for i in range(len(periods)):
-            grid.setColumnMinimumWidth(i + 1, 90)
-
-        # Build lookup: line_item_lower -> {period -> value}
         lookup: Dict[str, Dict[str, str]] = {}
         for row in subject_rows:
             key = str(row.get("Line Item", "")).strip().lower()
@@ -230,27 +302,14 @@ class SubjectFinancialsPage(QWidget):
                 if k not in ("Ticker", "Key", "Line Item")
             }
 
-        
-        for row_idx, (key, label, is_calc, bold) in enumerate(lines):
-            row = row_idx + 1
-            name_lbl = QLabel(label)
-            if bold:
-                name_lbl.setStyleSheet(BOLD_STYLE)
-            grid.addWidget(name_lbl, row, 0)
+        self._build_header(grid, periods)
 
-            sa_key = SA_KEY_MAP.get(key, "").lower()
-            row_data = lookup.get(sa_key, {})
+        raw_by_period = self._gather_raw_public(lines, periods, lookup)
 
-            for col_idx, period in enumerate(periods):
-                val = row_data.get(period, "")
-                val_lbl = QLabel(_fmt(val) if val else "-")
-                val_lbl.setAlignment(
-                    Qt.AlignmentFlag.AlignRight |
-                    Qt.AlignmentFlag.AlignVCenter
-                )
-                if bold:
-                    val_lbl.setStyleSheet(BOLD_STYLE)
-                grid.addWidget(val_lbl, row, col_idx + 1)
+        compute_fn = compute_is_calculated if self._current_statement == "IS" else compute_bs_calculated
+        calc_by_period = {period: compute_fn(raw_by_period[period]) for period in periods}
+
+        self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
         grid.setRowStretch(len(lines) + 2, 1)
         container.setLayout(grid)
@@ -267,71 +326,14 @@ class SubjectFinancialsPage(QWidget):
         lines = IS_LINES if self._current_statement == "IS" else BS_LINES
         periods = self._visible_private_periods(inputs)
 
-        # total_equity/total_liab_equity are marked is_calc=True in BS_LINES,
-        # but PrivateFinancials only stores raw manually-entered values —
-        # nothing writes a correct total_equity into pf.bs_data upstream.
-        # Compute both here instead of doing a flat get_bs() lookup.
-        equity_component_keys = [
-            "preferred_stock", "common_stock", "apic",
-            "treasury_stock", "aoci", "minority_interest",
-            "retained_earnings", "common_equity", "placeholder",
-        ]
+        self._build_header(grid, periods)
 
-        def _computed_bs_value(key: str, period: str):
-            if key == "total_equity":
-                total = 0.0
-                any_present = False
-                for k in equity_component_keys:
-                    v = pf.get_bs(k, period)
-                    if v is not None:
-                        total += v
-                        any_present = True
-                return total if any_present else None
-            if key == "total_liab_equity":
-                liab = pf.get_bs("total_liabilities", period)
-                equity = _computed_bs_value("total_equity", period)
-                if liab is None and equity is None:
-                    return None
-                return (liab or 0.0) + (equity or 0.0)
-            return pf.get_bs(key, period)
+        raw_by_period = self._gather_raw_private(lines, periods, pf)
 
-        # Header
-        grid.addWidget(QLabel("Line Item"), 0, 0)
-        for col_idx, period in enumerate(periods):
-            lbl = QLabel(period)
-            lbl.setStyleSheet(BOLD_STYLE)
-            lbl.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            grid.addWidget(lbl, 0, col_idx + 1)
+        compute_fn = compute_is_calculated if self._current_statement == "IS" else compute_bs_calculated
+        calc_by_period = {period: compute_fn(raw_by_period[period]) for period in periods}
 
-        grid.setColumnStretch(0, 2)
-        for i in range(len(periods)):
-            grid.setColumnMinimumWidth(i + 1, 90)
-
-        for row_idx, (key, label, is_calc, bold) in enumerate(lines):
-            row = row_idx + 1
-            name_lbl = QLabel(label)
-            if bold:
-                name_lbl.setStyleSheet(BOLD_STYLE)
-            grid.addWidget(name_lbl, row, 0)
-
-            for col_idx, period in enumerate(periods):
-                if self._current_statement == "IS":
-                    val = pf.get_is(key, period)
-                elif key in ("total_equity", "total_liab_equity"):
-                    val = _computed_bs_value(key, period)
-                else:
-                    val = pf.get_bs(key, period)
-
-                val_lbl = QLabel(_fmt(val) if val is not None else "-")
-                val_lbl.setAlignment(
-                    Qt.AlignmentFlag.AlignRight |
-                    Qt.AlignmentFlag.AlignVCenter
-                )
-                if bold:
-                    val_lbl.setStyleSheet(BOLD_STYLE)
-                grid.addWidget(val_lbl, row, col_idx + 1)
+        self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
         grid.setRowStretch(len(lines) + 2, 1)
         container.setLayout(grid)
@@ -345,7 +347,6 @@ class SubjectFinancialsPage(QWidget):
 
         forward = ["TTM", "NFY", "NFY+1", "NFY+2"]
 
-        # YTD labels
         lfq_str = inputs.last_fiscal_quarter
         lfq = None
         for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
@@ -373,7 +374,8 @@ class SubjectFinancialsPage(QWidget):
         keys = ["st_debt", "current_ltd", "lt_debt"]
         if inputs.is_private:
             pf = self.get_private_financials()
-            for k in keys: res += (pf.get_bs(k, "TTM") or 0.0)
+            for k in keys:
+                res += (pf.get_bs(k, "TTM") or 0.0)
         else:
             sa = self.get_stockanalysis_results().get("BS", [])
             tick = inputs.subject_ticker.lower()
@@ -381,8 +383,10 @@ class SubjectFinancialsPage(QWidget):
                 sa_key = SA_KEY_MAP.get(k)
                 for r in sa:
                     if str(r.get("Ticker")).lower() == tick and str(r.get("Line Item")).lower() == sa_key:
-                        try: res += float(str(r.get("TTM")).replace(",",""))
-                        except: pass
+                        try:
+                            res += float(str(r.get("TTM")).replace(",", ""))
+                        except Exception:
+                            pass
         return res
 
     def get_historical_line_values(self, key: str, statement: str = "IS") -> Dict[str, Optional[float]]:
@@ -390,43 +394,48 @@ class SubjectFinancialsPage(QWidget):
         Returns {period_label: float_or_None} for the given line-item key,
         across historical periods + TTM (LFY-N ... LFY, TTM).
 
-        Resolves via StockAnalysis (public) or PrivateFinancials (private) —
-        the exact same branching used by _build_public_view/_build_private_view.
-
-        This is the single source of truth for other pages (Projection Module,
-        GT, GPC, future NWC/DCF) needing subject company historicals as raw
-        floats rather than display strings. Don't duplicate the public/private
-        resolution logic elsewhere — call this instead.
+        Single source of truth for other pages (Projection Module, GT,
+        GPC) needing subject company historicals as raw floats.
         """
         inputs = self.get_project_inputs()
         periods = inputs.historical_period_columns + ["TTM"]
-        result: Dict[str, Optional[float]] = {}
+        lines = IS_LINES if statement == "IS" else BS_LINES
+        is_calc = next((c for k, l, c, b in lines if k == key), False)
+
+        raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
 
         if inputs.is_publicly_traded:
             results = self.get_stockanalysis_results()
             stmt_results = results.get(statement, []) if results else []
             ticker = inputs.subject_ticker.lower()
-            subject_rows = [
-                r for r in stmt_results
-                if str(r.get("Ticker", "")).lower() == ticker
-            ]
-            sa_key = SA_KEY_MAP.get(key, "").lower()
-            row_data = {}
+            subject_rows = [r for r in stmt_results if str(r.get("Ticker", "")).lower() == ticker]
+            lookup = {}
             for row in subject_rows:
-                if str(row.get("Line Item", "")).strip().lower() == sa_key:
-                    row_data = {
-                        k: v for k, v in row.items()
-                        if k not in ("Ticker", "Key", "Line Item")
-                    }
-                    break
-            for period in periods:
-                result[period] = _parse_val(row_data.get(period, ""))
+                lk = str(row.get("Line Item", "")).strip().lower()
+                lookup[lk] = {k: v for k, v in row.items() if k not in ("Ticker", "Key", "Line Item")}
+            for k2, l2, c2, b2 in lines:
+                if c2 and not (statement == "BS" and k2 in BS_DIRECT_PULL_KEYS):
+                    continue
+                sa_key = SA_KEY_MAP.get(k2, "").lower()
+                row_data = lookup.get(sa_key, {})
+                for period in periods:
+                    raw_by_period[period][k2] = _parse_val(row_data.get(period, ""))
         else:
             pf = self.get_private_financials()
-            for period in periods:
-                if statement == "IS":
-                    result[period] = pf.get_is(key, period)
-                else:
-                    result[period] = pf.get_bs(key, period)
+            for k2, l2, c2, b2 in lines:
+                if c2 and not (statement == "BS" and k2 in BS_DIRECT_PULL_KEYS):
+                    continue
+                for period in periods:
+                    raw_by_period[period][k2] = pf.get_is(k2, period) if statement == "IS" else pf.get_bs(k2, period)
 
-        return result    
+        compute_fn = compute_is_calculated if statement == "IS" else compute_bs_calculated
+        result: Dict[str, Optional[float]] = {}
+        for period in periods:
+            if is_calc and statement == "BS" and key in BS_DIRECT_PULL_KEYS:
+                result[period] = raw_by_period[period].get(key)
+            elif is_calc:
+                result[period] = compute_fn(raw_by_period[period]).get(key)
+            else:
+                result[period] = raw_by_period[period].get(key)
+
+        return result

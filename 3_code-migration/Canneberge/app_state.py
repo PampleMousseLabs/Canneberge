@@ -44,7 +44,7 @@ IS_LINES = [
     ("revenue",                    "Revenue",                          False, True),
     ("cogs",                       "COGS",                             False, False),
     ("cogs_adjustment",            "Adjustment to Cost of Goods Sold", False, False),
-    ("cost_of_goods_sold",         "Cost of Goods Sold",               True,  False),
+    ("cost_of_goods_sold",         "Cost of Goods Sold",               True,  True),
     ("gross_profit",               "Gross Profit",                     True,  True),
     ("sga",                        "Operating Expense (SG&A)",         False, False),
     ("rd",                         "Research & Development",           False, False),
