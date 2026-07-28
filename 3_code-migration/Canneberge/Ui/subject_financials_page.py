@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Calculations.projection_resolve import resolve_projection_dollars, MS_COVERED_PERIODS
+
 from Canneberge.Calculations.subject_is_bs_calc import (
     compute_is_calculated,
     compute_bs_calculated,
@@ -131,11 +133,13 @@ class SubjectFinancialsPage(QWidget):
 
     def __init__(self, get_project_inputs_callback,
                  get_stockanalysis_results_callback,
-                 get_private_financials_callback):
+                 get_private_financials_callback,
+                 get_marketscreener_results_callback=None):
         super().__init__()
         self.get_project_inputs = get_project_inputs_callback
         self.get_stockanalysis_results = get_stockanalysis_results_callback
         self.get_private_financials = get_private_financials_callback
+        self.get_marketscreener_results = get_marketscreener_results_callback or (lambda: [])
 
         self._current_statement = "IS"
         self._build_ui()
@@ -195,8 +199,33 @@ class SubjectFinancialsPage(QWidget):
         self._scroll.setWidget(widget)
 
     def _get_periods(self, inputs: ProjectInputs) -> List[str]:
-        """Historical periods only for display (no projected in read-only view)."""
+        return inputs.historical_period_columns + ["TTM"] + inputs.projection_period_columns
+
+    def _get_periods_historical_only(self, inputs: ProjectInputs) -> List[str]:
         return inputs.historical_period_columns + ["TTM"]
+
+    def _get_ms_revenue_ebitda(self, inputs: ProjectInputs):
+        """Same extraction the Projection Module does — MS rows for
+        subject ticker, revenue/ebitda only, NFY/NFY+1/NFY+2 only."""
+        ticker = inputs.subject_ticker.strip().upper()
+        ms_revenue, ms_ebitda = {}, {}
+        for row in self.get_marketscreener_results() or []:
+            if str(row.get("Ticker", "")).strip().upper() != ticker:
+                continue
+            metric = str(row.get("Line Item", "")).strip().lower()
+            for period in MS_COVERED_PERIODS:
+                raw = row.get(period)
+                val = None
+                if raw is not None:
+                    try:
+                        val = float(str(raw).replace(",", ""))
+                    except (ValueError, TypeError):
+                        pass
+                if metric == "revenue":
+                    ms_revenue[period] = val
+                elif metric == "ebitda":
+                    ms_ebitda[period] = val
+        return ms_revenue, ms_ebitda
 
     # ------------------------------------------------------------------
     # Shared row-building helpers
@@ -309,6 +338,30 @@ class SubjectFinancialsPage(QWidget):
         compute_fn = compute_is_calculated if self._current_statement == "IS" else compute_bs_calculated
         calc_by_period = {period: compute_fn(raw_by_period[period]) for period in periods}
 
+        proj_periods = inputs.projection_period_columns
+        if self._current_statement == "IS" and proj_periods:
+            ms_revenue, ms_ebitda = self._get_ms_revenue_ebitda(inputs)
+            hist_only = self._get_periods_historical_only(inputs)
+            proj_values = resolve_projection_dollars(
+                historical_periods=hist_only,
+                projection_periods=proj_periods,
+                hist_revenue={p: raw_by_period[p].get("revenue") for p in hist_only},
+                hist_gross_profit={p: calc_by_period[p].get("gross_profit") for p in hist_only},
+                hist_ebitda={p: calc_by_period[p].get("ebitda") for p in hist_only},
+                is_public=True,
+                ms_revenue=ms_revenue,
+                ms_ebitda=ms_ebitda,
+                projection_data=inputs.projection_data,
+            )
+            for period, vals in proj_values.items():
+                raw_by_period.setdefault(period, {})
+                calc_by_period.setdefault(period, {})
+                raw_by_period[period]["revenue"] = vals["revenue"]
+                raw_by_period[period]["depreciation"] = vals["da"]
+                calc_by_period[period]["gross_profit"] = vals["gross_profit"]
+                calc_by_period[period]["ebitda"] = vals["ebitda"]
+                raw_by_period[period]["capex"] = vals["capex"]
+
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
         grid.setRowStretch(len(lines) + 2, 1)
@@ -333,6 +386,30 @@ class SubjectFinancialsPage(QWidget):
         compute_fn = compute_is_calculated if self._current_statement == "IS" else compute_bs_calculated
         calc_by_period = {period: compute_fn(raw_by_period[period]) for period in periods}
 
+        proj_periods = inputs.projection_period_columns
+        if self._current_statement == "IS" and proj_periods:
+            ms_revenue, ms_ebitda = self._get_ms_revenue_ebitda(inputs)
+            hist_only = self._get_periods_historical_only(inputs)
+            proj_values = resolve_projection_dollars(
+                historical_periods=hist_only,
+                projection_periods=proj_periods,
+                hist_revenue={p: raw_by_period[p].get("revenue") for p in hist_only},
+                hist_gross_profit={p: calc_by_period[p].get("gross_profit") for p in hist_only},
+                hist_ebitda={p: calc_by_period[p].get("ebitda") for p in hist_only},
+                is_public=True,
+                ms_revenue=ms_revenue,
+                ms_ebitda=ms_ebitda,
+                projection_data=inputs.projection_data,
+            )
+            for period, vals in proj_values.items():
+                raw_by_period.setdefault(period, {})
+                calc_by_period.setdefault(period, {})
+                raw_by_period[period]["revenue"] = vals["revenue"]
+                raw_by_period[period]["depreciation"] = vals["da"]
+                calc_by_period[period]["gross_profit"] = vals["gross_profit"]
+                calc_by_period[period]["ebitda"] = vals["ebitda"]
+                raw_by_period[period]["capex"] = vals["capex"]
+        
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
         grid.setRowStretch(len(lines) + 2, 1)

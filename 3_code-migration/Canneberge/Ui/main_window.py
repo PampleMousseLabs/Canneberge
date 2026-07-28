@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
             get_private_financials_callback=self._get_private_financials,
+            get_marketscreener_results_callback=self._get_marketscreener_results,
         )
 
         self.tabs.addTab(self.home_page, "Home")
