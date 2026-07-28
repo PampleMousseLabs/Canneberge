@@ -116,12 +116,15 @@ class PrivateFinancialsInputPage(QDialog):
         self._build_ui()
         self._load_data()
 
-    def _get_periods(self) -> list:
+    def _get_periods(self, stmt: str) -> list:
         """
         Returns ordered period column labels.
-        Historical: LFY-N ... LFY
-        Then: TTM (calculated)
-        Then: YTD prior, YTD current (far right)
+        IS: Historical (LFY-N ... LFY) + TTM (calculated via YTD formula)
+            + YTD prior, YTD current (far right).
+        BS: Historical (LFY-N ... LFY) + TTM only. No YTD columns — BS is
+            a snapshot, not a flow, so there's no YTD-based TTM formula
+            for it. TTM is a directly-entered input here, same as every
+            other historical period.
         NFY/NFY+1/NFY+2 removed — those live in the Projection Module popup.
         """
         hist = []
@@ -129,9 +132,11 @@ class PrivateFinancialsInputPage(QDialog):
             hist.append(f"LFY-{i}")
         hist.append("LFY")
 
+        if stmt == "BS":
+            return hist + ["TTM"]
+
         ytd_prior, ytd_current = self._get_ytd_labels()
         ytd = [ytd_prior, ytd_current]
-
         return hist + ["TTM"] + ytd
 
     def _get_ytd_labels(self) -> tuple:
@@ -218,7 +223,7 @@ class PrivateFinancialsInputPage(QDialog):
         grid.setSpacing(2)
         grid.setContentsMargins(8, 8, 8, 8)
 
-        periods = self._get_periods()
+        periods = self._get_periods(stmt)
         ytd_prior, ytd_current = self._get_ytd_labels()
 
         # Header row
@@ -257,18 +262,21 @@ class PrivateFinancialsInputPage(QDialog):
             self._calc_labels[stmt][key] = {}
 
             for col_idx, period in enumerate(periods):
-                is_ttm = period == "TTM"
+                # TTM is only a forced calc column on IS (it's derived
+                # from the YTD formula there). On BS it's a plain input
+                # like every other historical period, unless the row
+                # itself is a calc row (a total).
+                is_ttm_calc = period == "TTM" and stmt == "IS"
                 is_ytd = period.startswith("YTD")
 
-                # TTM is always calculated, never an input
-                if is_calc or is_ttm:
+                if is_calc or is_ttm_calc:
                     val_lbl = QLabel("")
                     val_lbl.setAlignment(
                         Qt.AlignmentFlag.AlignRight |
                         Qt.AlignmentFlag.AlignVCenter
                     )
                     style = BOLD_STYLE if bold else ""
-                    if is_ttm:
+                    if is_ttm_calc:
                         style += " color: #555555;"
                     val_lbl.setStyleSheet(style)
                     grid.addWidget(val_lbl, row, col_idx + 1)
@@ -303,8 +311,8 @@ class PrivateFinancialsInputPage(QDialog):
 
     def _load_data(self):
         """Populate input fields from working copy."""
-        periods = self._get_periods()
         for stmt, lines in [("IS", IS_LINES), ("BS", BS_LINES)]:
+            periods = self._get_periods(stmt)
             data = (self._working.is_data if stmt == "IS"
                     else self._working.bs_data)
             for key, label, is_calc, bold in lines:
@@ -342,7 +350,7 @@ class PrivateFinancialsInputPage(QDialog):
 
     def _recalculate(self, stmt: str):
         """Recompute all calculated rows for given statement."""
-        periods = self._get_periods()
+        periods = self._get_periods(stmt)
         ytd_prior, ytd_current = self._get_ytd_labels()
 
         if stmt == "IS":
@@ -496,12 +504,13 @@ class PrivateFinancialsInputPage(QDialog):
     def _collect_data(self) -> PrivateFinancials:
         """Read all input and calc fields into a fresh PrivateFinancials."""
         pf = PrivateFinancials()
-        periods = self._get_periods()
 
         for stmt, lines in [("IS", IS_LINES), ("BS", BS_LINES)]:
+            periods = self._get_periods(stmt)
             for key, label, is_calc, bold in lines:
                 for period in periods:
-                    if is_calc or period == "TTM":
+                    is_ttm_calc = period == "TTM" and stmt == "IS"
+                    if is_calc or is_ttm_calc:
                         lbl = self._calc_labels[stmt].get(
                             key, {}
                         ).get(period)

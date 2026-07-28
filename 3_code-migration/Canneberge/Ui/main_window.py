@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
             get_private_financials_callback=self._get_private_financials,
-            get_marketscreener_results_callback=self._get_marketscreener_results,
+            get_projection_data_callback=self._get_projection_data,
         )
 
         self.tabs.addTab(self.home_page, "Home")
@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
 
     def _get_private_financials(self) -> PrivateFinancials:
         return self._private_financials
+
+    def _get_projection_data(self) -> ProjectionData:
+        return self._projection_data
 
     def get_subject_debt(self) -> float:
         return self.subject_financials_page.get_subject_debt()
@@ -287,9 +290,13 @@ class MainWindow(QMainWindow):
         return {
             "revenue":             dict(pd.revenue),
             "revenue_growth":      dict(pd.revenue_growth),
+            "gross_profit":        dict(pd.gross_profit),
             "gp_improvement":      dict(pd.gp_improvement),
+            "ebitda":              dict(pd.ebitda),
             "ebitda_improvement":  dict(pd.ebitda_improvement),
+            "da":                  dict(pd.da),
             "da_pct":              dict(pd.da_pct),
+            "capex":               dict(pd.capex),
             "capex_pct":           dict(pd.capex_pct),
             "last_edited_revenue": dict(pd.last_edited_revenue),
         }
@@ -300,9 +307,13 @@ class MainWindow(QMainWindow):
         pd = self._projection_data
         pd.revenue             = {k: v for k, v in state.get("revenue", {}).items()}
         pd.revenue_growth      = {k: v for k, v in state.get("revenue_growth", {}).items()}
+        pd.gross_profit        = {k: v for k, v in state.get("gross_profit", {}).items()}
         pd.gp_improvement      = {k: v for k, v in state.get("gp_improvement", {}).items()}
+        pd.ebitda              = {k: v for k, v in state.get("ebitda", {}).items()}
         pd.ebitda_improvement  = {k: v for k, v in state.get("ebitda_improvement", {}).items()}
+        pd.da                  = {k: v for k, v in state.get("da", {}).items()}
         pd.da_pct              = {k: v for k, v in state.get("da_pct", {}).items()}
+        pd.capex                = {k: v for k, v in state.get("capex", {}).items()}
         pd.capex_pct           = {k: v for k, v in state.get("capex_pct", {}).items()}
         pd.last_edited_revenue = {k: v for k, v in state.get("last_edited_revenue", {}).items()}
 

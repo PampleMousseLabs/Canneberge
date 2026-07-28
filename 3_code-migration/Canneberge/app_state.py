@@ -196,9 +196,13 @@ class ProjectionData:
     """
     revenue:               Dict[str, Optional[float]] = field(default_factory=dict)
     revenue_growth:        Dict[str, Optional[float]] = field(default_factory=dict)
+    gross_profit:          Dict[str, Optional[float]] = field(default_factory=dict)
     gp_improvement:        Dict[str, Optional[float]] = field(default_factory=dict)
+    ebitda:                Dict[str, Optional[float]] = field(default_factory=dict)
     ebitda_improvement:    Dict[str, Optional[float]] = field(default_factory=dict)
+    da:                    Dict[str, Optional[float]] = field(default_factory=dict)
     da_pct:                Dict[str, Optional[float]] = field(default_factory=dict)
+    capex:                 Dict[str, Optional[float]] = field(default_factory=dict)
     capex_pct:             Dict[str, Optional[float]] = field(default_factory=dict)
     last_edited_revenue:   Dict[str, Optional[str]]   = field(default_factory=dict)
 

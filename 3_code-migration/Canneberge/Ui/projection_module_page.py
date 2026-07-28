@@ -203,6 +203,13 @@ class ProjectionModulePage(QDialog):
 
         self._recalc_guard: bool = False
 
+        # Resolved dollar values per projection period, populated during
+        # _recalculate(). This is what actually gets persisted to
+        # ProjectionData on Save — the single source of truth Subject
+        # Financials reads from, so nothing downstream ever needs to
+        # touch MarketScreener again.
+        self._resolved: Dict[str, Dict[str, Optional[float]]] = {}
+
         self._build_ui()
         self._load_saved_data()
         self._recalculate()
@@ -696,6 +703,14 @@ class ProjectionModulePage(QDialog):
                 capex = _mul(rev, capex_pct)
                 self._set_label("capex", period, _fmt_dollars(capex))
 
+                self._resolved[period] = {
+                    "revenue": rev,
+                    "gross_profit": gp,
+                    "ebitda": ebitda,
+                    "da": da,
+                    "capex": capex,
+                }
+
         finally:
             self._recalc_guard = False
 
@@ -871,15 +886,29 @@ class ProjectionModulePage(QDialog):
             if last:
                 pd.last_edited_revenue[period] = last
 
+            # Resolved dollar values — the actual numbers Subject
+            # Financials and every downstream page (GT, GPC, DCF, NWC)
+            # should read. Sourced from self._resolved, populated by
+            # _recalculate(), not recomputed here.
+            resolved = self._resolved.get(period, {})
+            pd.gross_profit[period] = resolved.get("gross_profit")
+            pd.ebitda[period] = resolved.get("ebitda")
+            pd.da[period] = resolved.get("da")
+            pd.capex[period] = resolved.get("capex")
+
         return pd
 
     def _on_save(self):
         collected = self._collect_data()
         self._projection_data.revenue             = collected.revenue
         self._projection_data.revenue_growth      = collected.revenue_growth
-        self._projection_data.gp_improvement      = collected.gp_improvement
+        self._projection_data.gross_profit        = collected.gross_profit
+        self._projection_data.gp_improvement       = collected.gp_improvement
+        self._projection_data.ebitda               = collected.ebitda
         self._projection_data.ebitda_improvement  = collected.ebitda_improvement
+        self._projection_data.da                   = collected.da
         self._projection_data.da_pct              = collected.da_pct
+        self._projection_data.capex                = collected.capex
         self._projection_data.capex_pct           = collected.capex_pct
         self._projection_data.last_edited_revenue = collected.last_edited_revenue
         self.accept()
