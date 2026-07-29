@@ -220,13 +220,15 @@ class GPCPage(QWidget):
                  get_stockanalysis_results_callback,
                  get_marketscreener_results_callback,
                  get_private_financials_callback,
-                 get_subject_debt):
+                 get_subject_debt,
+                 get_subject_metric_value):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_stockanalysis_results_callback = get_stockanalysis_results_callback
         self._get_marketscreener_results_callback = get_marketscreener_results_callback
         self._get_private_financials_callback = get_private_financials_callback
         self._get_subject_debt = get_subject_debt
+        self._get_subject_metric_value = get_subject_metric_value
 
         # Per-column Custom Multiple state, keyed by column index.
         # When True, that column's ticker cells + subject cell are
@@ -783,6 +785,8 @@ class GPCPage(QWidget):
             self.selected_low_inputs[i].setVisible(visible)
             self.selected_high_inputs[i].setVisible(visible)
             self.weight_inputs[i].setVisible(visible)
+            self.indicated_bev_low_labels[i].setVisible(visible)
+            self.indicated_bev_high_labels[i].setVisible(visible)
             for row in range(MAX_ROWS):
                 self.tick_mult_labels[row][i].setVisible(
                     visible and not self._is_custom_multiple[i]
@@ -818,12 +822,9 @@ class GPCPage(QWidget):
                 grey = "color: grey;" if excluded else "color: black;"
 
                 self.tick_row_labels[row]["ticker"].setText(ticker)
-                # Company name isn't in this callback chain yet — left
-                # blank until GT/GPC gets a shared ticker->name lookup.
-                # TODO: wire company name once available (see home_page.py
-                # gpc_name_edits — that data currently lives only in the
-                # Home page UI, not in ProjectInputs).
-                self.tick_row_labels[row]["company"].setText("")
+                self.tick_row_labels[row]["company"].setText(
+                    inputs.gpc_company_names.get(ticker.upper(), "")
+                )
 
                 for lbl in self.tick_row_labels[row].values():
                     lbl.setStyleSheet(grey)
@@ -1035,11 +1036,13 @@ class GPCPage(QWidget):
         whichever GPC_METRICS entry is selected in that column's dropdown.
         Custom Multiple columns return None here — caller must read the
         editable CurrencyInputEdit directly instead.
-        """
-        # Line keys currently available on the private-company IS form.
-        # See app_state.py IS_LINES for the authoritative list.
-        PRIVATE_LINE_KEYS = {"revenue", "ebitda", "ebit"}
 
+        Every value — historical, TTM, or projected (NFY/NFY+1/NFY+2) —
+        is sourced through Subject Financials' get_metric_value, which is
+        the single source of truth for subject-company data regardless
+        of period or company status. This page no longer reads
+        StockAnalysis or PrivateFinancials directly for subject metrics.
+        """
         results = []
 
         for col_idx in range(n_cols):
@@ -1049,33 +1052,12 @@ class GPCPage(QWidget):
 
             metric_name = self.metric_combos[col_idx].currentText()
             metric = get_metric(metric_name)
-            val = None
 
             if metric is None:
                 results.append(None)
                 continue
 
-            if inputs.is_private:
-                pf = self._get_private_financials_callback()
-                if pf and metric.line_key in PRIVATE_LINE_KEYS:
-                    val = pf.get_is(metric.line_key, metric.period)
-
-            elif inputs.is_publicly_traded:
-                sa_results = self._get_stockanalysis_results_callback()
-                if sa_results:
-                    is_rows = sa_results.get("IS", [])
-                    ticker = inputs.subject_ticker.lower()
-                    for row in is_rows:
-                        if (str(row.get("Ticker", "")).lower() == ticker and
-                                str(row.get("Line Item", "")).lower() == metric.line_key):
-                            raw = row.get(metric.period)
-                            if raw is not None:
-                                try:
-                                    val = float(str(raw).replace(",", ""))
-                                except (ValueError, TypeError):
-                                    val = None
-                            break
-
+            val = self._get_subject_metric_value(metric.line_key, metric.period)
             results.append(val)
 
         return results

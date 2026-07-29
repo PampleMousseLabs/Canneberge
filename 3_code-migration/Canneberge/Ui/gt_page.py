@@ -174,12 +174,15 @@ class GTPage(QWidget):
     def __init__(self, get_project_inputs_callback,
                  get_stockanalysis_results_callback,
                  get_private_financials_callback,
-                 get_subject_debt):
+                 get_subject_debt,
+                 get_subject_metric_value):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_stockanalysis_results_callback = get_stockanalysis_results_callback
         self._get_private_financials_callback = get_private_financials_callback
         self._get_subject_debt = get_subject_debt
+        self._get_subject_metric_value = get_subject_metric_value
+
         self._build_ui()
         self._recalculate()
 
@@ -786,55 +789,22 @@ class GTPage(QWidget):
     def _get_subject_metrics(self, inputs, n_cols) -> list:
         """
         Returns subject company metric value per active column.
-        Reads from StockAnalysis results (public) or PrivateFinancials (private).
         Metric order matches METRICS list: TTM Revenue, TTM EBITDA, TTM EBIT.
+        Sourced through Subject Financials' get_metric_value — same
+        single source of truth GPC uses — rather than reading
+        StockAnalysis/PrivateFinancials directly.
         """
-        # Map metric label -> PrivateFinancials IS key
-        PRIVATE_KEY_MAP = {
-            "TTM Revenue": "revenue",
-            "TTM EBITDA":  "ebitda",
-            "TTM EBIT":    "ebit",
-        }
-
-        # Map metric label -> StockAnalysis line item name (lowercase)
-        PUBLIC_KEY_MAP = {
+        METRIC_LINE_KEYS = {
             "TTM Revenue": "revenue",
             "TTM EBITDA":  "ebitda",
             "TTM EBIT":    "ebit",
         }
 
         results = []
-
         for col_idx in range(n_cols):
             metric = self.metric_combos[col_idx].currentText()
-            val = None
-
-            if inputs.is_private:
-                pf = self._get_private_financials_callback()
-                key = PRIVATE_KEY_MAP.get(metric)
-                if key and pf:
-                    val = pf.get_is(key, "TTM")
-
-            elif inputs.is_publicly_traded:
-                sa_results = self._get_stockanalysis_results_callback()
-                if sa_results:
-                    is_rows = sa_results.get("IS", [])
-                    ticker = inputs.subject_ticker.lower()
-                    found_tickers = list(set(
-                        str(r.get("Ticker", "")).lower() for r in is_rows[:20]
-                    ))
-                    sa_key = PUBLIC_KEY_MAP.get(metric, "").lower()
-                    for row in is_rows:
-                        if (str(row.get("Ticker", "")).lower() == ticker and
-                                str(row.get("Line Item", "")).lower() == sa_key):
-                            raw = row.get("TTM")
-                            if raw is not None:
-                                try:
-                                    val = float(str(raw).replace(",", ""))
-                                except (ValueError, TypeError):
-                                    val = None
-                            break
-
+            line_key = METRIC_LINE_KEYS.get(metric)
+            val = self._get_subject_metric_value(line_key, "TTM") if line_key else None
             results.append(val)
 
         return results

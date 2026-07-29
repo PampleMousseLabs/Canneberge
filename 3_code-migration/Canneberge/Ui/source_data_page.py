@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QButtonGroup,
 )
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from Canneberge.Workers.source_data_worker import SourceDataWorker
 
@@ -24,6 +25,18 @@ class SourceDataPage(QWidget):
         "beta_vol": "Beta/Vol (Yahoo)",
     }
 
+    # Emitted every time any single worker reports a progress message,
+    # while a "refresh all" batch is in flight. Args: (completed_count,
+    # total_count, latest_status_message). Used by callers (e.g. the
+    # session-load progress dialog in main_window.py) that need to
+    # show batch-level progress, not just per-source status.
+    source_progress = pyqtSignal(int, int, str)
+
+    # Emitted once, when every source in a "refresh all" batch has
+    # finished (success or error) — not emitted for a single-source
+    # refresh triggered via one of the individual Refresh buttons.
+    all_sources_finished = pyqtSignal()
+
     def __init__(self, get_project_inputs_callback):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
@@ -31,6 +44,7 @@ class SourceDataPage(QWidget):
         self.all_results = {}
         self.current_source = "stockanalysis"
         self.current_statement = "IS"
+        self._pending_batch_sources = set()
         self._build_ui()
 
     def _build_ui(self):
@@ -123,6 +137,7 @@ class SourceDataPage(QWidget):
         self.vol_term_input.setVisible(show_beta_vol)
 
     def _on_refresh_all_clicked(self):
+        self._pending_batch_sources = set(self.SOURCES)
         for source in self.SOURCES:
             self._on_refresh_clicked(source)
 
@@ -175,6 +190,9 @@ class SourceDataPage(QWidget):
 
     def _on_progress(self, message):
         self.status_label.setText(message)
+        if self._pending_batch_sources:
+            completed = len(self.SOURCES) - len(self._pending_batch_sources)
+            self.source_progress.emit(completed, len(self.SOURCES), message)
 
     def _on_error(self, source, message):
         self.status_label.setText(
@@ -193,6 +211,15 @@ class SourceDataPage(QWidget):
 
     def _on_finished(self, source):
         self.refresh_buttons[source].setEnabled(True)
+        if source in self._pending_batch_sources:
+            self._pending_batch_sources.discard(source)
+            completed = len(self.SOURCES) - len(self._pending_batch_sources)
+            self.source_progress.emit(
+                completed, len(self.SOURCES),
+                f"{self.SOURCE_LABELS[source]} complete."
+            )
+            if not self._pending_batch_sources:
+                self.all_sources_finished.emit()
 
     def _count_rows(self, source, results):
         if source == "stockanalysis":

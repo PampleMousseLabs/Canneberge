@@ -467,3 +467,34 @@ class SubjectFinancialsPage(QWidget):
                 result[period] = raw_by_period[period].get(key)
 
         return result
+
+    def get_metric_value(self, key: str, period: str) -> Optional[float]:
+        """
+        Single entry point for any other page (GPC, future DCF) needing
+        one subject-company metric at one specific period — historical,
+        TTM, or a projection period (NFY, NFY+1, ...).
+
+        Historical/TTM: delegates to get_historical_line_values, which
+        already handles public/private branching and calc-row resolution.
+
+        Projection periods: reads directly from the Projection Module's
+        saved ProjectionData. Only revenue and ebitda are ever populated
+        there — gross_profit/da/capex exist in ProjectionData but have
+        no GPC_METRICS entry yet, and ebit is never projected (the
+        dialog has no EBIT driver), so this correctly returns None for
+        "ebit" at any forward period rather than guessing at one.
+        """
+        inputs = self.get_project_inputs()
+
+        if period in inputs.historical_period_columns + ["TTM"]:
+            return self.get_historical_line_values(key, "IS").get(period)
+
+        if period in inputs.projection_period_columns:
+            pd = self.get_projection_data()
+            if key == "revenue":
+                return pd.revenue.get(period)
+            if key == "ebitda":
+                return pd.ebitda.get(period)
+            return None
+
+        return None

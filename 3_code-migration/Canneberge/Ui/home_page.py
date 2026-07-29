@@ -429,6 +429,13 @@ class HomePage(QWidget):
                     ttm_ebit=ttm_ebit,
                 ))
 
+        gpc_company_names = {}
+        for ticker_edit, name_edit in zip(self.gpc_ticker_edits, self.gpc_name_edits):
+            ticker = ticker_edit.text().strip().upper()
+            name = name_edit.text().strip()
+            if ticker and name:
+                gpc_company_names[ticker] = name
+
         return ProjectInputs(
             client=self.client_input.text().strip(),
             subject_company_name=self.subject_name_input.text().strip(),
@@ -452,6 +459,7 @@ class HomePage(QWidget):
                     edit.text().strip() for edit in self.gpc_ticker_edits
                 )
             ),
+            gpc_company_names=gpc_company_names,
             gt_transactions=gt_transactions,
             historical_years=self.historical_years_spin.value(),
             projection_years=self.projection_years_spin.value(),

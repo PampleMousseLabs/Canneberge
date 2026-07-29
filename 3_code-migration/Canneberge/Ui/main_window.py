@@ -2,8 +2,9 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QTabWidget, QMenuBar, QMenu,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QProgressDialog
 )
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
 from Canneberge.Ui.home_page import HomePage
@@ -47,11 +48,19 @@ class MainWindow(QMainWindow):
             get_project_inputs_callback=self.home_page.get_project_inputs
         )
 
+        self.subject_financials_page = SubjectFinancialsPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_private_financials_callback=self._get_private_financials,
+            get_projection_data_callback=self._get_projection_data,
+        )
+
         self.gt_page = GTPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
             get_private_financials_callback=self._get_private_financials,
             get_subject_debt=self.get_subject_debt,
+            get_subject_metric_value=self._get_subject_metric_value,
         )
 
         self.gpc_page = GPCPage(
@@ -60,13 +69,7 @@ class MainWindow(QMainWindow):
             get_marketscreener_results_callback=self._get_marketscreener_results,
             get_private_financials_callback=self._get_private_financials,
             get_subject_debt=self.get_subject_debt,
-        )
-
-        self.subject_financials_page = SubjectFinancialsPage(
-            get_project_inputs_callback=self.home_page.get_project_inputs,
-            get_stockanalysis_results_callback=self._get_stockanalysis_results,
-            get_private_financials_callback=self._get_private_financials,
-            get_projection_data_callback=self._get_projection_data,
+            get_subject_metric_value=self._get_subject_metric_value,
         )
 
         self.tabs.addTab(self.home_page, "Home")
@@ -157,6 +160,12 @@ class MainWindow(QMainWindow):
 
     def _get_subject_historical_line(self, key: str) -> dict:
         return self.subject_financials_page.get_historical_line_values(key)
+
+    def _get_subject_historical_line(self, key: str) -> dict:
+        return self.subject_financials_page.get_historical_line_values(key)
+
+    def _get_subject_metric_value(self, key: str, period: str):
+        return self.subject_financials_page.get_metric_value(key, period)
 
     # ------------------------------------------------------------------
     # SAVE / LOAD
@@ -488,9 +497,46 @@ class MainWindow(QMainWindow):
         self.gt_page._recalculate()
         self.gpc_page._recalculate()
 
-        self._current_session_path = filepath
-        self.setWindowTitle(f"Canneberge — {filepath.stem}")
-        QMessageBox.information(
-            self, "Session Loaded",
-            f"Session loaded:\n{filepath.stem}"
+        # Block on a full source refresh before confirming the session
+        # is loaded. QProgressDialog.exec() runs its own local event
+        # loop, so it does NOT freeze Qt's signal processing — the
+        # SourceDataWorker QThreads keep running and their signals
+        # still reach _update_progress/_on_all_done while this dialog
+        # is up. No Cancel button: a partial refresh mid-batch would
+        # leave some sources stale with no clear recovery path, so
+        # canceling isn't offered here.
+        progress_dialog = QProgressDialog(
+            "Refreshing all sources...", None, 0, len(self.source_data_page.SOURCES), self
         )
+        progress_dialog.setWindowTitle("Loading Session")
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setValue(0)
+
+        def _update_progress(completed: int, total: int, message: str):
+            progress_dialog.setValue(completed)
+            pct = int((completed / total) * 100) if total else 0
+            progress_dialog.setLabelText(f"{message}\n\n{completed}/{total} sources complete ({pct}%)")
+
+        def _on_all_done():
+            try:
+                self.source_data_page.source_progress.disconnect(_update_progress)
+                self.source_data_page.all_sources_finished.disconnect(_on_all_done)
+            except TypeError:
+                pass  # already disconnected — harmless
+
+            progress_dialog.setValue(len(self.source_data_page.SOURCES))
+            progress_dialog.close()
+
+            self._current_session_path = filepath
+            self.setWindowTitle(f"Canneberge — {filepath.stem}")
+            QMessageBox.information(
+                self, "Session Loaded",
+                f"Session loaded:\n{filepath.stem}"
+            )
+
+        self.source_data_page.source_progress.connect(_update_progress)
+        self.source_data_page.all_sources_finished.connect(_on_all_done)
+
+        self.source_data_page._on_refresh_all_clicked()
+        progress_dialog.exec()

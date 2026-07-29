@@ -239,6 +239,7 @@ class ProjectInputs:
 
     # Market inputs
     gpc_tickers: List[str] = field(default_factory=list)
+    gpc_company_names: Dict[str, str] = field(default_factory=dict)
     gt_transactions: List[Transaction] = field(default_factory=list)
 
     # Projection controls
