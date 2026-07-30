@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
+
 from Canneberge.Calculations.gpc_metrics import (
     GPC_METRICS,
     CUSTOM_MULTIPLE_LABEL,
@@ -234,6 +236,7 @@ class GPCPage(QWidget):
         # When True, that column's ticker cells + subject cell are
         # editable widgets instead of computed labels.
         self._is_custom_multiple = [False] * MAX_COLS
+        self._chart_dialog = None
 
         self._build_ui()
         self._recalculate()
@@ -295,6 +298,23 @@ class GPCPage(QWidget):
         self.grid.addWidget(self.lbl_method,  r, COL_COMPANY, 1, 2)
         self.grid.addWidget(self.lbl_date,    r, COL_M_START, 1, 2)
         self._current_row += 1
+
+        r = self._current_row
+        self.chart_link = QLabel('<a href="#">GPC Multiples Range Chart →</a>')
+        self.chart_link.setStyleSheet("color: #1a4a8a;")
+        self.chart_link.linkActivated.connect(self._on_chart_link_clicked)
+        self.grid.addWidget(self.chart_link, r, COL_M_START, 1, 2)
+        self._current_row += 1
+
+    def _on_chart_link_clicked(self, _href=None):
+        first_open = self._chart_dialog is None
+        if first_open:
+            self._chart_dialog = GPCCandlestickChart(parent=self)
+        if first_open:
+            self._recalculate()  # push current data into the new dialog immediately
+        self._chart_dialog.show()
+        self._chart_dialog.raise_()
+        self._chart_dialog.activateWindow()
 
     def _build_controls(self):
         r = self._current_row
@@ -866,18 +886,34 @@ class GPCPage(QWidget):
             "Minimum":        lambda v: min(v),
         }
 
+        # Raw (unformatted) stat values per column, captured alongside
+        # the display-label loop below, for the candlestick chart —
+        # avoids re-parsing "3.81x"/"NA" strings back out of QLabels.
+        chart_max, chart_q3, chart_q1, chart_min = [], [], [], []
+
         for stat, func in stat_funcs.items():
             for col_idx in range(n_cols):
                 vals = multiples_per_col[col_idx]
+                result = None
                 if vals:
                     try:
+                        result = func(vals)
                         self.stat_label_widgets[stat][col_idx].setText(
-                            _fmt_multiple(func(vals))
+                            _fmt_multiple(result)
                         )
                     except Exception:
                         self.stat_label_widgets[stat][col_idx].setText("NA")
                 else:
                     self.stat_label_widgets[stat][col_idx].setText("NA")
+
+                if stat == "Maximum":
+                    chart_max.append(result)
+                elif stat == "Third Quartile":
+                    chart_q3.append(result)
+                elif stat == "First Quartile":
+                    chart_q1.append(result)
+                elif stat == "Minimum":
+                    chart_min.append(result)
 
         # Subject metrics — computed columns pull from StockAnalysis/Private,
         # Custom columns read the user-typed CurrencyInputEdit directly.
@@ -1029,6 +1065,14 @@ class GPCPage(QWidget):
         self.bridge_labels_high["bev_ctrl"].setText(
             _fmt_currency(bev_ctrl_high) if bev_ctrl_high is not None else "NA"
         )
+
+        chart_labels = [
+            self.metric_combos[i].currentText() for i in range(n_cols)
+        ]
+        if self._chart_dialog is not None:
+            self._chart_dialog.update_data(
+                chart_labels, chart_q3, chart_max, chart_min, chart_q1
+            )
 
     def _get_subject_metrics(self, inputs, n_cols) -> list:
         """

@@ -548,6 +548,7 @@ class GTPage(QWidget):
         self._current_row += 1
 
         bridge_rows = [
+            ("FMV BEV",                                            "fmv_bev_start"),
             ("Less: Total Debt",                                   "total_debt"),
             ("FMV of Equity (marketable, controlling)",            "eq_ctrl"),
             ("Less: Discount for Lack of Control",                 "dloc_pct"),
@@ -721,6 +722,13 @@ class GTPage(QWidget):
             _fmt_currency(fmv_low) if fmv_low is not None else "NA"
         )
         self.fmv_high_label.setText(
+            _fmt_currency(fmv_high) if fmv_high is not None else "NA"
+        )
+
+        self.bridge_labels_low["fmv_bev_start"].setText(
+            _fmt_currency(fmv_low) if fmv_low is not None else "NA"
+        )
+        self.bridge_labels_high["fmv_bev_start"].setText(
             _fmt_currency(fmv_high) if fmv_high is not None else "NA"
         )
 

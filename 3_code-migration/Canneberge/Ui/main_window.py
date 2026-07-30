@@ -12,6 +12,7 @@ from Canneberge.Ui.source_data_page import SourceDataPage
 from Canneberge.Ui.gt_page import GTPage
 from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
+from Canneberge.Ui.wacc_page import WACCPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.Ui.projection_module_page import ProjectionModulePage
 from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
@@ -72,10 +73,16 @@ class MainWindow(QMainWindow):
             get_subject_metric_value=self._get_subject_metric_value,
         )
 
+        self.wacc_page = WACCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_beta_vol_results_callback=self._get_beta_vol_results,
+        )
+
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
         self.tabs.addTab(self.gt_page, "GT")
         self.tabs.addTab(self.gpc_page, "GPC")
+        self.tabs.addTab(self.wacc_page, "WACC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -116,6 +123,8 @@ class MainWindow(QMainWindow):
             self.gt_page._recalculate()
         if self.tabs.widget(index) is self.gpc_page:
             self.gpc_page._recalculate()
+        if self.tabs.widget(index) is self.wacc_page:
+            self.wacc_page._recalculate()
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()
@@ -148,6 +157,9 @@ class MainWindow(QMainWindow):
 
     def _get_marketscreener_results(self) -> list:
         return self.source_data_page.all_results.get("marketscreener", [])
+
+    def _get_beta_vol_results(self) -> list:
+        return self.source_data_page.all_results.get("beta_vol", [])
 
     def _get_private_financials(self) -> PrivateFinancials:
         return self._private_financials
