@@ -11,7 +11,7 @@ Row count is dynamic, driven by ProjectInputs.gpc_tickers (same source
 GPC page uses), capped at 15 slots to match the Home page's GPC grid.
 """
 
-from typing import Optional
+from typing import Optional, Dict
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -24,7 +24,14 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
 )
+
 from PyQt6.QtCore import Qt
+
+from Canneberge.Calculations.ratio_catalogue import (
+    compute_debt_to_tic_book,
+    compute_historic_capital_structure,
+    debt_to_equity_from_debt_to_tic,
+)
 
 # Beta Type + Beta Frequency -> matching column in the Beta/Vol (Yahoo)
 # Source Data results. Capital Structure is intentionally NOT part of
@@ -37,6 +44,13 @@ CAPITAL_STRUCTURE_OPTIONS = [
     "Historical 2 Yr. Average",
     "Historical 5 Year Average",
 ]
+
+# Capital Structure dropdown -> Debt/TIC column header text.
+CAPITAL_STRUCTURE_HEADER_MAP = {
+    "As of Valuation Date":       "Debt (Book) as a % of TIC",
+    "Historical 2 Yr. Average":   "2 Yr. Historic Capital Structure",
+    "Historical 5 Year Average":  "5 Yr. Historic Capital Structure",
+}
 
 BETA_COLUMN_MAP = {
     ("Raw Betas",      "2-Year Weekly"):  "2yr Raw",
@@ -101,6 +115,11 @@ def _fmt_beta(value: Optional[float]) -> str:
         return "NA"
     return f"{value:.2f}"
 
+def _fmt_pct(value: Optional[float]) -> str:
+    if value is None:
+        return "NA"
+    return f"{value * 100:.1f}%"
+    
 
 class WACCPage(QWidget):
     """
@@ -109,10 +128,12 @@ class WACCPage(QWidget):
     schema, scroll area, Exclude checkboxes per row.
     """
 
-    def __init__(self, get_project_inputs_callback, get_beta_vol_results_callback):
+    def __init__(self, get_project_inputs_callback, get_beta_vol_results_callback,
+                 get_stockanalysis_results_callback):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_beta_vol_results = get_beta_vol_results_callback
+        self._get_stockanalysis_results = get_stockanalysis_results_callback
         self._build_ui()
         self._recalculate()
 
@@ -240,12 +261,15 @@ class WACCPage(QWidget):
             COL_UNLEVERED_BETA:   "Unlevered Beta",
             COL_RELEVERED_BETA:   "Re-Levered Beta",
         }
+
+        self.header_labels: Dict[int, QLabel] = {}
         for col, text in header_texts.items():
             lbl = QLabel(text)
             lbl.setStyleSheet(HEADER_STYLE)
             lbl.setWordWrap(True)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.grid.addWidget(lbl, r, col)
+            self.header_labels[col] = lbl
 
         self._current_row += 1
 
@@ -351,6 +375,23 @@ class WACCPage(QWidget):
             if t:
                 beta_lookup[t] = row_data
 
+        capital_structure = self.capital_structure_combo.currentText()
+        self.header_labels[COL_DEBT_TIC].setText(
+            CAPITAL_STRUCTURE_HEADER_MAP.get(capital_structure, "Debt (Book) as a % of TIC")
+        )
+
+        sa_results = self._get_stockanalysis_results() or {}
+        bs_rows = sa_results.get("BS", [])
+        ratio_rows = sa_results.get("Ratios", [])
+
+        hist_periods = inputs.historical_period_columns + ["TTM"]
+        # Strict: if the window's exact period requirement isn't
+        # available (e.g. Historical Years set to 4 on Home page but
+        # 5 Yr. Average needs LFY-4), return None entirely — no
+        # silently-smaller-sample average.
+        two_yr_periods = hist_periods[-3:] if len(hist_periods) >= 3 else None
+        five_yr_periods = hist_periods if len(hist_periods) >= 6 else None
+
         for row in range(MAX_ROWS):
             if row < len(tickers):
                 ticker = tickers[row]
@@ -365,12 +406,34 @@ class WACCPage(QWidget):
                     beta_val = _to_float(row_data.get(beta_col))
                 self.tick_data_labels[row][COL_BETA].setText(_fmt_beta(beta_val))
 
+                if capital_structure == "Historical 2 Yr. Average":
+                    debt_tic_val = (
+                        compute_historic_capital_structure(bs_rows, ratio_rows, ticker, two_yr_periods)
+                        if two_yr_periods is not None else None
+                    )
+                elif capital_structure == "Historical 5 Year Average":
+                    debt_tic_val = (
+                        compute_historic_capital_structure(bs_rows, ratio_rows, ticker, five_yr_periods)
+                        if five_yr_periods is not None else None
+                    )
+                else:
+                    debt_tic_val = compute_debt_to_tic_book(bs_rows, ticker, "TTM")
+
+                self.tick_data_labels[row][COL_DEBT_TIC].setText(_fmt_pct(debt_tic_val))
+
+                debt_equity_val = debt_to_equity_from_debt_to_tic(debt_tic_val)
+                self.tick_data_labels[row][COL_DEBT_EQUITY].setText(_fmt_pct(debt_equity_val))
+
                 excluded = self.tick_exclude_checks[row].isChecked()
                 grey = "color: grey;" if excluded else "color: black;"
                 self.tick_row_labels[row]["ticker"].setStyleSheet(grey)
                 self.tick_row_labels[row]["company"].setStyleSheet(grey)
                 self.tick_data_labels[row][COL_BETA].setStyleSheet(grey)
+                self.tick_data_labels[row][COL_DEBT_TIC].setStyleSheet(grey)
+                self.tick_data_labels[row][COL_DEBT_EQUITY].setStyleSheet(grey)
             else:
                 self.tick_row_labels[row]["ticker"].setText("")
                 self.tick_row_labels[row]["company"].setText("")
                 self.tick_data_labels[row][COL_BETA].setText("-")
+                self.tick_data_labels[row][COL_DEBT_TIC].setText("-")
+                self.tick_data_labels[row][COL_DEBT_EQUITY].setText("-")

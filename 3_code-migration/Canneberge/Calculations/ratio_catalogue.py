@@ -23,13 +23,19 @@ PrivateFinancials, cached matrix) before calling in here.
 from typing import Optional, Dict
 
 
+import math
+
+
 def _to_float(raw) -> Optional[float]:
     if raw is None:
         return None
     try:
-        return float(str(raw).replace(",", ""))
+        val = float(str(raw).replace(",", ""))
     except (ValueError, TypeError):
         return None
+    if math.isnan(val) or math.isinf(val):
+        return None
+    return val
 
 
 def _div(a: Optional[float], b: Optional[float]) -> Optional[float]:
@@ -252,3 +258,134 @@ def compute_bs_calculations(
         "debt_free_nwc_incl_cash_pct_revenue": debt_free_nwc_pct_of_revenue(nwc_incl, revenue),
         "debt_free_nwc_excl_cash_pct_revenue": debt_free_nwc_pct_of_revenue(nwc_excl, revenue),
     }
+
+# ============================================================
+# CAPITAL STRUCTURE (Ratio Catalogue subsection — WACC page)
+# ============================================================
+# Two distinct capital-structure bases, per Ted:
+#   - Book basis: Total Debt / TIC (Book Value) — uses book equity,
+#     "As of Valuation Date" only, single period (TTM).
+#   - Market basis: Total Debt / MVIC (Market Value of Invested
+#     Capital) — uses Market Cap, averaged across TTM:LFY-1 (2yr) or
+#     TTM:LFY-4 (5yr) for the historical toggle options. Deliberately
+#     a different ratio than the book one — not a bug, confirmed.
+#
+# Debt (Book) as a % of Equity is NOT computed independently — it's
+# derived from whichever Debt/TIC-or-MVIC value is currently on
+# screen: Debt%Equity = Debt%TIC / (1 - Debt%TIC).
+
+from typing import List
+
+_CAPSTRUCT_BS_LINE_ITEMS = {
+    "current_ltd":   "current portion of long-term debt",
+    "st_debt":       "short-term debt",
+    "current_leases": "current portion of leases",
+    "lt_debt":       "long-term debt",
+    "lt_leases":     "long-term leases",
+    "cash":          "cash & equivalents",
+    "total_equity":  "shareholders' equity",
+}
+_MARKET_CAP_LINE_ITEM = "market cap"
+
+
+def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
+    """
+    Same pattern as gpc_multiples.py's _build_lookup — kept local
+    rather than imported, consistent with this codebase's existing
+    convention of not creating cross-module Calculations dependencies
+    for simple row-filtering helpers.
+    """
+    ticker_lower = ticker.strip().lower()
+    lookup: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        if str(row.get("Ticker", "")).strip().lower() != ticker_lower:
+            continue
+        key = str(row.get("Line Item", "")).strip().lower()
+        lookup[key] = {
+            k: v for k, v in row.items()
+            if k not in ("Ticker", "Key", "Line Item")
+        }
+    return lookup
+
+
+def _bs_dict_for_period(bs_rows: list, ticker: str, period: str) -> Dict[str, Optional[float]]:
+    lookup = _build_lookup(bs_rows, ticker)
+    result = {}
+    for key, label in _CAPSTRUCT_BS_LINE_ITEMS.items():
+        result[key] = _to_float(lookup.get(label, {}).get(period))
+    return result
+
+
+def _market_cap_for_period(ratio_rows: list, ticker: str, period: str) -> Optional[float]:
+    lookup = _build_lookup(ratio_rows, ticker)
+    return _to_float(lookup.get(_MARKET_CAP_LINE_ITEM, {}).get(period))
+
+
+def debt_to_tic_book_from_bs(bs: Dict[str, Optional[float]]) -> Optional[float]:
+    """Debt (Book) as a % of TIC — book basis. TIC includes cash."""
+    debt = total_debt(bs)
+    equity = bs.get("total_equity")
+    tic = tic_book_value(debt, equity)
+    return total_debt_to_tic(debt, tic)
+
+
+def market_value_invested_capital(
+    market_cap: Optional[float], debt: Optional[float]
+) -> Optional[float]:
+    if market_cap is None and debt is None:
+        return None
+    return (market_cap or 0.0) + (debt or 0.0)
+
+
+def debt_to_mvic(debt: Optional[float], mvic: Optional[float]) -> Optional[float]:
+    return _div(debt, mvic)
+
+
+def historic_average(
+    values: Dict[str, Optional[float]], periods: List[str]
+) -> Optional[float]:
+    present = [values[p] for p in periods if values.get(p) is not None]
+    if not present:
+        return None
+    return sum(present) / len(present)
+
+
+def debt_to_equity_from_debt_to_tic(
+    debt_pct_tic: Optional[float]
+) -> Optional[float]:
+    """Debt (Book) as a % of Equity = Debt%TIC / (1 - Debt%TIC)."""
+    if debt_pct_tic is None or debt_pct_tic == 1:
+        return None
+    return debt_pct_tic / (1 - debt_pct_tic)
+
+
+def compute_debt_to_tic_book(
+    bs_rows: list, ticker: str, period: str = "TTM"
+) -> Optional[float]:
+    """Book-basis Debt/TIC for one ticker at one period (default TTM)."""
+    bs = _bs_dict_for_period(bs_rows, ticker, period)
+    return debt_to_tic_book_from_bs(bs)
+
+
+def compute_debt_to_mvic(
+    bs_rows: list, ratio_rows: list, ticker: str, period: str
+) -> Optional[float]:
+    """Market-basis Debt/MVIC for one ticker at one period."""
+    bs = _bs_dict_for_period(bs_rows, ticker, period)
+    debt = total_debt(bs)
+    market_cap = _market_cap_for_period(ratio_rows, ticker, period)
+    mvic = market_value_invested_capital(market_cap, debt)
+    return debt_to_mvic(debt, mvic)
+
+
+def compute_historic_capital_structure(
+    bs_rows: list, ratio_rows: list, ticker: str, periods: List[str]
+) -> Optional[float]:
+    """
+    Average Debt/MVIC across the given periods. Caller supplies the
+    period list: 2yr = ["TTM", "LFY", "LFY-1"], 5yr = TTM through
+    LFY-4 (whatever historical_period_columns + ["TTM"] actually
+    contains for this session).
+    """
+    per_period = {p: compute_debt_to_mvic(bs_rows, ratio_rows, ticker, p) for p in periods}
+    return historic_average(per_period, periods)

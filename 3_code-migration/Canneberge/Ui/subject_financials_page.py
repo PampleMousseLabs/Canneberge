@@ -88,7 +88,7 @@ SA_KEY_MAP = {
     "total_assets": "total assets",
     "st_debt": "short-term debt",
     "current_ltd": "current portion of long-term debt",
-    "current_leases": "current portion of long-term leases",
+    "current_leases": "current portion of leases",
     "accounts_payable": "accounts payable",
     "accrued_expenses": "accrued expenses",
     "unearned_revenue": "unearned revenue",

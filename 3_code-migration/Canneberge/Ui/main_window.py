@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self.wacc_page = WACCPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_beta_vol_results_callback=self._get_beta_vol_results,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
         )
 
         self.tabs.addTab(self.home_page, "Home")
