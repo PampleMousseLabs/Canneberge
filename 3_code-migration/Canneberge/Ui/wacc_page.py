@@ -380,6 +380,7 @@ class WACCPage(QWidget):
         self.tick_exclude_checks = []
         self.tick_row_labels = []      # {"ticker": lbl, "company": lbl} per row
         self.tick_data_labels = []     # one QLabel per row per DATA_COLS entry
+        self.tick_num_labels = []
 
         for row in range(MAX_ROWS):
             r = self._current_row
@@ -392,6 +393,7 @@ class WACCPage(QWidget):
                                 alignment=Qt.AlignmentFlag.AlignCenter)
 
             num_lbl = QLabel(str(row + 1))
+            self.tick_num_labels.append(num_lbl)
             self.grid.addWidget(num_lbl, r, COL_NUM)
 
             ticker_lbl = QLabel("")
@@ -465,64 +467,88 @@ class WACCPage(QWidget):
 
         self._current_row += 1
 
-    def _add_note(self, row: int, note: str):
-        if not note:
-            return
-        note_lbl = QLabel(note)
-        note_lbl.setWordWrap(True)
-        note_lbl.setStyleSheet("color: #555555; font-style: italic;")
-        self.grid.addWidget(note_lbl, row, COL_DEBT_TIC, 1, 5)
+    LABEL_WIDTH = 260
+    VALUE_WIDTH = 80
+
+    def _row_container(self, r: int) -> QHBoxLayout:
+        row_layout = QHBoxLayout()
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        container = QWidget()
+        container.setLayout(row_layout)
+        self.grid.addWidget(container, r, COL_EXCLUDE, 1, 10)
+        return row_layout
+
+    def _note_or_stretch(self, row_layout: QHBoxLayout, note: str):
+        if note:
+            note_lbl = QLabel(note)
+            note_lbl.setWordWrap(True)
+            note_lbl.setStyleSheet("color: #555555; font-style: italic;")
+            row_layout.addWidget(note_lbl, 1)
+        else:
+            row_layout.addStretch()
 
     def _build_labeled_row(self, label_text: str, bold: bool = False, note: str = "") -> QLabel:
-        """One label (spanning cols 0-3) + one value QLabel (col COL_BETA)
-        + an optional static note further right (formula/source citation)."""
         r = self._current_row
+        row_layout = self._row_container(r)
+
         lbl = QLabel(label_text)
+        lbl.setFixedWidth(self.LABEL_WIDTH)
         if bold:
             lbl.setStyleSheet("font-weight: bold;")
-        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+        row_layout.addWidget(lbl)
 
-        val_lbl = _placeholder_label()
+        val_lbl = QLabel("-")
+        val_lbl.setFixedWidth(self.VALUE_WIDTH)
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if bold:
             val_lbl.setStyleSheet("font-weight: bold;")
-        self.grid.addWidget(val_lbl, r, COL_BETA)
+        row_layout.addWidget(val_lbl)
 
-        self._add_note(r, note)
+        self._note_or_stretch(row_layout, note)
 
         self._current_row += 1
         return val_lbl
 
     def _build_labeled_input_row(self, label_text: str, placeholder: str, note: str = "") -> "PctInputEdit":
         r = self._current_row
+        row_layout = self._row_container(r)
+
         lbl = QLabel(label_text)
-        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+        lbl.setFixedWidth(self.LABEL_WIDTH)
+        row_layout.addWidget(lbl)
 
         inp = PctInputEdit(placeholder=placeholder)
+        inp.setFixedWidth(self.VALUE_WIDTH)
         inp.editingFinished.connect(self._on_inputs_changed)
-        self.grid.addWidget(inp, r, COL_BETA)
+        row_layout.addWidget(inp)
 
-        self._add_note(r, note)
+        self._note_or_stretch(row_layout, note)
 
         self._current_row += 1
         return inp
 
     def _build_labeled_dropdown_row(self, label_text: str, options: list, note: str = "") -> "QComboBox":
-        """Label + a value QLabel (col COL_BETA, computed from the dropdown
-        selection) + the dropdown itself one column right (col COL_DEBT_EQUITY)."""
         r = self._current_row
-        lbl = QLabel(label_text)
-        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+        row_layout = self._row_container(r)
 
-        val_lbl = _placeholder_label()
-        self.grid.addWidget(val_lbl, r, COL_BETA)
+        lbl = QLabel(label_text)
+        lbl.setFixedWidth(self.LABEL_WIDTH)
+        row_layout.addWidget(lbl)
+
+        val_lbl = QLabel("-")
+        val_lbl.setFixedWidth(self.VALUE_WIDTH)
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row_layout.addWidget(val_lbl)
 
         combo = QComboBox()
         combo.addItems(options)
         combo.setStyleSheet(INPUT_STYLE)
+        combo.setFixedWidth(220)
         combo.currentIndexChanged.connect(self._on_inputs_changed)
-        self.grid.addWidget(combo, r, COL_DEBT_EQUITY, 1, 2)
+        row_layout.addWidget(combo)
 
-        self._add_note(r, note)
+        self._note_or_stretch(row_layout, note)
 
         self._current_row += 1
         return combo, val_lbl
@@ -604,7 +630,7 @@ class WACCPage(QWidget):
         self.grid.addWidget(_make_hrule(), self._current_row, COL_EXCLUDE, 1, 10)
         self._current_row += 1
 
-        self.lbl_wacc_rounded = self._build_labeled_row("WACC (Rounded)", bold=True)
+        self.lbl_wacc_rounded = self._build_labeled_row("WACC", bold=True)
 
     # ------------------------------------------------------------------
     # RECALCULATION — layout population only for now (ticker/company
@@ -657,6 +683,14 @@ class WACCPage(QWidget):
         stats_values: Dict[int, List[float]] = {col: [] for col in DATA_COLS}
 
         for row in range(MAX_ROWS):
+            row_visible = row < len(tickers)
+            self.tick_exclude_checks[row].setVisible(row_visible)
+            self.tick_num_labels[row].setVisible(row_visible)
+            self.tick_row_labels[row]["ticker"].setVisible(row_visible)
+            self.tick_row_labels[row]["company"].setVisible(row_visible)
+            for col in DATA_COLS:
+                self.tick_data_labels[row][col].setVisible(row_visible)
+
             if row < len(tickers):
                 ticker = tickers[row]
                 self.tick_row_labels[row]["ticker"].setText(ticker)
@@ -807,4 +841,6 @@ class WACCPage(QWidget):
         wacc = None
         if weighted_cost_of_equity is not None and weighted_cost_of_debt is not None:
             wacc = weighted_cost_of_equity + weighted_cost_of_debt
-        self.lbl_wacc_rounded.setText(_fmt_pct(wacc))
+        self.lbl_wacc_rounded.setText(
+            f"{wacc * 100:.4f}%" if wacc is not None else "NA"
+        )
