@@ -37,6 +37,20 @@ def _to_float(raw) -> Optional[float]:
         return None
     return val
 
+def _to_pct_float(raw) -> Optional[float]:
+    """Parses a percent-formatted string ('20.66%') into a decimal (0.2066)."""
+    if raw is None:
+        return None
+    text = str(raw).strip().replace(",", "").replace("%", "")
+    if not text:
+        return None
+    try:
+        val = float(text)
+    except (ValueError, TypeError):
+        return None
+    if math.isnan(val) or math.isinf(val):
+        return None
+    return val / 100.0
 
 def _div(a: Optional[float], b: Optional[float]) -> Optional[float]:
     if a is None or b is None or b == 0:
@@ -287,7 +301,6 @@ _CAPSTRUCT_BS_LINE_ITEMS = {
 }
 _MARKET_CAP_LINE_ITEM = "market cap"
 
-
 def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
     """
     Same pattern as gpc_multiples.py's _build_lookup — kept local
@@ -307,7 +320,6 @@ def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
         }
     return lookup
 
-
 def _bs_dict_for_period(bs_rows: list, ticker: str, period: str) -> Dict[str, Optional[float]]:
     lookup = _build_lookup(bs_rows, ticker)
     result = {}
@@ -315,11 +327,9 @@ def _bs_dict_for_period(bs_rows: list, ticker: str, period: str) -> Dict[str, Op
         result[key] = _to_float(lookup.get(label, {}).get(period))
     return result
 
-
 def _market_cap_for_period(ratio_rows: list, ticker: str, period: str) -> Optional[float]:
     lookup = _build_lookup(ratio_rows, ticker)
     return _to_float(lookup.get(_MARKET_CAP_LINE_ITEM, {}).get(period))
-
 
 def debt_to_tic_book_from_bs(bs: Dict[str, Optional[float]]) -> Optional[float]:
     """Debt (Book) as a % of TIC — book basis. TIC includes cash."""
@@ -328,18 +338,23 @@ def debt_to_tic_book_from_bs(bs: Dict[str, Optional[float]]) -> Optional[float]:
     tic = tic_book_value(debt, equity)
     return total_debt_to_tic(debt, tic)
 
-
 def market_value_invested_capital(
     market_cap: Optional[float], debt: Optional[float]
 ) -> Optional[float]:
-    if market_cap is None and debt is None:
+    """
+    MVIC = Market Cap + Total Debt. Requires BOTH inputs present — a
+    missing Market Cap does NOT mean $0 (the company almost certainly
+    wasn't publicly traded that period, or wasn't scraped), it means
+    unknown. Returning MVIC = Debt when Market Cap is missing produces
+    a fabricated Debt/MVIC = 100%, which looks like a real ratio but
+    isn't one.
+    """
+    if market_cap is None or debt is None:
         return None
-    return (market_cap or 0.0) + (debt or 0.0)
-
+    return market_cap + debt
 
 def debt_to_mvic(debt: Optional[float], mvic: Optional[float]) -> Optional[float]:
     return _div(debt, mvic)
-
 
 def historic_average(
     values: Dict[str, Optional[float]], periods: List[str]
@@ -349,7 +364,6 @@ def historic_average(
         return None
     return sum(present) / len(present)
 
-
 def debt_to_equity_from_debt_to_tic(
     debt_pct_tic: Optional[float]
 ) -> Optional[float]:
@@ -358,14 +372,12 @@ def debt_to_equity_from_debt_to_tic(
         return None
     return debt_pct_tic / (1 - debt_pct_tic)
 
-
 def compute_debt_to_tic_book(
     bs_rows: list, ticker: str, period: str = "TTM"
 ) -> Optional[float]:
     """Book-basis Debt/TIC for one ticker at one period (default TTM)."""
     bs = _bs_dict_for_period(bs_rows, ticker, period)
     return debt_to_tic_book_from_bs(bs)
-
 
 def compute_debt_to_mvic(
     bs_rows: list, ratio_rows: list, ticker: str, period: str
@@ -376,7 +388,6 @@ def compute_debt_to_mvic(
     market_cap = _market_cap_for_period(ratio_rows, ticker, period)
     mvic = market_value_invested_capital(market_cap, debt)
     return debt_to_mvic(debt, mvic)
-
 
 def compute_historic_capital_structure(
     bs_rows: list, ratio_rows: list, ticker: str, periods: List[str]
@@ -389,3 +400,30 @@ def compute_historic_capital_structure(
     """
     per_period = {p: compute_debt_to_mvic(bs_rows, ratio_rows, ticker, p) for p in periods}
     return historic_average(per_period, periods)
+
+_EFFECTIVE_TAX_RATE_LINE_ITEM = "effective tax rate"
+
+def compute_effective_tax_rate(
+    is_rows: list, ticker: str, fallback_rate: Optional[float] = None
+) -> Optional[float]:
+    """
+    Effective Tax Rate, in priority order:
+      1. 3-yr average of LFY, LFY-1, LFY-2 (all three required — TTM
+         deliberately excluded, tax filing cyclicality makes TTM
+         inconsistent as a standalone period; see Ted's note).
+      2. LFY alone, if the 3-yr average isn't available.
+      3. fallback_rate (the Home page's Tax Rate input), if neither
+         historical option is available.
+    """
+    lookup = _build_lookup(is_rows, ticker)
+    row_data = lookup.get(_EFFECTIVE_TAX_RATE_LINE_ITEM, {})
+
+    three_yr = [_to_pct_float(row_data.get(p)) for p in ("LFY", "LFY-1", "LFY-2")]
+    if all(v is not None for v in three_yr):
+        return sum(three_yr) / 3
+
+    lfy = _to_pct_float(row_data.get("LFY"))
+    if lfy is not None:
+        return lfy
+
+    return fallback_rate

@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_beta_vol_results_callback=self._get_beta_vol_results,
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_fred_results_callback=self._get_fred_results,
         )
 
         self.tabs.addTab(self.home_page, "Home")
@@ -162,6 +163,9 @@ class MainWindow(QMainWindow):
     def _get_beta_vol_results(self) -> list:
         return self.source_data_page.all_results.get("beta_vol", [])
 
+    def _get_fred_results(self) -> list:
+        return self.source_data_page.all_results.get("fred", [])
+
     def _get_private_financials(self) -> PrivateFinancials:
         return self._private_financials
 
@@ -183,6 +187,56 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # SAVE / LOAD
     # ------------------------------------------------------------------
+
+    def _collect_wacc_page_state(self) -> dict:
+        return {
+            "beta_type": self.wacc_page.beta_type_combo.currentText(),
+            "beta_frequency": self.wacc_page.beta_frequency_combo.currentText(),
+            "capital_structure": self.wacc_page.capital_structure_combo.currentText(),
+            "selected_debt_tic": self.wacc_page.selected_debt_tic_input.text(),
+            "selected_relevered_beta": self.wacc_page.selected_relevered_beta_input.text(),
+            "equity_risk_premium": self.wacc_page.input_equity_risk_premium.text(),
+            "size_premium": self.wacc_page.input_size_premium.text(),
+            "csrp": self.wacc_page.input_csrp.text(),
+            "pretax_debt_series": self.wacc_page.pretax_debt_combo.currentText(),
+            "excluded_rows": [
+                chk.isChecked() for chk in self.wacc_page.tick_exclude_checks
+            ],
+        }
+
+    def _apply_wacc_page_state(self, state: dict):
+        if not state:
+            return
+        wp = self.wacc_page
+
+        def _set_combo(combo, text):
+            if text:
+                idx = combo.findText(text)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+
+        _set_combo(wp.beta_type_combo, state.get("beta_type"))
+        _set_combo(wp.beta_frequency_combo, state.get("beta_frequency"))
+        _set_combo(wp.capital_structure_combo, state.get("capital_structure"))
+        _set_combo(wp.pretax_debt_combo, state.get("pretax_debt_series"))
+
+        if state.get("selected_debt_tic"):
+            wp.selected_debt_tic_input.setText(state["selected_debt_tic"])
+        if state.get("selected_relevered_beta"):
+            wp.selected_relevered_beta_input.setText(state["selected_relevered_beta"])
+        if state.get("equity_risk_premium"):
+            wp.input_equity_risk_premium.setText(state["equity_risk_premium"])
+        if state.get("size_premium"):
+            wp.input_size_premium.setText(state["size_premium"])
+        if state.get("csrp"):
+            wp.input_csrp.setText(state["csrp"])
+
+        for i, checked in enumerate(state.get("excluded_rows", [])):
+            if i < len(wp.tick_exclude_checks):
+                wp.tick_exclude_checks[i].setChecked(checked)
+
+        wp._recalculate()
+
 
     def _collect_gt_page_state(self) -> dict:
         return {
@@ -423,6 +477,7 @@ class MainWindow(QMainWindow):
         gt_state   = self._collect_gt_page_state()
         gpc_state  = self._collect_gpc_page_state()
         proj_state = self._collect_projection_page_state()
+        wacc_state = self._collect_wacc_page_state()
 
         try:
             path = save_session(
@@ -431,6 +486,7 @@ class MainWindow(QMainWindow):
                 gt_page_state=gt_state,
                 gpc_page_state=gpc_state,
                 projection_page_state=proj_state,
+                wacc_page_state=wacc_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -459,6 +515,7 @@ class MainWindow(QMainWindow):
         gt_state   = self._collect_gt_page_state()
         gpc_state  = self._collect_gpc_page_state()
         proj_state = self._collect_projection_page_state()
+        wacc_state = self._collect_wacc_page_state()
 
         try:
             saved_path = save_session(
@@ -467,6 +524,7 @@ class MainWindow(QMainWindow):
                 gt_page_state=gt_state,
                 gpc_page_state=gpc_state,
                 projection_page_state=proj_state,
+                wacc_page_state=wacc_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -505,6 +563,7 @@ class MainWindow(QMainWindow):
         self._apply_gt_page_state(data["gt_page_state"])
         self._apply_gpc_page_state(data["gpc_page_state"])
         self._apply_projection_page_state(data.get("projection_page_state", {}))
+        self._apply_wacc_page_state(data.get("wacc_page_state", {}))
 
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()

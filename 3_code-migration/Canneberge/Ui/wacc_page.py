@@ -11,7 +11,8 @@ Row count is dynamic, driven by ProjectInputs.gpc_tickers (same source
 GPC page uses), capped at 15 slots to match the Home page's GPC grid.
 """
 
-from typing import Optional, Dict
+import statistics
+from typing import Optional, Dict, List
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QGridLayout,
     QLabel,
+    QLineEdit,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -31,6 +33,7 @@ from Canneberge.Calculations.ratio_catalogue import (
     compute_debt_to_tic_book,
     compute_historic_capital_structure,
     debt_to_equity_from_debt_to_tic,
+    compute_effective_tax_rate,
 )
 
 # Beta Type + Beta Frequency -> matching column in the Beta/Vol (Yahoo)
@@ -50,6 +53,15 @@ CAPITAL_STRUCTURE_HEADER_MAP = {
     "As of Valuation Date":       "Debt (Book) as a % of TIC",
     "Historical 2 Yr. Average":   "2 Yr. Historic Capital Structure",
     "Historical 5 Year Average":  "5 Yr. Historic Capital Structure",
+}
+
+# FRED corporate-rate series available for Pre-Tax Cost of Debt.
+CORPORATE_RATE_SERIES = {
+    "ICE BofA US Corporate Master":   "BAMLC0A0CMEY",
+    "ICE BofA AAA US Corporate":      "BAMLC0A1CAAAEY",
+    "ICE BofA AA US Corporate":       "BAMLC0A2CAAEY",
+    "ICE BofA A US Corporate":        "BAMLC0A3CAEY",
+    "ICE BofA BBB US Corporate":      "BAMLC0A4CBBBEY",
 }
 
 BETA_COLUMN_MAP = {
@@ -101,6 +113,51 @@ def _placeholder_label() -> QLabel:
     lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     return lbl
 
+INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
+
+
+class PctInputEdit(QLineEdit):
+    """Editable percent input, formats ##.#% on focus-out."""
+    def __init__(self, placeholder="", parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder)
+        self.setStyleSheet(INPUT_STYLE)
+        self.setFixedWidth(W_DATA - 10)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.editingFinished.connect(self._format_value)
+
+    def _format_value(self):
+        val = _parse_pct_input(self.text())
+        if val is not None:
+            self.setText(f"{val * 100:.1f}%")
+
+
+class BetaInputEdit(QLineEdit):
+    """Editable beta input, formats X.XX on focus-out."""
+    def __init__(self, placeholder="", parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder)
+        self.setStyleSheet(INPUT_STYLE)
+        self.setFixedWidth(W_DATA - 10)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.editingFinished.connect(self._format_value)
+
+    def _format_value(self):
+        val = _to_float(self.text())
+        if val is not None:
+            self.setText(f"{val:.2f}")
+
+
+def _parse_pct_input(text: str) -> Optional[float]:
+    text = str(text).strip().replace(",", "").replace("%", "")
+    if not text:
+        return None
+    try:
+        val = float(text)
+    except (ValueError, TypeError):
+        return None
+    return val / 100.0 if abs(val) > 1 else val
+
 def _to_float(raw) -> Optional[float]:
     if raw is None:
         return None
@@ -109,6 +166,13 @@ def _to_float(raw) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+def _to_pct_float_local(raw) -> Optional[float]:
+    """FRED's LatestValue is a plain number meaning a percent (e.g. '4.98'
+    means 4.98%), not pre-divided — different shape than StockAnalysis's
+    '%'-suffixed strings, so this is intentionally separate from
+    _to_pct_float in ratio_catalogue.py."""
+    val = _to_float(raw)
+    return val / 100.0 if val is not None else None
 
 def _fmt_beta(value: Optional[float]) -> str:
     if value is None:
@@ -119,6 +183,42 @@ def _fmt_pct(value: Optional[float]) -> str:
     if value is None:
         return "NA"
     return f"{value * 100:.1f}%"
+
+def _quartile(values: list, q: float) -> float:
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    if n == 1:
+        return sorted_vals[0]
+    idx = q * (n - 1)
+    lo = int(idx)
+    hi = lo + 1
+    if hi >= n:
+        return sorted_vals[-1]
+    frac = idx - lo
+    return sorted_vals[lo] + frac * (sorted_vals[hi] - sorted_vals[lo])
+
+
+def _compute_unlevered_beta(
+    observed_beta: Optional[float], debt_pct_equity: Optional[float], tax_rate: Optional[float]
+) -> Optional[float]:
+    if observed_beta is None or debt_pct_equity is None or tax_rate is None:
+        return None
+    denom = 1 + debt_pct_equity * (1 - tax_rate)
+    if denom == 0:
+        return None
+    return observed_beta / denom
+
+
+def _compute_relevered_beta(
+    unlevered_beta: Optional[float], selected_debt_pct_tic: Optional[float],
+    selected_tax_rate: Optional[float]
+) -> Optional[float]:
+    if unlevered_beta is None or selected_debt_pct_tic is None or selected_tax_rate is None:
+        return None
+    if selected_debt_pct_tic == 1:
+        return None
+    factor = 1 + (selected_debt_pct_tic / (1 - selected_debt_pct_tic)) * (1 - selected_tax_rate)
+    return unlevered_beta * factor
     
 
 class WACCPage(QWidget):
@@ -129,11 +229,12 @@ class WACCPage(QWidget):
     """
 
     def __init__(self, get_project_inputs_callback, get_beta_vol_results_callback,
-                 get_stockanalysis_results_callback):
+                 get_stockanalysis_results_callback, get_fred_results_callback):
         super().__init__()
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_beta_vol_results = get_beta_vol_results_callback
         self._get_stockanalysis_results = get_stockanalysis_results_callback
+        self._get_fred_results = get_fred_results_callback
         self._build_ui()
         self._recalculate()
 
@@ -160,6 +261,9 @@ class WACCPage(QWidget):
         self._build_ticker_section()
         self._build_statistics_section()
         self._build_selected_section()
+        self._build_cost_of_equity_section()
+        self._build_cost_of_debt_section()
+        self._build_wacc_summary_section()
 
         self.grid.setRowStretch(self._current_row + 50, 1)
 
@@ -338,23 +442,178 @@ class WACCPage(QWidget):
     def _build_selected_section(self):
         r = self._current_row
         lbl = QLabel("Selected")
-        lbl.setStyleSheet("font-weight: bold; color: #c0392b;")
+        lbl.setStyleSheet("font-weight: bold; color: #6912b0;")
         self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 3)
 
-        self.selected_labels = {}
-        for col in DATA_COLS:
-            data_lbl = _placeholder_label()
-            data_lbl.setStyleSheet("font-weight: bold;")
-            self.grid.addWidget(data_lbl, r, col)
-            self.selected_labels[col] = data_lbl
+        # Only three cells are ever populated on this row: Debt%TIC and
+        # Re-Levered Beta are user-typed inputs; Effective Tax Rate is a
+        # read-only mirror of the Home page's Tax Rate field, never
+        # independently editable here. Observed Beta, Debt%Equity, and
+        # Unlevered Beta stay permanently blank — there's no single
+        # "target" figure for those three.
+        self.selected_debt_tic_input = PctInputEdit(placeholder="e.g. 25.0%")
+        self.selected_debt_tic_input.editingFinished.connect(self._on_inputs_changed)
+        self.grid.addWidget(self.selected_debt_tic_input, r, COL_DEBT_TIC)
+
+        self.selected_tax_rate_label = _placeholder_label()
+        self.selected_tax_rate_label.setStyleSheet("font-weight: bold;")
+        self.grid.addWidget(self.selected_tax_rate_label, r, COL_TAX_RATE)
+
+        self.selected_relevered_beta_input = BetaInputEdit(placeholder="e.g. 1.25")
+        self.selected_relevered_beta_input.editingFinished.connect(self._on_inputs_changed)
+        self.grid.addWidget(self.selected_relevered_beta_input, r, COL_RELEVERED_BETA)
 
         self._current_row += 1
+
+    def _add_note(self, row: int, note: str):
+        if not note:
+            return
+        note_lbl = QLabel(note)
+        note_lbl.setWordWrap(True)
+        note_lbl.setStyleSheet("color: #555555; font-style: italic;")
+        self.grid.addWidget(note_lbl, row, COL_DEBT_TIC, 1, 5)
+
+    def _build_labeled_row(self, label_text: str, bold: bool = False, note: str = "") -> QLabel:
+        """One label (spanning cols 0-3) + one value QLabel (col COL_BETA)
+        + an optional static note further right (formula/source citation)."""
+        r = self._current_row
+        lbl = QLabel(label_text)
+        if bold:
+            lbl.setStyleSheet("font-weight: bold;")
+        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+
+        val_lbl = _placeholder_label()
+        if bold:
+            val_lbl.setStyleSheet("font-weight: bold;")
+        self.grid.addWidget(val_lbl, r, COL_BETA)
+
+        self._add_note(r, note)
+
+        self._current_row += 1
+        return val_lbl
+
+    def _build_labeled_input_row(self, label_text: str, placeholder: str, note: str = "") -> "PctInputEdit":
+        r = self._current_row
+        lbl = QLabel(label_text)
+        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+
+        inp = PctInputEdit(placeholder=placeholder)
+        inp.editingFinished.connect(self._on_inputs_changed)
+        self.grid.addWidget(inp, r, COL_BETA)
+
+        self._add_note(r, note)
+
+        self._current_row += 1
+        return inp
+
+    def _build_labeled_dropdown_row(self, label_text: str, options: list, note: str = "") -> "QComboBox":
+        """Label + a value QLabel (col COL_BETA, computed from the dropdown
+        selection) + the dropdown itself one column right (col COL_DEBT_EQUITY)."""
+        r = self._current_row
+        lbl = QLabel(label_text)
+        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
+
+        val_lbl = _placeholder_label()
+        self.grid.addWidget(val_lbl, r, COL_BETA)
+
+        combo = QComboBox()
+        combo.addItems(options)
+        combo.setStyleSheet(INPUT_STYLE)
+        combo.currentIndexChanged.connect(self._on_inputs_changed)
+        self.grid.addWidget(combo, r, COL_DEBT_EQUITY, 1, 2)
+
+        self._add_note(r, note)
+
+        self._current_row += 1
+        return combo, val_lbl
+
+    def _build_cost_of_equity_section(self):
+        self.grid.addWidget(
+            _make_section_label("Cost of Equity (Ke) - MCAPM Method"),
+            self._current_row, COL_EXCLUDE, 1, 10
+        )
+        self._current_row += 1
+
+        self.lbl_risk_free_rate = self._build_labeled_row(
+            "Risk-Free Rate (Rf)",
+            note="The risk-free rate is based on the yield of 20-year constant "
+                 "maturity U.S. Treasury bonds per FRED."
+        )
+        self.lbl_relevered_beta_display = self._build_labeled_row(
+            "Re-Levered Beta (Be)",
+            note="Be = Ba x [ 1 + (Wd / We) x ( 1 - T) ]"
+        )
+        self.input_equity_risk_premium = self._build_labeled_input_row(
+            "Equity Risk Premium (Rm - Rf)", "e.g. 5.0%", note="Kroll"
+        )
+        self.lbl_adjusted_erp = self._build_labeled_row(
+            "Adjusted Equity Risk Premium", note="(Rm - Rf)"
+        )
+        self.input_size_premium = self._build_labeled_input_row(
+            "Size Premium (SP)", "e.g. 0.0%"
+        )
+        self.input_csrp = self._build_labeled_input_row(
+            "Company Specific Risk Premium (CSRP)", "e.g. 5.0%",
+            note="The company specific premium takes into account company-specific "
+                 "risks including the uncertainty of achieving the financial projections."
+        )
+        self.lbl_cost_of_equity = self._build_labeled_row(
+            "Cost of Equity", bold=True,
+            note="Ke = Rf + Be (Rm - Rf) + SP + CSRP"
+        )
+
+        self.grid.addWidget(QLabel(""), self._current_row, 0)
+        self._current_row += 1
+
+    def _build_cost_of_debt_section(self):
+        self.grid.addWidget(
+            _make_section_label("After-Tax Cost of Debt (Kd)"),
+            self._current_row, COL_EXCLUDE, 1, 10
+        )
+        self._current_row += 1
+
+        self.pretax_debt_combo, self.lbl_pretax_cost_of_debt = self._build_labeled_dropdown_row(
+            "Pre-Tax Cost of Debt", list(CORPORATE_RATE_SERIES.keys())
+        )
+        self.lbl_tax_rate_kd = self._build_labeled_row("Tax Rate (T)")
+        self.lbl_after_tax_cost_of_debt = self._build_labeled_row(
+            "After-Tax Cost of Debt", bold=True, note="Kd = Kd (1 - T)"
+        )
+
+        self.grid.addWidget(QLabel(""), self._current_row, 0)
+        self._current_row += 1
+
+    def _build_wacc_summary_section(self):
+        self.grid.addWidget(
+            _make_section_label("Weighted Average Cost of Capital"),
+            self._current_row, COL_EXCLUDE, 1, 10
+        )
+        self._current_row += 1
+
+        self.lbl_equity_pct_capital = self._build_labeled_row("Equity % of Capital (We)")
+        self.lbl_cost_of_equity_ref = self._build_labeled_row("Cost of Equity (Ke)")
+        self.lbl_weighted_cost_of_equity = self._build_labeled_row("Weighted Cost of Equity")
+
+        self.grid.addWidget(QLabel(""), self._current_row, 0)
+        self._current_row += 1
+
+        self.lbl_debt_pct_capital = self._build_labeled_row("Debt % of Capital (Wd)")
+        self.lbl_cost_of_debt_ref = self._build_labeled_row("Cost of Debt (Kd)")
+        self.lbl_weighted_cost_of_debt = self._build_labeled_row("Weighted Cost of Debt")
+
+        self.grid.addWidget(_make_hrule(), self._current_row, COL_EXCLUDE, 1, 10)
+        self._current_row += 1
+
+        self.lbl_wacc_rounded = self._build_labeled_row("WACC (Rounded)", bold=True)
 
     # ------------------------------------------------------------------
     # RECALCULATION — layout population only for now (ticker/company
     # name), no formulas wired. Every DATA_COLS cell stays "-" until
     # each column's calculation is specified.
     # ------------------------------------------------------------------
+
+    def _on_inputs_changed(self):
+        self._recalculate()
 
     def _recalculate(self):
         inputs = self.get_project_inputs_callback()
@@ -383,14 +642,19 @@ class WACCPage(QWidget):
         sa_results = self._get_stockanalysis_results() or {}
         bs_rows = sa_results.get("BS", [])
         ratio_rows = sa_results.get("Ratios", [])
+        is_rows = sa_results.get("IS", [])
 
         hist_periods = inputs.historical_period_columns + ["TTM"]
-        # Strict: if the window's exact period requirement isn't
-        # available (e.g. Historical Years set to 4 on Home page but
-        # 5 Yr. Average needs LFY-4), return None entirely — no
-        # silently-smaller-sample average.
-        two_yr_periods = hist_periods[-3:] if len(hist_periods) >= 3 else None
-        five_yr_periods = hist_periods if len(hist_periods) >= 6 else None
+        two_yr_periods = hist_periods[-3:] if len(hist_periods) >= 3 else hist_periods
+        five_yr_periods = hist_periods
+
+        # Selected-row inputs — drive every row's Re-Levered Beta via the
+        # target capital structure, plus the Home-page-linked tax rate.
+        self.selected_tax_rate_label.setText(_fmt_pct(inputs.subject_tax_rate))
+        selected_debt_tic = _parse_pct_input(self.selected_debt_tic_input.text())
+        selected_tax_rate = inputs.subject_tax_rate
+
+        stats_values: Dict[int, List[float]] = {col: [] for col in DATA_COLS}
 
         for row in range(MAX_ROWS):
             if row < len(tickers):
@@ -407,33 +671,140 @@ class WACCPage(QWidget):
                 self.tick_data_labels[row][COL_BETA].setText(_fmt_beta(beta_val))
 
                 if capital_structure == "Historical 2 Yr. Average":
-                    debt_tic_val = (
-                        compute_historic_capital_structure(bs_rows, ratio_rows, ticker, two_yr_periods)
-                        if two_yr_periods is not None else None
+                    debt_tic_val = compute_historic_capital_structure(
+                        bs_rows, ratio_rows, ticker, two_yr_periods
                     )
                 elif capital_structure == "Historical 5 Year Average":
-                    debt_tic_val = (
-                        compute_historic_capital_structure(bs_rows, ratio_rows, ticker, five_yr_periods)
-                        if five_yr_periods is not None else None
+                    debt_tic_val = compute_historic_capital_structure(
+                        bs_rows, ratio_rows, ticker, five_yr_periods
                     )
                 else:
                     debt_tic_val = compute_debt_to_tic_book(bs_rows, ticker, "TTM")
-
                 self.tick_data_labels[row][COL_DEBT_TIC].setText(_fmt_pct(debt_tic_val))
 
                 debt_equity_val = debt_to_equity_from_debt_to_tic(debt_tic_val)
                 self.tick_data_labels[row][COL_DEBT_EQUITY].setText(_fmt_pct(debt_equity_val))
 
+                tax_rate_val = compute_effective_tax_rate(
+                    is_rows, ticker, fallback_rate=inputs.subject_tax_rate
+                )
+                self.tick_data_labels[row][COL_TAX_RATE].setText(_fmt_pct(tax_rate_val))
+
+                unlevered_beta_val = _compute_unlevered_beta(beta_val, debt_equity_val, tax_rate_val)
+                self.tick_data_labels[row][COL_UNLEVERED_BETA].setText(_fmt_beta(unlevered_beta_val))
+
+                relevered_beta_val = _compute_relevered_beta(
+                    unlevered_beta_val, selected_debt_tic, selected_tax_rate
+                )
+                self.tick_data_labels[row][COL_RELEVERED_BETA].setText(_fmt_beta(relevered_beta_val))
+
                 excluded = self.tick_exclude_checks[row].isChecked()
                 grey = "color: grey;" if excluded else "color: black;"
+                for col in [COL_BETA, COL_DEBT_TIC, COL_DEBT_EQUITY, COL_TAX_RATE,
+                            COL_UNLEVERED_BETA, COL_RELEVERED_BETA]:
+                    self.tick_data_labels[row][col].setStyleSheet(grey)
                 self.tick_row_labels[row]["ticker"].setStyleSheet(grey)
                 self.tick_row_labels[row]["company"].setStyleSheet(grey)
-                self.tick_data_labels[row][COL_BETA].setStyleSheet(grey)
-                self.tick_data_labels[row][COL_DEBT_TIC].setStyleSheet(grey)
-                self.tick_data_labels[row][COL_DEBT_EQUITY].setStyleSheet(grey)
+
+                if not excluded:
+                    for col, val in [
+                        (COL_BETA, beta_val), (COL_DEBT_TIC, debt_tic_val),
+                        (COL_DEBT_EQUITY, debt_equity_val), (COL_TAX_RATE, tax_rate_val),
+                        (COL_UNLEVERED_BETA, unlevered_beta_val), (COL_RELEVERED_BETA, relevered_beta_val),
+                    ]:
+                        if val is not None:
+                            stats_values[col].append(val)
             else:
                 self.tick_row_labels[row]["ticker"].setText("")
                 self.tick_row_labels[row]["company"].setText("")
-                self.tick_data_labels[row][COL_BETA].setText("-")
-                self.tick_data_labels[row][COL_DEBT_TIC].setText("-")
-                self.tick_data_labels[row][COL_DEBT_EQUITY].setText("-")
+                for col in DATA_COLS:
+                    self.tick_data_labels[row][col].setText("-")
+
+        stat_funcs = {
+            "Maximum":        lambda v: max(v),
+            "Third Quartile": lambda v: _quartile(v, 0.75),
+            "Average":        lambda v: sum(v) / len(v),
+            "Median":         lambda v: statistics.median(v),
+            "First Quartile": lambda v: _quartile(v, 0.25),
+            "Minimum":        lambda v: min(v),
+        }
+        beta_cols = {COL_BETA, COL_UNLEVERED_BETA, COL_RELEVERED_BETA}
+
+        for stat, func in stat_funcs.items():
+            for col in DATA_COLS:
+                vals = stats_values[col]
+                if vals:
+                    try:
+                        result = func(vals)
+                        text = _fmt_beta(result) if col in beta_cols else _fmt_pct(result)
+                    except Exception:
+                        text = "NA"
+                else:
+                    text = "NA"
+                self.stat_label_widgets[stat][col].setText(text)
+
+        # ------------------------------------------------------------
+        # Cost of Equity / Cost of Debt / WACC summary
+        # ------------------------------------------------------------
+        fred_rows = self._get_fred_results() or []
+        risk_free_rate = None
+        for row_data in fred_rows:
+            if str(row_data.get("SeriesID", "")).strip().upper() == "DGS20":
+                risk_free_rate = _to_pct_float_local(row_data.get("LatestValue"))
+                break
+        self.lbl_risk_free_rate.setText(_fmt_pct(risk_free_rate))
+
+        relevered_beta_selected = _to_float(self.selected_relevered_beta_input.text())
+        self.lbl_relevered_beta_display.setText(_fmt_beta(relevered_beta_selected))
+
+        erp = _parse_pct_input(self.input_equity_risk_premium.text())
+        adjusted_erp = (
+            relevered_beta_selected * erp
+            if relevered_beta_selected is not None and erp is not None else None
+        )
+        self.lbl_adjusted_erp.setText(_fmt_pct(adjusted_erp))
+
+        size_premium = _parse_pct_input(self.input_size_premium.text())
+        csrp = _parse_pct_input(self.input_csrp.text())
+
+        cost_of_equity = None
+        if None not in (risk_free_rate, adjusted_erp, size_premium, csrp):
+            cost_of_equity = risk_free_rate + adjusted_erp + size_premium + csrp
+        self.lbl_cost_of_equity.setText(_fmt_pct(cost_of_equity))
+
+        selected_series_label = self.pretax_debt_combo.currentText()
+        selected_series_id = CORPORATE_RATE_SERIES.get(selected_series_label)
+        pretax_cost_of_debt = None
+        for row_data in fred_rows:
+            if str(row_data.get("SeriesID", "")).strip().upper() == selected_series_id:
+                pretax_cost_of_debt = _to_pct_float_local(row_data.get("LatestValue"))
+                break
+        self.lbl_pretax_cost_of_debt.setText(_fmt_pct(pretax_cost_of_debt))
+        self.lbl_tax_rate_kd.setText(_fmt_pct(selected_tax_rate))
+
+        after_tax_cost_of_debt = None
+        if pretax_cost_of_debt is not None and selected_tax_rate is not None:
+            after_tax_cost_of_debt = pretax_cost_of_debt * (1 - selected_tax_rate)
+        self.lbl_after_tax_cost_of_debt.setText(_fmt_pct(after_tax_cost_of_debt))
+
+        we = 1 - selected_debt_tic if selected_debt_tic is not None else None
+        wd = selected_debt_tic
+
+        self.lbl_equity_pct_capital.setText(_fmt_pct(we))
+        self.lbl_cost_of_equity_ref.setText(_fmt_pct(cost_of_equity))
+        weighted_cost_of_equity = (
+            we * cost_of_equity if we is not None and cost_of_equity is not None else None
+        )
+        self.lbl_weighted_cost_of_equity.setText(_fmt_pct(weighted_cost_of_equity))
+
+        self.lbl_debt_pct_capital.setText(_fmt_pct(wd))
+        self.lbl_cost_of_debt_ref.setText(_fmt_pct(after_tax_cost_of_debt))
+        weighted_cost_of_debt = (
+            wd * after_tax_cost_of_debt if wd is not None and after_tax_cost_of_debt is not None else None
+        )
+        self.lbl_weighted_cost_of_debt.setText(_fmt_pct(weighted_cost_of_debt))
+
+        wacc = None
+        if weighted_cost_of_equity is not None and weighted_cost_of_debt is not None:
+            wacc = weighted_cost_of_equity + weighted_cost_of_debt
+        self.lbl_wacc_rounded.setText(_fmt_pct(wacc))

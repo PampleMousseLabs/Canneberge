@@ -24,6 +24,7 @@ def save_session(
     gt_page_state: dict,
     gpc_page_state: dict,
     projection_page_state: dict,
+    wacc_page_state: dict,
     filepath: Optional[Path] = None,
 ) -> Path:
     """
@@ -96,6 +97,7 @@ def save_session(
         "gt_page_state":         gt_page_state,
         "gpc_page_state":        gpc_page_state,
         "projection_page_state": projection_page_state,
+        "wacc_page_state":       wacc_page_state,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -113,6 +115,7 @@ def load_session(filepath: Path) -> dict:
         gt_page_state           (dict)
         gpc_page_state          (dict)
         projection_page_state   (dict)
+        wacc_page_state         (dict)
     """
     with open(filepath, "r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -122,6 +125,7 @@ def load_session(filepath: Path) -> dict:
     gt_raw   = payload.get("gt_page_state", {})
     gpc_raw  = payload.get("gpc_page_state", {})
     proj_raw = payload.get("projection_page_state", {})
+    wacc_raw = payload.get("wacc_page_state", {})
 
     pf = PrivateFinancials(
         is_data=pf_raw.get("is_data", {}),
@@ -134,6 +138,7 @@ def load_session(filepath: Path) -> dict:
         "gt_page_state":         gt_raw,
         "gpc_page_state":        gpc_raw,
         "projection_page_state": proj_raw,
+        "wacc_page_state":       wacc_raw,
     }
 
 
