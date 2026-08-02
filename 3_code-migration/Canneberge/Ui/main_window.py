@@ -13,6 +13,7 @@ from Canneberge.Ui.gt_page import GTPage
 from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.wacc_page import WACCPage
+from Canneberge.Ui.dcf_page import DCFPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.Ui.projection_module_page import ProjectionModulePage
 from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
@@ -80,11 +81,20 @@ class MainWindow(QMainWindow):
             get_fred_results_callback=self._get_fred_results,
         )
 
+        self.dcf_page = DCFPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_wacc_value_callback=self._get_wacc_value, 
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_projection_data_callback=self._get_projection_data,
+            update_projection_callback=self._update_projection_controls,
+        )
+
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
         self.tabs.addTab(self.gt_page, "GT")
         self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.wacc_page, "WACC")
+        self.tabs.addTab(self.dcf_page, "DCF")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -127,6 +137,8 @@ class MainWindow(QMainWindow):
             self.gpc_page._recalculate()
         if self.tabs.widget(index) is self.wacc_page:
             self.wacc_page._recalculate()
+        if self.tabs.widget(index) is self.dcf_page:
+            self.dcf_page._recalculate()
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()
@@ -140,7 +152,7 @@ class MainWindow(QMainWindow):
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
-
+            self.dcf_page._recalculate()
     def _open_projection_module_dialog(self):
         dialog = ProjectionModulePage(
             projection_data=self._projection_data,
@@ -153,7 +165,7 @@ class MainWindow(QMainWindow):
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
-
+            self.dcf_page._recalculate()
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
 
@@ -172,6 +184,11 @@ class MainWindow(QMainWindow):
     def _get_projection_data(self) -> ProjectionData:
         return self._projection_data
 
+    def _update_projection_controls(self, hist_years: int, proj_years: int):
+        """Called by DCF Page to update Home Page spinboxes (Last Edit Wins)."""
+        self.home_page.historical_years_spin.setValue(hist_years)
+        self.home_page.projection_years_spin.setValue(proj_years)
+
     def get_subject_debt(self) -> float:
         return self.subject_financials_page.get_subject_debt()
 
@@ -183,6 +200,18 @@ class MainWindow(QMainWindow):
 
     def _get_subject_metric_value(self, key: str, period: str):
         return self.subject_financials_page.get_metric_value(key, period)
+
+    def _get_wacc_value(self) -> Optional[float]:
+        """Extracts the final WACC float from the WACC page label."""
+        # Using the lbl_wacc_rounded from your wacc_page.py
+        text = self.wacc_page.lbl_wacc_rounded.text()
+        if text and text != "NA":
+            try:
+                # Handles strings like "12.1800%" -> float 0.1218
+                return float(text.strip().replace("%", "")) / 100.0
+            except ValueError:
+                pass
+        return None
 
     # ------------------------------------------------------------------
     # SAVE / LOAD
@@ -472,12 +501,20 @@ class MainWindow(QMainWindow):
 
         hp._on_company_status_changed(pi.get("company_status", ""))
 
+    def _collect_dcf_page_state(self) -> dict:
+        return self.dcf_page.collect_state()
+
+    def _apply_dcf_page_state(self, state: dict):
+        self.dcf_page.apply_state(state)
+
+
     def _on_save_session(self):
         inputs = self.home_page.get_project_inputs()
         gt_state   = self._collect_gt_page_state()
         gpc_state  = self._collect_gpc_page_state()
         proj_state = self._collect_projection_page_state()
         wacc_state = self._collect_wacc_page_state()
+        dcf_state = self._collect_dcf_page_state()
 
         try:
             path = save_session(
@@ -487,6 +524,7 @@ class MainWindow(QMainWindow):
                 gpc_page_state=gpc_state,
                 projection_page_state=proj_state,
                 wacc_page_state=wacc_state,
+                dcf_page_state=dcf_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -516,7 +554,7 @@ class MainWindow(QMainWindow):
         gpc_state  = self._collect_gpc_page_state()
         proj_state = self._collect_projection_page_state()
         wacc_state = self._collect_wacc_page_state()
-
+        dcf_state = self._collect_dcf_page_state()
         try:
             saved_path = save_session(
                 project_inputs=inputs,
@@ -525,6 +563,7 @@ class MainWindow(QMainWindow):
                 gpc_page_state=gpc_state,
                 projection_page_state=proj_state,
                 wacc_page_state=wacc_state,
+                dcf_page_state=dcf_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -564,6 +603,7 @@ class MainWindow(QMainWindow):
         self._apply_gpc_page_state(data["gpc_page_state"])
         self._apply_projection_page_state(data.get("projection_page_state", {}))
         self._apply_wacc_page_state(data.get("wacc_page_state", {}))
+        self._apply_dcf_page_state(data.get("dcf_page_state", {}))
 
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()
