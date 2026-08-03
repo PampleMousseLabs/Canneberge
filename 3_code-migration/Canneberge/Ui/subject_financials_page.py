@@ -19,6 +19,7 @@ from Canneberge.Calculations.subject_is_bs_calc import (
     compute_is_calculated,
     compute_bs_calculated,
     BS_DIRECT_PULL_KEYS,
+    _sub,
 )
 from Canneberge.app_state import ProjectInputs, PrivateFinancials, ProjectionData, IS_LINES, BS_LINES
 
@@ -74,6 +75,7 @@ SA_KEY_MAP = {
     "taxes": "provision for income taxes",
     "net_income": "net income",
     "capex": "capital expenditures",
+    "acquisitions": "cash acquisitions",
     "cash": "cash & equivalents",
     "st_investments": "short-term investments",
     "accounts_receivable": "accounts receivable",
@@ -111,6 +113,12 @@ SA_KEY_MAP = {
     "total_equity": "shareholders' equity",
     "total_liab_equity": "total liabilities & equity",
 }
+
+# These two IS_LINES keys are sourced from StockAnalysis's CFS statement,
+# not IS, so they need a separate lookup pass against results.get("CFS", []),
+# and are sign-flipped from source (StockAnalysis shows outflows negative;
+# Subject Financials displays them as positive expense-style lines).
+CFS_SOURCED_KEYS = {"capex", "acquisitions"}
 
 
 class SubjectFinancialsPage(QWidget):
@@ -206,15 +214,48 @@ class SubjectFinancialsPage(QWidget):
     # Shared row-building helpers
     # ------------------------------------------------------------------
 
-    def _gather_raw_public(self, lines, periods, lookup) -> Dict[str, Dict[str, Optional[float]]]:
+    def _build_cfs_lookup(self, ticker: str) -> Dict[str, Dict[str, str]]:
+        """CFS-statement rows for the subject ticker, keyed by lowercased
+        Line Item — same shape as the IS/BS lookups built in
+        _build_public_view, but pulled from results['CFS'] specifically.
+        Used for IS_LINES keys in CFS_SOURCED_KEYS (capex, acquisitions),
+        which don't live in the IS statement StockAnalysis returns."""
+        results = self.get_stockanalysis_results()
+        cfs_rows = results.get("CFS", []) if results else []
+        lookup: Dict[str, Dict[str, str]] = {}
+        for row in cfs_rows:
+            if str(row.get("Ticker", "")).lower() != ticker:
+                continue
+            key = str(row.get("Line Item", "")).strip().lower()
+            lookup[key] = {
+                k: v for k, v in row.items()
+                if k not in ("Ticker", "Key", "Line Item")
+            }
+        return lookup
+
+    def _gather_raw_public(self, lines, periods, lookup, ticker: str = "") -> Dict[str, Dict[str, Optional[float]]]:
         """Raw (non-calc) values per period, from StockAnalysis rows.
         BS_DIRECT_PULL_KEYS are pulled here too even though is_calc=True,
-        since those four are direct SA pulls, not local sums."""
+        since those four are direct SA pulls, not local sums.
+        CFS_SOURCED_KEYS (capex, acquisitions) are pulled from a separate
+        CFS lookup and sign-flipped, since StockAnalysis reports them as
+        negative outflows in that statement."""
         raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
+        cfs_lookup = (
+            self._build_cfs_lookup(ticker)
+            if ticker and self._current_statement == "IS"
+            else {}
+        )
         for key, label, is_calc, bold in lines:
             if is_calc and not (self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS):
                 continue
             sa_key = SA_KEY_MAP.get(key, "").lower()
+            if key in CFS_SOURCED_KEYS:
+                row_data = cfs_lookup.get(sa_key, {})
+                for period in periods:
+                    v = _parse_val(row_data.get(period, ""))
+                    raw_by_period[period][key] = -v if v is not None else None
+                continue
             row_data = lookup.get(sa_key, {})
             for period in periods:
                 raw_by_period[period][key] = _parse_val(row_data.get(period, ""))
@@ -308,7 +349,7 @@ class SubjectFinancialsPage(QWidget):
 
         self._build_header(grid, periods)
 
-        raw_by_period = self._gather_raw_public(lines, periods, lookup)
+        raw_by_period = self._gather_raw_public(lines, periods, lookup, ticker=ticker)
 
         compute_fn = compute_is_calculated if self._current_statement == "IS" else compute_bs_calculated
         calc_by_period = {period: compute_fn(raw_by_period[period]) for period in periods}
@@ -324,6 +365,12 @@ class SubjectFinancialsPage(QWidget):
                 calc_by_period[period]["gross_profit"] = pd.gross_profit.get(period)
                 calc_by_period[period]["ebitda"] = pd.ebitda.get(period)
                 raw_by_period[period]["capex"] = pd.capex.get(period)
+                calc_by_period[period]["cost_of_goods_sold"] = _sub(
+                    pd.revenue.get(period), pd.gross_profit.get(period)
+                )
+                calc_by_period[period]["operating_expenses"] = _sub(
+                    pd.gross_profit.get(period), pd.ebitda.get(period)
+                )
 
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
@@ -360,7 +407,13 @@ class SubjectFinancialsPage(QWidget):
                 calc_by_period[period]["gross_profit"] = pd.gross_profit.get(period)
                 calc_by_period[period]["ebitda"] = pd.ebitda.get(period)
                 raw_by_period[period]["capex"] = pd.capex.get(period)
-        
+                calc_by_period[period]["cost_of_goods_sold"] = _sub(
+                    pd.revenue.get(period), pd.gross_profit.get(period)
+                )
+                calc_by_period[period]["operating_expenses"] = _sub(
+                    pd.gross_profit.get(period), pd.ebitda.get(period)
+                )
+
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
         grid.setRowStretch(len(lines) + 2, 1)
@@ -441,10 +494,17 @@ class SubjectFinancialsPage(QWidget):
             for row in subject_rows:
                 lk = str(row.get("Line Item", "")).strip().lower()
                 lookup[lk] = {k: v for k, v in row.items() if k not in ("Ticker", "Key", "Line Item")}
+            cfs_lookup = self._build_cfs_lookup(ticker) if statement == "IS" else {}
             for k2, l2, c2, b2 in lines:
                 if c2 and not (statement == "BS" and k2 in BS_DIRECT_PULL_KEYS):
                     continue
                 sa_key = SA_KEY_MAP.get(k2, "").lower()
+                if k2 in CFS_SOURCED_KEYS:
+                    row_data = cfs_lookup.get(sa_key, {})
+                    for period in periods:
+                        v = _parse_val(row_data.get(period, ""))
+                        raw_by_period[period][k2] = -v if v is not None else None
+                    continue
                 row_data = lookup.get(sa_key, {})
                 for period in periods:
                     raw_by_period[period][k2] = _parse_val(row_data.get(period, ""))

@@ -202,16 +202,16 @@ class MainWindow(QMainWindow):
         return self.subject_financials_page.get_metric_value(key, period)
 
     def _get_wacc_value(self) -> Optional[float]:
-        """Extracts the final WACC float from the WACC page label."""
-        # Using the lbl_wacc_rounded from your wacc_page.py
-        text = self.wacc_page.lbl_wacc_rounded.text()
-        if text and text != "NA":
-            try:
-                # Handles strings like "12.1800%" -> float 0.1218
-                return float(text.strip().replace("%", "")) / 100.0
-            except ValueError:
-                pass
+        if hasattr(self, 'wacc_page'):
+            self.wacc_page._recalculate()
+            text = self.wacc_page.lbl_wacc_rounded.text()
+            if text and text != "NA":
+                try:
+                    return float(text.strip().replace("%", "")) / 100.0
+                except ValueError:
+                    pass
         return None
+
 
     # ------------------------------------------------------------------
     # SAVE / LOAD
