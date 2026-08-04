@@ -62,6 +62,34 @@ def _safe_div(a: Optional[float], b: Optional[float]) -> Optional[float]:
     return a / b
 
 
+def _sub_strict(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    """a - b, but None (not a partial number) if either side is
+    missing — used for Residual's Gross Profit/EBITDA, which are
+    real differences of two grown figures, not sums-with-0-fallback."""
+    if a is None or b is None:
+        return None
+    return a - b
+
+
+def _mul_strict(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    if a is None or b is None:
+        return None
+    return a * b
+
+
+def _parse_multiple(line_edit) -> Optional[float]:
+    """Parse a '10.00x' style multiple input. None if unset/unparseable."""
+    if line_edit is None:
+        return None
+    text = line_edit.text().strip().lower().replace("x", "")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def _parse_label_as_float(text: str) -> Optional[float]:
     """
     Parse a cell text back to a float. Handles formatted currency
@@ -532,6 +560,11 @@ class DCFPage(QWidget):
             # cells (and Residual) but NOT for historicals, and
             # populate both sides in _recalculate().
             is_other_adj_row = (label == "Less: Other Adjustments")
+            # Amortization is a normal pulled/calc row for every column
+            # except Residual, where Ted's instructions make it a user
+            # input (Terminal Value amortization has no source to pull
+            # from — nothing upstream projects it).
+            is_amort_row = (label == "Amortization")
 
             self._calc_labels[idx] = {}
             self._input_fields[idx] = {}
@@ -540,7 +573,13 @@ class DCFPage(QWidget):
                 grid_col = self._grid_col(data_idx)
                 is_hist_col = self._is_historical[data_idx]
 
-                if is_other_adj_row and not is_hist_col:
+                col_label = self._headers[data_idx]
+                make_input = (
+                    (is_other_adj_row and not is_hist_col)
+                    or (is_amort_row and col_label == "Residual")
+                )
+
+                if make_input:
                     inp = QLineEdit()
                     inp.setStyleSheet(INPUT_STYLE)
                     inp.setFixedWidth(COL_WIDTH - 10)
@@ -620,7 +659,17 @@ class DCFPage(QWidget):
                 except (IndexError, ValueError, TypeError):
                     result[label] = ""
 
-        result["Residual"] = self.res_year_input.text().strip() if hasattr(self, "res_year_input") else ""
+        # Residual FYE = Final Projection Period's year + 1 — there's
+        # no more standalone "Residual Year" input to read (deleted
+        # per Ted's Terminal Value box redesign); Residual is defined
+        # as the year immediately after the last discrete projection.
+        final_proj_year_str = None
+        if inputs.projection_period_columns:
+            final_proj_year_str = result.get(inputs.projection_period_columns[-1])
+        try:
+            result["Residual"] = str(int(final_proj_year_str) + 1) if final_proj_year_str else ""
+        except (ValueError, TypeError):
+            result["Residual"] = ""
 
         return result
 
@@ -640,43 +689,46 @@ class DCFPage(QWidget):
         res_frame = QFrame()
         res_frame.setFrameShape(QFrame.Shape.StyledPanel)
         res_layout = QVBoxLayout()
-        res_layout.addWidget(QLabel("Residual Year Inputs", styleSheet=BOLD_STYLE))
+        res_layout.addWidget(QLabel("Terminal Value", styleSheet=BOLD_STYLE))
 
-        h_use = QHBoxLayout()
-        h_use.addWidget(QLabel("Use Residual Year:"))
-        self.res_use_combo = QComboBox()
-        self.res_use_combo.addItems(["Yes", "No"])
-        self.res_use_combo.setStyleSheet(INPUT_STYLE)
-        h_use.addWidget(self.res_use_combo)
-        res_layout.addLayout(h_use)
-
-        h_year = QHBoxLayout()
-        h_year.addWidget(QLabel("Residual Year:"))
-        self.res_year_input = QLineEdit("2035")
-        self.res_year_input.setStyleSheet(INPUT_STYLE)
-        self.res_year_input.setFixedWidth(60)
-        self.res_year_input.editingFinished.connect(self._recalculate)
-        h_year.addWidget(self.res_year_input)
-        res_layout.addLayout(h_year)
+        h_model = QHBoxLayout()
+        h_model.addWidget(QLabel("Model:"))
+        self.tv_model_combo = QComboBox()
+        self.tv_model_combo.addItems(
+            ["Gordon Growth", "EBITDA Multiple", "Revenue Multiple", "H-Model"]
+        )
+        self.tv_model_combo.setStyleSheet(INPUT_STYLE)
+        self.tv_model_combo.currentTextChanged.connect(self._on_tv_model_changed)
+        h_model.addWidget(self.tv_model_combo)
+        res_layout.addLayout(h_model)
 
         h_ltg = QHBoxLayout()
         h_ltg.addWidget(QLabel("Long Term Growth Rate:"))
         self.ltg_input = QLineEdit("3.0%")
         self.ltg_input.setStyleSheet(INPUT_STYLE)
         self.ltg_input.setFixedWidth(60)
+        self.ltg_input.editingFinished.connect(self._recalculate)
         h_ltg.addWidget(self.ltg_input)
         res_layout.addLayout(h_ltg)
 
-        self.chk_ebitda = QCheckBox("EBITDA Multiple")
-        self.chk_ebitda.setChecked(True)
-        self.chk_rev = QCheckBox("Revenue Multiple")
-        self.chk_h = QCheckBox("H-Model")
-        res_layout.addWidget(self.chk_ebitda)
-        res_layout.addWidget(self.chk_rev)
-        res_layout.addWidget(self.chk_h)
+        # Each model gets its own sub-panel (own inputs + own output
+        # rows), stacked in the same QVBoxLayout, visibility toggled by
+        # tv_model_combo — same end result as the Excel workbook's
+        # VBA-driven group show/hide, just done with widget visibility
+        # instead of row grouping.
+        self._tv_panels: Dict[str, QWidget] = {}
+        self._tv_outputs: Dict[str, Dict[str, QLabel]] = {}
+        self._tv_inputs: Dict[str, Dict[str, QLineEdit]] = {}
+
+        res_layout.addWidget(self._build_gordon_growth_panel())
+        res_layout.addWidget(self._build_ebitda_multiple_panel())
+        res_layout.addWidget(self._build_revenue_multiple_panel())
+        res_layout.addWidget(self._build_h_model_panel())
 
         res_frame.setLayout(res_layout)
         self._footer_hbox.addWidget(res_frame, 1)
+
+        self._apply_tv_model_visibility()
 
         capex_frame = QFrame()
         capex_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -719,6 +771,191 @@ class DCFPage(QWidget):
 
         capex_frame.setLayout(capex_layout)
         self._footer_hbox.addWidget(capex_frame, 1)
+
+    # ------------------------------------------------------------------
+    # TERMINAL VALUE — 4 model panels
+    # ------------------------------------------------------------------
+
+    def _tv_output_row(self, form: QFormLayout, model: str, key: str, label_text: str):
+        lbl = QLabel("-")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        form.addRow(label_text, lbl)
+        self._tv_outputs.setdefault(model, {})[key] = lbl
+
+    def _tv_input_row(self, form: QFormLayout, model: str, key: str, label_text: str, default: str):
+        inp = QLineEdit(default)
+        inp.setStyleSheet(INPUT_STYLE)
+        inp.setFixedWidth(70)
+        inp.editingFinished.connect(self._recalculate)
+        form.addRow(label_text, inp)
+        self._tv_inputs.setdefault(model, {})[key] = inp
+
+    def _build_gordon_growth_panel(self) -> QWidget:
+        panel = QWidget()
+        form = QFormLayout()
+        panel.setLayout(form)
+        self._tv_output_row(form, "Gordon Growth", "cash_flow", "Residual Year Cash Flow:")
+        self._tv_output_row(form, "Gordon Growth", "cap_rate", "Capitalization Rate:")
+        self._tv_output_row(form, "Gordon Growth", "residual_value", "Residual Value:")
+        self._tv_output_row(form, "Gordon Growth", "pv_factor", "PV Factor:")
+        self._tv_output_row(form, "Gordon Growth", "pv_residual_value", "Present Value of Residual Value:")
+        self._tv_panels["Gordon Growth"] = panel
+        return panel
+
+    def _build_ebitda_multiple_panel(self) -> QWidget:
+        panel = QWidget()
+        form = QFormLayout()
+        panel.setLayout(form)
+        self._tv_input_row(form, "EBITDA Multiple", "multiple", "Selected Multiple:", "10.00x")
+        self._tv_output_row(form, "EBITDA Multiple", "ebitda", "EBITDA:")
+        self._tv_output_row(form, "EBITDA Multiple", "multiple_out", "EBITDA Multiple:")
+        self._tv_output_row(form, "EBITDA Multiple", "residual_value", "Residual Value:")
+        self._tv_output_row(form, "EBITDA Multiple", "pv_factor", "PV Factor:")
+        self._tv_output_row(form, "EBITDA Multiple", "pv_residual_value", "Present Value of Residual Value:")
+        self._tv_panels["EBITDA Multiple"] = panel
+        return panel
+
+    def _build_revenue_multiple_panel(self) -> QWidget:
+        panel = QWidget()
+        form = QFormLayout()
+        panel.setLayout(form)
+        self._tv_input_row(form, "Revenue Multiple", "multiple", "Selected Multiple:", "10.00x")
+        self._tv_output_row(form, "Revenue Multiple", "revenue", "Revenue:")
+        self._tv_output_row(form, "Revenue Multiple", "multiple_out", "Revenue Multiple:")
+        self._tv_output_row(form, "Revenue Multiple", "residual_value", "Residual Value:")
+        self._tv_output_row(form, "Revenue Multiple", "pv_factor", "PV Factor:")
+        self._tv_output_row(form, "Revenue Multiple", "pv_residual_value", "Present Value of Residual Value:")
+        self._tv_panels["Revenue Multiple"] = panel
+        return panel
+
+    def _build_h_model_panel(self) -> QWidget:
+        panel = QWidget()
+        form = QFormLayout()
+        panel.setLayout(form)
+        self._tv_input_row(form, "H-Model", "num_years", "Number of Years:", "5")
+        self._tv_input_row(form, "H-Model", "short_term_growth", "Short Term Growth Rate:", "20.0%")
+        self._tv_output_row(form, "H-Model", "cash_flow", "Free Cash Flow:")
+        self._tv_output_row(form, "H-Model", "cap_rate", "Capitalization Rate:")
+        self._tv_output_row(form, "H-Model", "residual_value", "Residual Value:")
+        self._tv_output_row(form, "H-Model", "pv_factor", "PV Factor:")
+        self._tv_output_row(form, "H-Model", "pv_residual_value", "Present Value of Residual Value:")
+        self._tv_panels["H-Model"] = panel
+        return panel
+
+    def _on_tv_model_changed(self, _text: str):
+        self._apply_tv_model_visibility()
+        self._recalculate()
+
+    def _apply_tv_model_visibility(self):
+        current = self.tv_model_combo.currentText()
+        for model, panel in self._tv_panels.items():
+            panel.setVisible(model == current)
+
+    def _populate_terminal_value(self, wacc_val: Optional[float], inputs):
+        """
+        Terminal Value box. All four models share: WACC (page-level),
+        LTGR (this box's own input), and the Final Projection Period's
+        already-resolved grid values (EBITDA/Revenue/FCF/PV Period) —
+        read straight from the main grid at final_idx, same
+        "most recent level" rule as everything else on this page.
+
+        Gordon Growth and H-Model discount off the Final Projection
+        Period's own PV Period (not a chained Residual-column period —
+        the main grid intentionally leaves Residual's PVP blank).
+        EBITDA/Revenue Multiple offset that PV Period by +0.5 per
+        Ted's formulas (mid-year-convention exit at the multiple,
+        rather than end-of-year).
+        """
+        model = self.tv_model_combo.currentText()
+        final_idx = self._num_hist + self._num_proj - 1
+        if final_idx < 0:
+            return
+
+        ltgr = self._get_ltgr()
+        final_pvp = _read_label(self._calc_labels, self._row_idx.get("Present Value Period"), final_idx)
+        residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
+        residual_fcf = (
+            _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), residual_idx)
+            if residual_idx is not None else None
+        )
+        final_fcf = _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), final_idx)
+        final_ebitda = _read_label(self._calc_labels, self._row_idx.get("EBITDA"), final_idx)
+        final_revenue = _read_label(self._calc_labels, self._row_idx.get("Revenue"), final_idx)
+
+        cap_rate = (wacc_val - ltgr) if (wacc_val is not None and ltgr is not None) else None
+
+        def out(m: str, key: str, text: str):
+            lbl = self._tv_outputs.get(m, {}).get(key)
+            if lbl is not None:
+                lbl.setText(text)
+
+        # --- Gordon Growth ---
+        gg_residual_value = _safe_div(residual_fcf, cap_rate)
+        gg_pv_factor = None
+        if final_pvp is not None and wacc_val is not None:
+            gg_pv_factor = 1.0 / ((1.0 + wacc_val) ** final_pvp)
+        gg_pv_residual_value = _mul_strict(gg_residual_value, gg_pv_factor)
+
+        out("Gordon Growth", "cash_flow", _fmt_currency(residual_fcf))
+        out("Gordon Growth", "cap_rate", _fmt_pct(cap_rate))
+        out("Gordon Growth", "residual_value", _fmt_currency(gg_residual_value))
+        out("Gordon Growth", "pv_factor", f"{gg_pv_factor:.2f}" if gg_pv_factor is not None else "-")
+        out("Gordon Growth", "pv_residual_value", _fmt_currency(gg_pv_residual_value))
+
+        # --- EBITDA Multiple ---
+        ebitda_mult = _parse_multiple(self._tv_inputs.get("EBITDA Multiple", {}).get("multiple"))
+        ebitda_residual_value = _mul_strict(final_ebitda, ebitda_mult)
+        ebitda_pv_factor = None
+        if final_pvp is not None and wacc_val is not None:
+            ebitda_pv_factor = 1.0 / ((1.0 + wacc_val) ** (final_pvp + 0.5))
+        ebitda_pv_residual_value = _mul_strict(ebitda_residual_value, ebitda_pv_factor)
+
+        out("EBITDA Multiple", "ebitda", _fmt_currency(final_ebitda))
+        out("EBITDA Multiple", "multiple_out", f"{ebitda_mult:.2f}x" if ebitda_mult is not None else "-")
+        out("EBITDA Multiple", "residual_value", _fmt_currency(ebitda_residual_value))
+        out("EBITDA Multiple", "pv_factor", f"{ebitda_pv_factor:.2f}" if ebitda_pv_factor is not None else "-")
+        out("EBITDA Multiple", "pv_residual_value", _fmt_currency(ebitda_pv_residual_value))
+
+        # --- Revenue Multiple ---
+        revenue_mult = _parse_multiple(self._tv_inputs.get("Revenue Multiple", {}).get("multiple"))
+        revenue_residual_value = _mul_strict(final_revenue, revenue_mult)
+        revenue_pv_factor = ebitda_pv_factor  # same PVP+0.5 convention
+        revenue_pv_residual_value = _mul_strict(revenue_residual_value, revenue_pv_factor)
+
+        out("Revenue Multiple", "revenue", _fmt_currency(final_revenue))
+        out("Revenue Multiple", "multiple_out", f"{revenue_mult:.2f}x" if revenue_mult is not None else "-")
+        out("Revenue Multiple", "residual_value", _fmt_currency(revenue_residual_value))
+        out("Revenue Multiple", "pv_factor", f"{revenue_pv_factor:.2f}" if revenue_pv_factor is not None else "-")
+        out("Revenue Multiple", "pv_residual_value", _fmt_currency(revenue_pv_residual_value))
+
+        # --- H-Model ---
+        num_years = _parse_label_as_float(
+            self._tv_inputs.get("H-Model", {}).get("num_years").text()
+        ) if self._tv_inputs.get("H-Model", {}).get("num_years") else None
+        short_growth_text = self._tv_inputs.get("H-Model", {}).get("short_term_growth")
+        short_growth = None
+        if short_growth_text is not None:
+            t = short_growth_text.text().strip().replace("%", "")
+            try:
+                short_growth = float(t) / 100.0
+            except ValueError:
+                short_growth = None
+
+        h_residual_value = None
+        if (final_fcf is not None and num_years is not None and short_growth is not None
+                and ltgr is not None and cap_rate not in (None, 0)):
+            h_residual_value = (
+                (((final_fcf * num_years) / 2.0) * (short_growth - ltgr) / cap_rate)
+                + (gg_residual_value if gg_residual_value is not None else 0.0)
+            )
+        h_pv_factor = gg_pv_factor  # same 1/(1+WACC)^PVP convention as Gordon Growth
+        h_pv_residual_value = _mul_strict(h_residual_value, h_pv_factor)
+
+        out("H-Model", "cash_flow", _fmt_currency(final_fcf))
+        out("H-Model", "cap_rate", _fmt_pct(cap_rate))
+        out("H-Model", "residual_value", _fmt_currency(h_residual_value))
+        out("H-Model", "pv_factor", f"{h_pv_factor:.2f}" if h_pv_factor is not None else "-")
+        out("H-Model", "pv_residual_value", _fmt_currency(h_pv_residual_value))
 
     # ------------------------------------------------------------------
     # DATA ACCESS — Subject Financials, with period-aware routing
@@ -808,6 +1045,13 @@ class DCFPage(QWidget):
         self._populate_capex_other_nwc()
         self._populate_fcf()
         self._populate_pv_chain(wacc_val, inputs)
+        # Residual runs LAST and overwrites whatever the generic
+        # per-row passes above wrote for the Residual column (those
+        # passes only know Subject Financials / ProjectionData, which
+        # have no "Residual" period — Residual is a self-contained
+        # LTGR-grown formula chain, computed here end-to-end).
+        self._populate_residual_column(inputs)
+        self._populate_terminal_value(wacc_val, inputs)
 
     # ------------------------------------------------------------------
     # DYNAMIC ROWS
@@ -901,24 +1145,20 @@ class DCFPage(QWidget):
                 opex = self._sf_get("operating_expenses", label)
                 ebitda = self._sf_get("ebitda", label)
             else:
-                # ProjectionData tracks five fields directly. Read
-                # them. COGS and OpEx aren't tracked there, so
-                # derive from LFY ratios held forward.
-                pd = self._get_projection_data()
-                rev = pd.revenue.get(label)
-                gp = pd.gross_profit.get(label)
-                ebitda = pd.ebitda.get(label)
-                gp_lfy = self._sf_get("gross_profit", "LFY")
-                rev_lfy = self._sf_get("revenue", "LFY")
-                opex_lfy = self._sf_get("operating_expenses", "LFY")
-                if rev is not None and gp_lfy is not None and rev_lfy not in (None, 0):
-                    cogs = rev - (rev * (gp_lfy / rev_lfy))
-                else:
-                    cogs = None
-                if gp is not None and opex_lfy is not None and gp_lfy not in (None, 0):
-                    opex = gp * (opex_lfy / gp_lfy)
-                else:
-                    opex = None
+                # Projected: pull straight from Subject Financials, same
+                # as every other row on this page — it already resolves
+                # cost_of_goods_sold (Revenue - Gross Profit) and
+                # operating_expenses (Gross Profit - EBITDA) correctly
+                # for projection periods via ProjectionData. There is
+                # no LFY-ratio fallback anymore: that was a stale
+                # formula from before Subject Financials exposed these
+                # keys for projected periods, and it silently diverged
+                # from the confirmed Gross Profit - EBITDA formula.
+                rev = self._sf_get("revenue", label)
+                gp = self._sf_get("gross_profit", label)
+                ebitda = self._sf_get("ebitda", label)
+                cogs = self._sf_get("cost_of_goods_sold", label)
+                opex = self._sf_get("operating_expenses", label)
 
             self._set_currency("Cost of Goods Sold", data_idx, cogs)
             self._set_currency("Gross Profit", data_idx, gp)
@@ -1235,6 +1475,16 @@ class DCFPage(QWidget):
                 # styling. Nothing to do.
                 continue
 
+            if label == "Residual":
+                # Per the Excel model, Residual does NOT continue the
+                # PVP/PVF/PV-FCF chain in the main grid — those exist
+                # only inside the Terminal Value box, computed off
+                # the Final Projection Period's PV Period, not off a
+                # chained Residual-column PVP. Leave these four rows
+                # blank for Residual; _populate_residual_column
+                # doesn't touch them either.
+                continue
+
             if label == "NFY":
                 pvp = (ppa / 2.0) if ppa is not None else None
             elif label == "NFY+1":
@@ -1276,45 +1526,197 @@ class DCFPage(QWidget):
                 self._set("Present Value of Free Cash Flows", data_idx, "-")
 
     # ------------------------------------------------------------------
-    # SESSION STATE
+    # RESIDUAL COLUMN — self-contained LTGR-grown formula chain
     # ------------------------------------------------------------------
+
+    def _get_ltgr(self) -> Optional[float]:
+        text = self.ltg_input.text().strip().replace("%", "")
+        if not text:
+            return None
+        try:
+            return float(text) / 100.0
+        except ValueError:
+            return None
+
+    def _get_dep_pct_of_capex(self) -> Optional[float]:
+        text = self.capex_dep_pct.text().strip().replace("%", "")
+        if not text:
+            return None
+        try:
+            return float(text) / 100.0
+        except ValueError:
+            return None
+
+    def _populate_residual_column(self, inputs):
+        """
+        Residual is a self-contained column: every line item grows the
+        Final Projection Period's own value at LTGR (or is otherwise
+        formula-derived), per Ted's Residual Year instructions. It has
+        no source in Subject Financials or ProjectionData, so unlike
+        every other column this page doesn't pull — it computes.
+
+        "Final Projection Period" = the last NFY+N column, read
+        straight from this page's own grid cells (already-resolved
+        values), per the same "pull from the most recent level" rule
+        used everywhere else on this page.
+        """
+        if "Residual" not in self._headers:
+            return
+        data_idx = self._headers.index("Residual")
+        final_idx = self._num_hist + self._num_proj - 1
+        if final_idx < 0:
+            return
+
+        ltgr = self._get_ltgr()
+        tax_rate = inputs.subject_tax_rate
+        is_fcfe = (self._cash_flows_to == "FCFE")
+
+        def final(row_label: str) -> Optional[float]:
+            return _read_label(self._calc_labels, self._row_idx.get(row_label), final_idx)
+
+        growth_factor = (1.0 + ltgr) if ltgr is not None else None
+
+        def grow(value: Optional[float]) -> Optional[float]:
+            return value * growth_factor if (value is not None and growth_factor is not None) else None
+
+        # Revenue, COGS, OpEx: final projected period's own value grown
+        # at LTGR. Gross Profit / EBITDA are then LOCAL differences of
+        # those grown figures, not separately grown.
+        revenue = grow(final("Revenue"))
+        cogs = grow(final("Cost of Goods Sold"))
+        opex = grow(final("Operating Expenses"))
+
+        gross_profit = _sub_strict(revenue, cogs)
+        ebitda = _sub_strict(gross_profit, opex)
+
+        self._set_currency("Revenue", data_idx, revenue)
+        self._set_currency("Cost of Goods Sold", data_idx, cogs)
+        self._set_currency("Gross Profit", data_idx, gross_profit)
+        self._set_pct("Gross Profit Margin", data_idx, _safe_div(gross_profit, revenue))
+        self._set_currency("Operating Expenses", data_idx, opex)
+        self._set_currency("EBITDA", data_idx, ebitda)
+        self._set_pct("EBITDA Margin", data_idx, _safe_div(ebitda, revenue))
+
+        # Depreciation = Residual CapEx * Dep-as-%-of-CapEx (CapEx
+        # Options box). CapEx itself is computed further below, but
+        # its formula only needs Revenue/final-period ratios, not
+        # Depreciation, so no circularity — compute CapEx first.
+        final_capex = final("Less: Capital Expenditures (CapEx)")
+        final_revenue = final("Revenue")
+        capex_ratio = _safe_div(final_capex, final_revenue)
+        residual_capex = revenue * capex_ratio if (revenue is not None and capex_ratio is not None) else None
+        self._set_currency("Less: Capital Expenditures (CapEx)", data_idx, residual_capex)
+
+        dep_pct = self._get_dep_pct_of_capex()
+        depreciation = residual_capex * dep_pct if (residual_capex is not None and dep_pct is not None) else None
+        self._set_currency("Depreciation", data_idx, depreciation)
+        self._set_currency("Plus: Depreciation", data_idx, depreciation)
+
+        # Amortization: user input field for this column specifically.
+        amort_idx = self._row_idx.get("Amortization")
+        amort_inp = self._input_fields.get(amort_idx, {}).get(data_idx)
+        amortization = _parse_label_as_float(amort_inp.text()) if amort_inp is not None else None
+
+        # Net Interest Expense = Final Projection Period Net Interest
+        # Expense grown at LTGR. The final-period cell already holds
+        # the FCFF/FCFE-appropriate value (0 or the 8008135
+        # placeholder) via _apply_net_int_proj_visibility, so reading
+        # it directly is correct for either mode.
+        net_interest = None
+        if is_fcfe:
+            net_interest = grow(final("Net Interest Expense"))
+            self._set_currency("Net Interest Expense", data_idx, net_interest)
+
+        if ebitda is None or depreciation is None:
+            ebit_or_ebt = None
+        elif is_fcfe:
+            ebit_or_ebt = None if net_interest is None else (
+                ebitda - depreciation - (amortization or 0.0) - net_interest
+            )
+        else:
+            ebit_or_ebt = ebitda - depreciation - (amortization or 0.0)
+
+        self._set_currency("EBIT", data_idx, ebit_or_ebt)
+        self._set_pct("EBIT Margin", data_idx, _safe_div(ebit_or_ebt, revenue))
+
+        taxes = ebit_or_ebt * tax_rate if (ebit_or_ebt is not None and tax_rate is not None) else None
+        self._set_currency("Taxes", data_idx, taxes)
+
+        nopat = (ebit_or_ebt - (taxes or 0.0)) if ebit_or_ebt is not None else None
+        self._set_currency("Net Operating Profit After Tax (NOPAT)", data_idx, nopat)
+
+        dfcfnwc = float(NWC_PLACEHOLDER)  # already set generically, restated for FCF math below
+
+        other_adj_idx = self._row_idx.get("Less: Other Adjustments")
+        other_inp = self._input_fields.get(other_adj_idx, {}).get(data_idx)
+        other_adj = None
+        if other_inp is not None:
+            raw = other_inp.text().strip()
+            other_adj = _parse_label_as_float(raw) if raw else 0.0
+
+        fcf = None
+        if nopat is not None:
+            fcf = nopat + (depreciation or 0.0) - dfcfnwc - (residual_capex or 0.0) - (other_adj or 0.0)
+        self._set_currency("Free Cash Flow", data_idx, fcf)
 
     def collect_state(self) -> dict:
         # Capture the "Less: Other Adjustments" projected/Residual
         # user inputs by period label so apply_state can restore
-        # them after a table rebuild.
+        # them after a table rebuild. Same treatment for the
+        # Residual-only Amortization input.
         other_adj_idx = self._row_idx.get("Less: Other Adjustments")
         other_adj: Dict[str, str] = {}
         for data_idx, label in enumerate(self._headers):
             inp = self._input_fields.get(other_adj_idx, {}).get(data_idx)
             if inp is not None:
                 other_adj[label] = inp.text()
+
+        amort_idx = self._row_idx.get("Amortization")
+        residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
+        amort_inp = self._input_fields.get(amort_idx, {}).get(residual_idx) if residual_idx is not None else None
+        residual_amortization = amort_inp.text() if amort_inp is not None else ""
+
+        tv_inputs_state = {
+            model: {key: widget.text() for key, widget in fields.items()}
+            for model, fields in self._tv_inputs.items()
+        }
+
         return {
             "ltg_input": self.ltg_input.text(),
-            "res_use_combo": self.res_use_combo.currentText(),
-            "res_year_input": self.res_year_input.text(),
-            "chk_ebitda": self.chk_ebitda.isChecked(),
-            "chk_rev": self.chk_rev.isChecked(),
-            "chk_h": self.chk_h.isChecked(),
+            "tv_model": self.tv_model_combo.currentText(),
+            "tv_inputs": tv_inputs_state,
             "capex_ltg": self.capex_ltg.text(),
             "capex_dep_pct": self.capex_dep_pct.text(),
             "cash_flows_to": self._cash_flows_to,
             "other_adj_inputs": other_adj,
+            "residual_amortization": residual_amortization,
         }
 
     def apply_state(self, state: dict):
         if not state:
             return
         self.ltg_input.setText(state.get("ltg_input", "3.0%"))
-        self.res_year_input.setText(state.get("res_year_input", "2035"))
         self.capex_ltg.setText(state.get("capex_ltg", "425"))
         self.capex_dep_pct.setText(state.get("capex_dep_pct", "100.0%"))
         self._cash_flows_to = state.get("cash_flows_to", "FCFF")
-        # Other-adjustment inputs are restored AFTER
-        # _rebuild_table_if_needed has created the new input widgets
-        # (via _recalculate). We recalc, push saved text into the
-        # QLineEdits, then recalc again so the FCF / PV chain picks
-        # up the restored values.
+
+        tv_model = state.get("tv_model", "Gordon Growth")
+        idx = self.tv_model_combo.findText(tv_model)
+        if idx >= 0:
+            self.tv_model_combo.setCurrentIndex(idx)
+        self._apply_tv_model_visibility()
+
+        for model, fields in state.get("tv_inputs", {}).items():
+            for key, text in fields.items():
+                widget = self._tv_inputs.get(model, {}).get(key)
+                if widget is not None:
+                    widget.setText(text)
+
+        # Other-adjustment / Residual-amortization inputs are restored
+        # AFTER _rebuild_table_if_needed has created the new input
+        # widgets (via _recalculate). We recalc, push saved text into
+        # the QLineEdits, then recalc again so FCF / PV chain / EBIT
+        # pick up the restored values.
         self._recalculate()
         other_adj_idx = self._row_idx.get("Less: Other Adjustments")
         other_adj = state.get("other_adj_inputs", {})
@@ -1322,4 +1724,11 @@ class DCFPage(QWidget):
             inp = self._input_fields.get(other_adj_idx, {}).get(data_idx)
             if inp is not None and label in other_adj:
                 inp.setText(other_adj[label])
+
+        amort_idx = self._row_idx.get("Amortization")
+        residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
+        amort_inp = self._input_fields.get(amort_idx, {}).get(residual_idx) if residual_idx is not None else None
+        if amort_inp is not None and "residual_amortization" in state:
+            amort_inp.setText(state["residual_amortization"])
+
         self._recalculate()

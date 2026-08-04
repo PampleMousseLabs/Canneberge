@@ -530,19 +530,29 @@ class SubjectFinancialsPage(QWidget):
 
     def get_metric_value(self, key: str, period: str) -> Optional[float]:
         """
-        Single entry point for any other page (GPC, future DCF) needing
-        one subject-company metric at one specific period — historical,
+        Single entry point for any other page (GPC, DCF) needing one
+        subject-company metric at one specific period — historical,
         TTM, or a projection period (NFY, NFY+1, ...).
 
         Historical/TTM: delegates to get_historical_line_values, which
         already handles public/private branching and calc-row resolution.
 
-        Projection periods: reads directly from the Projection Module's
-        saved ProjectionData. Only revenue and ebitda are ever populated
-        there — gross_profit/da/capex exist in ProjectionData but have
-        no GPC_METRICS entry yet, and ebit is never projected (the
-        dialog has no EBIT driver), so this correctly returns None for
-        "ebit" at any forward period rather than guessing at one.
+        Projection periods: mirrors exactly what _build_public_view /
+        _build_private_view already resolve and display for that column
+        — revenue and depreciation come straight from ProjectionData;
+        gross_profit/ebitda/capex are ProjectionData's own resolved
+        fields; cost_of_goods_sold and operating_expenses are derived
+        the same way the page derives them for display
+        (Revenue-GrossProfit, GrossProfit-EBITDA). "amortization" and
+        "ebit" have no projected source anywhere and correctly return
+        None rather than guessing at one.
+
+        NOTE: this method was previously reverted to an older
+        revenue/ebitda-only version between sessions, which silently
+        broke DCF's projected COGS/Gross Profit/Operating Expenses
+        (they all read through this method). Restored here — if this
+        regresses again, check whether something is overwriting this
+        file from an older branch/commit.
         """
         inputs = self.get_project_inputs()
 
@@ -553,8 +563,18 @@ class SubjectFinancialsPage(QWidget):
             pd = self.get_projection_data()
             if key == "revenue":
                 return pd.revenue.get(period)
+            if key == "depreciation":
+                return pd.da.get(period)
+            if key == "gross_profit":
+                return pd.gross_profit.get(period)
             if key == "ebitda":
                 return pd.ebitda.get(period)
+            if key == "capex":
+                return pd.capex.get(period)
+            if key == "cost_of_goods_sold":
+                return _sub(pd.revenue.get(period), pd.gross_profit.get(period))
+            if key == "operating_expenses":
+                return _sub(pd.gross_profit.get(period), pd.ebitda.get(period))
             return None
 
         return None

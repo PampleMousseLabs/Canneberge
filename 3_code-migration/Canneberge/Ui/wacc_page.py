@@ -235,6 +235,11 @@ class WACCPage(QWidget):
         self._get_beta_vol_results = get_beta_vol_results_callback
         self._get_stockanalysis_results = get_stockanalysis_results_callback
         self._get_fred_results = get_fred_results_callback
+        # Full-precision WACC, set at the end of every _recalculate().
+        # The label (lbl_wacc_rounded) is display-only, rounded to 4
+        # decimals for readability — DCF's PV Factor math must not
+        # round-trip through that string, so it reads this instead.
+        self.wacc_value: Optional[float] = None
         self._build_ui()
         self._recalculate()
 
@@ -841,6 +846,7 @@ class WACCPage(QWidget):
         wacc = None
         if weighted_cost_of_equity is not None and weighted_cost_of_debt is not None:
             wacc = weighted_cost_of_equity + weighted_cost_of_debt
+        self.wacc_value = wacc
         self.lbl_wacc_rounded.setText(
             f"{wacc * 100:.4f}%" if wacc is not None else "NA"
         )

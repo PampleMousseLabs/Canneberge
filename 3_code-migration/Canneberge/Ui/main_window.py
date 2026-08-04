@@ -204,12 +204,7 @@ class MainWindow(QMainWindow):
     def _get_wacc_value(self) -> Optional[float]:
         if hasattr(self, 'wacc_page'):
             self.wacc_page._recalculate()
-            text = self.wacc_page.lbl_wacc_rounded.text()
-            if text and text != "NA":
-                try:
-                    return float(text.strip().replace("%", "")) / 100.0
-                except ValueError:
-                    pass
+            return self.wacc_page.wacc_value
         return None
 
 
