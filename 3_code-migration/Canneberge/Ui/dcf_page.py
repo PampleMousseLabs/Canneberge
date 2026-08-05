@@ -10,14 +10,63 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-# --- Style Constants ---
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
+# =====================================================================
+# STYLE CONFIG — this is the block to edit for any purely visual
+# change (fonts, sizes, borders, spacers, widths, which rows are
+# bold). Nothing below this block should need touching to change how
+# the page LOOKS — if a visual change requires editing code outside
+# this block, that's a gap in this config, not something to hand-edit
+# elsewhere.
+# =====================================================================
+
+# --- Colors / base styles ---
+INPUT_BG_COLOR = "#dce9f7"
+INPUT_TEXT_COLOR = "#1a4a8a"
+HEADER_BG_COLOR = "#f0f0f0"
+BORDER_COLOR = "#000000"
+
+INPUT_STYLE = f"background-color: {INPUT_BG_COLOR}; color: {INPUT_TEXT_COLOR};"
 BOLD_STYLE = "font-weight: bold;"
-HEADER_STYLE = "font-weight: bold; font-size: 11px; background-color: #f0f0f0;"
+HEADER_FONT_SIZE = 11  # px
+HEADER_STYLE = f"font-weight: bold; font-size: {HEADER_FONT_SIZE}px; background-color: {HEADER_BG_COLOR};"
 INDENT_STYLE = "padding-left: 20px;"
 MARGIN_ROW_STYLE = "padding-left: 20px; font-style: italic;"
 MARGIN_CELL_STYLE = "font-style: italic;"
-COL_WIDTH = 95
+COL_WIDTH = 95  # px, width of each LFY-4/NFY/etc. data column
+
+# --- Borders ---
+# Change thickness/color here; applies everywhere these styles are used.
+BORDER_ABOVE_WIDTH = 1   # px, thin underline-above rule (subtotal rows)
+BORDER_BELOW_WIDTH = 2   # px, thick underline-below rule (grand total rows)
+BORDER_ABOVE_STYLE = f"border-top: {BORDER_ABOVE_WIDTH}px solid {BORDER_COLOR};"
+BORDER_BELOW_STYLE = f"border-bottom: {BORDER_BELOW_WIDTH}px solid {BORDER_COLOR};"
+
+# Rows that get a thin border ABOVE them, across every historical +
+# projected + Residual data cell (not just the label). "EBIT" covers
+# its FCFE relabel to "EBT" too, since the border is keyed off
+# whatever the row's grid position is, not its current text.
+ROWS_WITH_BORDER_ABOVE = {
+    "Gross Profit", "EBITDA", "EBIT",
+    "Net Operating Profit After Tax (NOPAT)", "Free Cash Flow",
+    "Present Value of Free Cash Flows",
+}
+
+# Rows that get a blank spacer row directly above them.
+ROWS_WITH_SPACER_ABOVE = {
+    "Operating Expenses", "Net Operating Profit After Tax (NOPAT)",
+    "Partial Period Adjustment",
+}
+
+# Rows forced bold regardless of the is_bold flag already in
+# _build_table_rows's row tuple (e.g. Revenue is defined as a
+# non-bold row there but Ted wants it bold on this page specifically).
+FORCE_BOLD_ROWS = {"Revenue"}
+
+# --- Fixed widths for specific controls ---
+MODEL_DROPDOWN_WIDTH = 170        # fits "Gordon Growth" (13 chars) + arrow with room
+BRIDGE_LABEL_COL_WIDTH = 260      # fits "Fair Value of Business Enterprise (Base):" unwrapped
+FOOTER_BOX_LABEL_COL_WIDTH = 210  # Terminal Value / CapEx Options label column width
+FOOTER_BOX_LEFT_PAD = 340         # blank space pushing those boxes' labels toward the right edge
 
 # Rows where historical columns should render truly blank (no "-")
 # because historical Free Cash Flow is never discounted.
@@ -325,6 +374,14 @@ class DCFPage(QWidget):
 
         self.page_layout.addLayout(self._footer_hbox)
 
+        sens_frame = QFrame()
+        sens_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        sens_outer = QVBoxLayout()
+        sens_outer.addWidget(QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=BOLD_STYLE))
+        sens_outer.addWidget(self._build_sensitivity_table())
+        sens_frame.setLayout(sens_outer)
+        self.page_layout.addWidget(sens_frame)
+
         self.page_layout.addStretch(1)
         self.page_container.setLayout(self.page_layout)
         scroll.setWidget(self.page_container)
@@ -533,6 +590,11 @@ class DCFPage(QWidget):
         self._free_cash_flow_row = None
 
         for idx, (label, is_bold, is_input, is_indent, is_margin) in enumerate(self._rows):
+            is_bold = is_bold or (label in FORCE_BOLD_ROWS)
+
+            if label in ROWS_WITH_SPACER_ABOVE:
+                self._current_table_row += 1  # blank grid row, no widgets
+
             row = self._current_table_row
             row_lbl = QLabel(label)
             style_parts = []
@@ -542,6 +604,8 @@ class DCFPage(QWidget):
                 style_parts.append(INDENT_STYLE)
             if is_margin:
                 style_parts.append(MARGIN_ROW_STYLE)
+            if label in ROWS_WITH_BORDER_ABOVE:
+                style_parts.append(BORDER_ABOVE_STYLE)
             if style_parts:
                 row_lbl.setStyleSheet(" ".join(style_parts))
             self.table_grid.addWidget(row_lbl, row, 0, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -600,6 +664,15 @@ class DCFPage(QWidget):
                         cell_style_parts.append(BOLD_STYLE)
                     if is_margin:
                         cell_style_parts.append(MARGIN_CELL_STYLE)
+                    if label in ROWS_WITH_BORDER_ABOVE:
+                        # PV of FCF is blank on historical columns by
+                        # design (HIST_BLANK_ROWS) — a border-top CSS
+                        # rule renders on an empty label too, so this
+                        # one row's border only applies to
+                        # projected/Residual columns, unlike the other
+                        # border-above rows which span every column.
+                        if not (label == "Present Value of Free Cash Flows" and is_hist_col):
+                            cell_style_parts.append(BORDER_ABOVE_STYLE)
                     if cell_style_parts:
                         calc_lbl.setStyleSheet(" ".join(cell_style_parts))
                     self.table_grid.addWidget(calc_lbl, row, grid_col)
@@ -693,6 +766,7 @@ class DCFPage(QWidget):
         res_frame = QFrame()
         res_frame.setFrameShape(QFrame.Shape.StyledPanel)
         res_layout = QVBoxLayout()
+        res_layout.setContentsMargins(FOOTER_BOX_LEFT_PAD, 8, 8, 8)
         res_layout.addWidget(QLabel("Terminal Value", styleSheet=BOLD_STYLE))
 
         h_model = QHBoxLayout()
@@ -702,6 +776,7 @@ class DCFPage(QWidget):
             ["Gordon Growth", "EBITDA Multiple", "Revenue Multiple", "H-Model"]
         )
         self.tv_model_combo.setStyleSheet(INPUT_STYLE)
+        self.tv_model_combo.setFixedWidth(MODEL_DROPDOWN_WIDTH)
         self.tv_model_combo.currentTextChanged.connect(self._on_tv_model_changed)
         h_model.addWidget(self.tv_model_combo)
         res_layout.addLayout(h_model)
@@ -736,6 +811,7 @@ class DCFPage(QWidget):
         capex_frame = QFrame()
         capex_frame.setFrameShape(QFrame.Shape.StyledPanel)
         capex_layout = QVBoxLayout()
+        capex_layout.setContentsMargins(FOOTER_BOX_LEFT_PAD, 8, 8, 8)
         capex_layout.addWidget(QLabel("CapEx Options", styleSheet=BOLD_STYLE))
 
         c1 = QHBoxLayout()
@@ -786,31 +862,37 @@ class DCFPage(QWidget):
         right_col.addWidget(res_frame)
         right_col.addWidget(capex_frame)
         right_col.addStretch(1)
-        self._footer_hbox.addLayout(right_col, 1)
+        self._footer_hbox.addLayout(right_col, 2)
 
     def _build_fv_bridge(self) -> QWidget:
         """
         Replaces the old boxed Terminal Value spot: plain lines, not a
         panel. Sum of PV of FCF + Discounted Residual Value (linked to
         whichever Terminal Value model is currently selected) + a user
-        -input Other Adjustment, reconciling to a Fair Value Base. FV
-        High/Low are wired to the WACC/LTGR sensitivity table once
-        that exists — left blank until then rather than faked.
+        -input Other Adjustment, reconciling to a Fair Value Base,
+        continuing straight into FV High/Low. The WACC/LTGR sensitivity
+        table is a separate full-width section at the bottom of the
+        page (see _build_ui) — not nested in here.
         """
         widget = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
+        LABEL_COL_WIDTH = BRIDGE_LABEL_COL_WIDTH
+
         def row(text_label: str, input_widget=None) -> QLabel:
             h = QHBoxLayout()
-            h.addWidget(QLabel(text_label))
-            h.addStretch()
+            lbl = QLabel(text_label)
+            lbl.setFixedWidth(LABEL_COL_WIDTH)
+            h.addWidget(lbl)
             if input_widget is not None:
                 h.addWidget(input_widget)
+                h.addStretch()
                 layout.addLayout(h)
                 return input_widget
             val_lbl = QLabel("-")
             h.addWidget(val_lbl)
+            h.addStretch()
             layout.addLayout(h)
             return val_lbl
 
@@ -823,38 +905,37 @@ class DCFPage(QWidget):
         row("Other Adjustment:", self.bridge_other_adj_input)
 
         layout.addSpacing(10)
-        layout.addWidget(self._build_sensitivity_table())
-
-        layout.addSpacing(10)
         self.bridge_fv_base_row_label = QLabel("Fair Value of Business Enterprise (Base):")
-        self.bridge_fv_base_row_label.setStyleSheet(BOLD_STYLE)
+        self.bridge_fv_base_row_label.setStyleSheet(BOLD_STYLE + BORDER_ABOVE_STYLE)
+        self.bridge_fv_base_row_label.setFixedWidth(LABEL_COL_WIDTH)
         h_base = QHBoxLayout()
         h_base.addWidget(self.bridge_fv_base_row_label)
-        h_base.addStretch()
         self.bridge_fv_base_label = QLabel("-")
-        self.bridge_fv_base_label.setStyleSheet(BOLD_STYLE)
+        self.bridge_fv_base_label.setStyleSheet(BOLD_STYLE + BORDER_ABOVE_STYLE + BORDER_BELOW_STYLE)
         h_base.addWidget(self.bridge_fv_base_label)
+        h_base.addStretch()
         layout.addLayout(h_base)
 
         h_hl_hdr = QHBoxLayout()
-        h_hl_hdr.addWidget(QLabel(""))
-        h_hl_hdr.addStretch()
+        hl_spacer = QLabel("")
+        hl_spacer.setFixedWidth(LABEL_COL_WIDTH)
+        h_hl_hdr.addWidget(hl_spacer)
         h_hl_hdr.addWidget(QLabel("FV High"))
         h_hl_hdr.addSpacing(20)
         h_hl_hdr.addWidget(QLabel("FV Low"))
+        h_hl_hdr.addStretch()
         layout.addLayout(h_hl_hdr)
 
         h_hl_val = QHBoxLayout()
-        h_hl_val.addWidget(QLabel(""))
-        h_hl_val.addStretch()
-        # Pending the WACC/LTGR sensitivity table — these read off it
-        # (@WACC-1%/LTGR+1% for High, @WACC+1%/LTGR-1% for Low) and
-        # can't be wired honestly until that table exists.
+        hl_spacer2 = QLabel("")
+        hl_spacer2.setFixedWidth(LABEL_COL_WIDTH)
+        h_hl_val.addWidget(hl_spacer2)
         self.bridge_fv_high_label = QLabel("-")
         self.bridge_fv_low_label = QLabel("-")
         h_hl_val.addWidget(self.bridge_fv_high_label)
         h_hl_val.addSpacing(20)
         h_hl_val.addWidget(self.bridge_fv_low_label)
+        h_hl_val.addStretch()
         layout.addLayout(h_hl_val)
 
         layout.addStretch(1)
@@ -1634,21 +1715,27 @@ class DCFPage(QWidget):
         """
         WACC x LTGR sensitivity table. Every cell in the WACC row and
         LTGR column is a real user input (per Ted: "make all WACC
-        spots and LTGR spots user input fields") — seeded ONCE at
-        build time with WACC/LTGR -2%/-1%/(actual)/+1%/+2%, then left
-        alone as ordinary sticky inputs, same as every other input
-        field on this page (they do NOT auto-reset to a fresh ±1%/±2%
-        spread on every recalc — only their initial default comes
-        from that formula).
+        spots and LTGR spots user input fields") — seeded with
+        WACC/LTGR -2%/-1%/(actual)/+1%/+2%, and kept in sync with the
+        page's live WACC/LTGR on every recalc UNTIL the user edits a
+        given cell (see _populate_sensitivity_table's auto-text
+        tracking) — Ted's WACC changes often, so a one-time default
+        would go stale.
 
-        The 25 interior cells are read-only, recomputed on every
-        recalc by temporarily overriding WACC/LTGR and re-running the
-        real PV chain / Terminal Value / bridge logic (not a
-        duplicated formula set) — see _compute_fv_base_for.
+        Column layout is corner label, one narrow spacer column, then
+        5 data columns — no spacing between the 5 data columns
+        themselves. Header inputs and value labels share the same
+        fixed width and right-alignment so a WACC header sits directly
+        above its own value column (this, not an actual extra 5
+        columns, was the source of the "looks like 10 columns"
+        report — mismatched center/right alignment made the header
+        float away from its value column visually).
         """
         container = QWidget()
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setHorizontalSpacing(0)
+        grid.setVerticalSpacing(4)
+        grid.setColumnMinimumWidth(1, 16)  # the one intentional gap column
 
         wacc_now = self.get_wacc_value()
         ltgr_now = self._get_ltgr()
@@ -1657,29 +1744,44 @@ class DCFPage(QWidget):
 
         grid.addWidget(QLabel("WACC \\ LTGR", styleSheet=BOLD_STYLE), 0, 0)
 
+        DATA_COL_WIDTH = 78
+        FIRST_DATA_COL = 2  # 0 = corner label, 1 = spacer
+
         self.sens_wacc_inputs = []
+        self._sens_wacc_auto_text = []
         for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
-            inp = QLineEdit(f"{(wacc_now + offset) * 100:.1f}%")
+            # WACC default at 4 decimal places, exactly matching the
+            # WACC page's own display precision, per Ted's instruction.
+            text = f"{(wacc_now + offset) * 100:.4f}%"
+            inp = QLineEdit(text)
             inp.setStyleSheet(INPUT_STYLE)
-            inp.setFixedWidth(60)
+            inp.setFixedWidth(DATA_COL_WIDTH)
+            inp.setAlignment(Qt.AlignmentFlag.AlignRight)
             inp.editingFinished.connect(self._recalculate)
             self.sens_wacc_inputs.append(inp)
-            grid.addWidget(inp, 0, col + 1, alignment=Qt.AlignmentFlag.AlignCenter)
+            self._sens_wacc_auto_text.append(text)
+            grid.addWidget(inp, 0, FIRST_DATA_COL + col, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.sens_ltgr_inputs = []
+        self._sens_ltgr_auto_text = []
         self.sens_value_labels = []
         for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
-            inp = QLineEdit(f"{(ltgr_now + offset) * 100:.1f}%")
+            text = f"{(ltgr_now + offset) * 100:.1f}%"
+            inp = QLineEdit(text)
             inp.setStyleSheet(INPUT_STYLE)
-            inp.setFixedWidth(60)
+            inp.setFixedWidth(DATA_COL_WIDTH)
+            inp.setAlignment(Qt.AlignmentFlag.AlignRight)
             inp.editingFinished.connect(self._recalculate)
             self.sens_ltgr_inputs.append(inp)
-            grid.addWidget(inp, row + 1, 0)
+            self._sens_ltgr_auto_text.append(text)
+            grid.addWidget(inp, row + 1, 0, alignment=Qt.AlignmentFlag.AlignRight)
 
             value_row = []
             for col in range(5):
                 lbl = QLabel("-")
-                grid.addWidget(lbl, row + 1, col + 1, alignment=Qt.AlignmentFlag.AlignRight)
+                lbl.setFixedWidth(DATA_COL_WIDTH)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+                grid.addWidget(lbl, row + 1, FIRST_DATA_COL + col, alignment=Qt.AlignmentFlag.AlignRight)
                 value_row.append(lbl)
             self.sens_value_labels.append(value_row)
 
@@ -1720,6 +1822,29 @@ class DCFPage(QWidget):
     def _populate_sensitivity_table(self, inputs):
         if not hasattr(self, "sens_value_labels"):
             return
+
+        # Keep the WACC/LTGR header defaults tracking the page's live
+        # WACC/LTGR — Ted's WACC changes often (Beta refresh, capital
+        # structure edits), so a one-time default at construction goes
+        # stale. Only refresh a field if its current text still
+        # matches the last value THIS method auto-set — if it
+        # differs, the user typed something, and that edit sticks.
+        wacc_now = self.get_wacc_value()
+        ltgr_now = self._get_ltgr()
+        if wacc_now is not None:
+            for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+                inp = self.sens_wacc_inputs[col]
+                if inp.text() == self._sens_wacc_auto_text[col]:
+                    new_text = f"{(wacc_now + offset) * 100:.4f}%"
+                    inp.setText(new_text)
+                    self._sens_wacc_auto_text[col] = new_text
+        if ltgr_now is not None:
+            for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+                inp = self.sens_ltgr_inputs[row]
+                if inp.text() == self._sens_ltgr_auto_text[row]:
+                    new_text = f"{(ltgr_now + offset) * 100:.1f}%"
+                    inp.setText(new_text)
+                    self._sens_ltgr_auto_text[row] = new_text
 
         def _pct_or_none(text: str) -> Optional[float]:
             v = _parse_label_as_float(text)
