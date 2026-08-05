@@ -281,6 +281,7 @@ class DCFPage(QWidget):
         # Grid row positions for the two rows that need dynamic behavior
         # (label rewrite / visibility) outside of cell text updates.
         self._ebit_grid_row = None
+        self._ebit_margin_grid_row = None
         self._net_int_grid_row = None
 
         self.table_container = None
@@ -431,6 +432,7 @@ class DCFPage(QWidget):
         self.pv_factor_row_label = None
         self._row_idx = {}
         self._ebit_grid_row = None
+        self._ebit_margin_grid_row = None
         self._net_int_grid_row = None
 
         num_hist, num_proj = self._generate_columns()
@@ -550,6 +552,8 @@ class DCFPage(QWidget):
                 self._free_cash_flow_row = row
             if label == "EBIT":
                 self._ebit_grid_row = row
+            if label == "EBIT Margin":
+                self._ebit_margin_grid_row = row
             if label == "Net Interest Expense":
                 self._net_int_grid_row = row
 
@@ -726,7 +730,6 @@ class DCFPage(QWidget):
         res_layout.addWidget(self._build_h_model_panel())
 
         res_frame.setLayout(res_layout)
-        self._footer_hbox.addWidget(res_frame, 1)
 
         self._apply_tv_model_visibility()
 
@@ -770,7 +773,93 @@ class DCFPage(QWidget):
         capex_layout.addLayout(c5)
 
         capex_frame.setLayout(capex_layout)
-        self._footer_hbox.addWidget(capex_frame, 1)
+
+        # Layout: left column = the new Fair Value bridge (lives where
+        # the Terminal Value box used to sit, directly under PV of FCF,
+        # left-aligned, plain lines rather than a boxed panel per
+        # Ted's instructions). Right column = Terminal Value box
+        # stacked above CapEx Options — both right-aligned now.
+        bridge_widget = self._build_fv_bridge()
+        self._footer_hbox.addWidget(bridge_widget, 1)
+
+        right_col = QVBoxLayout()
+        right_col.addWidget(res_frame)
+        right_col.addWidget(capex_frame)
+        right_col.addStretch(1)
+        self._footer_hbox.addLayout(right_col, 1)
+
+    def _build_fv_bridge(self) -> QWidget:
+        """
+        Replaces the old boxed Terminal Value spot: plain lines, not a
+        panel. Sum of PV of FCF + Discounted Residual Value (linked to
+        whichever Terminal Value model is currently selected) + a user
+        -input Other Adjustment, reconciling to a Fair Value Base. FV
+        High/Low are wired to the WACC/LTGR sensitivity table once
+        that exists — left blank until then rather than faked.
+        """
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        def row(text_label: str, input_widget=None) -> QLabel:
+            h = QHBoxLayout()
+            h.addWidget(QLabel(text_label))
+            h.addStretch()
+            if input_widget is not None:
+                h.addWidget(input_widget)
+                layout.addLayout(h)
+                return input_widget
+            val_lbl = QLabel("-")
+            h.addWidget(val_lbl)
+            layout.addLayout(h)
+            return val_lbl
+
+        self.bridge_sum_pv_label = row("Sum of Present Value of Free Cash Flows:")
+        self.bridge_disc_residual_label = row("Discounted Residual Value:")
+        self.bridge_other_adj_input = QLineEdit("")
+        self.bridge_other_adj_input.setStyleSheet(INPUT_STYLE)
+        self.bridge_other_adj_input.setFixedWidth(90)
+        self.bridge_other_adj_input.editingFinished.connect(self._recalculate)
+        row("Other Adjustment:", self.bridge_other_adj_input)
+
+        layout.addSpacing(10)
+        layout.addWidget(self._build_sensitivity_table())
+
+        layout.addSpacing(10)
+        self.bridge_fv_base_row_label = QLabel("Fair Value of Business Enterprise (Base):")
+        self.bridge_fv_base_row_label.setStyleSheet(BOLD_STYLE)
+        h_base = QHBoxLayout()
+        h_base.addWidget(self.bridge_fv_base_row_label)
+        h_base.addStretch()
+        self.bridge_fv_base_label = QLabel("-")
+        self.bridge_fv_base_label.setStyleSheet(BOLD_STYLE)
+        h_base.addWidget(self.bridge_fv_base_label)
+        layout.addLayout(h_base)
+
+        h_hl_hdr = QHBoxLayout()
+        h_hl_hdr.addWidget(QLabel(""))
+        h_hl_hdr.addStretch()
+        h_hl_hdr.addWidget(QLabel("FV High"))
+        h_hl_hdr.addSpacing(20)
+        h_hl_hdr.addWidget(QLabel("FV Low"))
+        layout.addLayout(h_hl_hdr)
+
+        h_hl_val = QHBoxLayout()
+        h_hl_val.addWidget(QLabel(""))
+        h_hl_val.addStretch()
+        # Pending the WACC/LTGR sensitivity table — these read off it
+        # (@WACC-1%/LTGR+1% for High, @WACC+1%/LTGR-1% for Low) and
+        # can't be wired honestly until that table exists.
+        self.bridge_fv_high_label = QLabel("-")
+        self.bridge_fv_low_label = QLabel("-")
+        h_hl_val.addWidget(self.bridge_fv_high_label)
+        h_hl_val.addSpacing(20)
+        h_hl_val.addWidget(self.bridge_fv_low_label)
+        layout.addLayout(h_hl_val)
+
+        layout.addStretch(1)
+        widget.setLayout(layout)
+        return widget
 
     # ------------------------------------------------------------------
     # TERMINAL VALUE — 4 model panels
@@ -1052,23 +1141,29 @@ class DCFPage(QWidget):
         # LTGR-grown formula chain, computed here end-to-end).
         self._populate_residual_column(inputs)
         self._populate_terminal_value(wacc_val, inputs)
+        self._populate_fv_bridge(inputs)
+        self._populate_sensitivity_table(inputs)
 
     # ------------------------------------------------------------------
     # DYNAMIC ROWS
     # ------------------------------------------------------------------
 
     def _update_ebit_row_label(self):
-        """EBIT <-> EBT dynamic label based on Cash Flows toggle."""
-        if self._ebit_grid_row is None:
-            return
-        lbl_item = self.table_grid.itemAtPosition(self._ebit_grid_row, 0)
-        if lbl_item is None:
-            return
-        widget = lbl_item.widget()
-        if widget is None:
-            return
+        """EBIT <-> EBT dynamic label based on Cash Flows toggle.
+        Applies to both the EBIT row itself and its Margin row —
+        the margin row was previously left stuck on "EBIT Margin"
+        even in FCFE mode."""
         new_text = "EBT" if self._cash_flows_to == "FCFE" else "EBIT"
-        widget.setText(new_text)
+
+        if self._ebit_grid_row is not None:
+            lbl_item = self.table_grid.itemAtPosition(self._ebit_grid_row, 0)
+            if lbl_item is not None and lbl_item.widget() is not None:
+                lbl_item.widget().setText(new_text)
+
+        if self._ebit_margin_grid_row is not None:
+            lbl_item = self.table_grid.itemAtPosition(self._ebit_margin_grid_row, 0)
+            if lbl_item is not None and lbl_item.widget() is not None:
+                lbl_item.widget().setText(f"{new_text} Margin")
 
     def _apply_net_int_proj_visibility(self):
         if self._net_int_grid_row is None:
@@ -1091,7 +1186,7 @@ class DCFPage(QWidget):
                 continue
 
             if is_hist_col:
-                widget.setVisible(True)
+                widget.setVisible(not is_fcff)
             else:
                 widget.setVisible(not is_fcff)
                 if is_fcff:
@@ -1247,15 +1342,12 @@ class DCFPage(QWidget):
                 net_int = 0.0
 
 
-            if ebitda is None or dep is None or amort is None:
+            if ebitda is None or dep is None:
                 ebit_or_ebt = None
             elif self._cash_flows_to == "FCFF":
-                ebit_or_ebt = ebitda - dep - amort
+                ebit_or_ebt = ebitda - dep - (amort or 0.0)
             else:
-                if net_int is None:
-                    ebit_or_ebt = None
-                else:
-                    ebit_or_ebt = ebitda - dep - amort - net_int
+                ebit_or_ebt = ebitda - dep - (amort or 0.0) - (net_int or 0.0)
 
             self._set_currency("EBIT", data_idx, ebit_or_ebt)
 
@@ -1398,9 +1490,9 @@ class DCFPage(QWidget):
                 else:
                     other = None
 
-            terms = [nopat, plus_dep, nwc, capex, other]
-            if all(t is not None for t in terms):
-                fcf = nopat + plus_dep - nwc - capex - other
+            required = [nopat, plus_dep, nwc, capex]
+            if all(t is not None for t in required):
+                fcf = nopat + plus_dep - nwc - capex - (other or 0.0)
                 self._set_currency("Free Cash Flow", data_idx, fcf)
             else:
                 self._set("Free Cash Flow", data_idx, "-")
@@ -1480,9 +1572,13 @@ class DCFPage(QWidget):
                 # PVP/PVF/PV-FCF chain in the main grid — those exist
                 # only inside the Terminal Value box, computed off
                 # the Final Projection Period's PV Period, not off a
-                # chained Residual-column PVP. Leave these four rows
-                # blank for Residual; _populate_residual_column
-                # doesn't touch them either.
+                # chained Residual-column PVP. Blank these three
+                # explicitly (not left at their initial-build "-")
+                # since Residual isn't "missing data," it's simply
+                # not part of this chain at all.
+                self._set("Present Value Period", data_idx, "")
+                self._set("Present Value Factor", data_idx, "")
+                self._set("Present Value of Free Cash Flows", data_idx, "")
                 continue
 
             if label == "NFY":
@@ -1507,27 +1603,216 @@ class DCFPage(QWidget):
             prior_pvp = pvp
 
             # PVF
+            pvf_full: Optional[float] = None
             if pvp is not None and wacc_val is not None and wacc_val > 0:
-                pvf = 1.0 / ((1.0 + wacc_val) ** pvp)
-                self._set("Present Value Factor", data_idx, f"{pvf:.2f}")
+                pvf_full = 1.0 / ((1.0 + wacc_val) ** pvp)
+                self._set("Present Value Factor", data_idx, f"{pvf_full:.2f}")
             else:
                 self._set("Present Value Factor", data_idx, "-")
 
-            # PV of FCF
+            # PV of FCF — uses pvf_full (the actual computed value),
+            # NOT a re-parse of the 2-decimal display label above.
+            # That re-parse was the actual source of the NFY variance
+            # against Excel (3,128 vs 3,140): a true PVF like 0.98039
+            # displays as "0.98", and using the rounded string for the
+            # multiplication baked that rounding into every PV of FCF
+            # cell. Same failure shape as the WACC label round-trip
+            # fixed earlier — anywhere a value is read back from its
+            # own formatted display label instead of a kept float is
+            # a precision leak, and this file had two of them.
             fcf = _read_label(self._calc_labels, fcf_idx, data_idx)
-            pvf = _read_label(self._calc_labels, pvf_idx, data_idx) if pvp is not None and wacc_val is not None else None
-            if fcf is not None and pvf is not None:
+            if fcf is not None and pvf_full is not None:
                 if label == "NFY" and ppa is not None:
-                    pv_fcf = fcf * ppa * pvf
+                    pv_fcf = fcf * ppa * pvf_full
                 else:
-                    pv_fcf = fcf * pvf
+                    pv_fcf = fcf * pvf_full
                 self._set_currency("Present Value of Free Cash Flows", data_idx, pv_fcf)
             else:
                 self._set("Present Value of Free Cash Flows", data_idx, "-")
 
-    # ------------------------------------------------------------------
-    # RESIDUAL COLUMN — self-contained LTGR-grown formula chain
-    # ------------------------------------------------------------------
+    def _build_sensitivity_table(self) -> QWidget:
+        """
+        WACC x LTGR sensitivity table. Every cell in the WACC row and
+        LTGR column is a real user input (per Ted: "make all WACC
+        spots and LTGR spots user input fields") — seeded ONCE at
+        build time with WACC/LTGR -2%/-1%/(actual)/+1%/+2%, then left
+        alone as ordinary sticky inputs, same as every other input
+        field on this page (they do NOT auto-reset to a fresh ±1%/±2%
+        spread on every recalc — only their initial default comes
+        from that formula).
+
+        The 25 interior cells are read-only, recomputed on every
+        recalc by temporarily overriding WACC/LTGR and re-running the
+        real PV chain / Terminal Value / bridge logic (not a
+        duplicated formula set) — see _compute_fv_base_for.
+        """
+        container = QWidget()
+        grid = QGridLayout()
+        grid.setSpacing(4)
+
+        wacc_now = self.get_wacc_value()
+        ltgr_now = self._get_ltgr()
+        wacc_now = wacc_now if wacc_now is not None else 0.10
+        ltgr_now = ltgr_now if ltgr_now is not None else 0.03
+
+        grid.addWidget(QLabel("WACC \\ LTGR", styleSheet=BOLD_STYLE), 0, 0)
+
+        self.sens_wacc_inputs = []
+        for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+            inp = QLineEdit(f"{(wacc_now + offset) * 100:.1f}%")
+            inp.setStyleSheet(INPUT_STYLE)
+            inp.setFixedWidth(60)
+            inp.editingFinished.connect(self._recalculate)
+            self.sens_wacc_inputs.append(inp)
+            grid.addWidget(inp, 0, col + 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.sens_ltgr_inputs = []
+        self.sens_value_labels = []
+        for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+            inp = QLineEdit(f"{(ltgr_now + offset) * 100:.1f}%")
+            inp.setStyleSheet(INPUT_STYLE)
+            inp.setFixedWidth(60)
+            inp.editingFinished.connect(self._recalculate)
+            self.sens_ltgr_inputs.append(inp)
+            grid.addWidget(inp, row + 1, 0)
+
+            value_row = []
+            for col in range(5):
+                lbl = QLabel("-")
+                grid.addWidget(lbl, row + 1, col + 1, alignment=Qt.AlignmentFlag.AlignRight)
+                value_row.append(lbl)
+            self.sens_value_labels.append(value_row)
+
+        container.setLayout(grid)
+        return container
+
+    def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:
+        """
+        Re-runs the real PV chain / Terminal Value / bridge math at an
+        overridden WACC and LTGR, WITHOUT touching the page's actual
+        WACC (that's a parameter everywhere already, not a widget) and
+        with LTGR temporarily swapped on self.ltg_input then restored.
+        This deliberately reuses the same populate methods the live
+        page uses rather than a second hand-written formula set, so
+        the data table can't silently drift from the real formulas —
+        exactly the kind of divergence that caused the OpEx and PVF
+        bugs earlier in this project.
+
+        Revenue/COGS/GP/OpEx/EBITDA/Depreciation/Taxes/NOPAT/CapEx and
+        the discrete-period Free Cash Flow values do NOT depend on
+        WACC or LTGR at all and are left as whatever the live grid
+        already computed — only the Residual column (LTGR-dependent),
+        the PV chain (WACC-dependent), the Terminal Value box (both),
+        and the bridge total are recomputed here.
+        """
+        orig_ltgr_text = self.ltg_input.text()
+        try:
+            self.ltg_input.setText(ltgr_text_override)
+            inputs = self.get_project_inputs()
+            self._populate_residual_column(inputs)
+            self._populate_pv_chain(wacc_override, inputs)
+            self._populate_terminal_value(wacc_override, inputs)
+            self._populate_fv_bridge(inputs)
+            return _parse_label_as_float(self.bridge_fv_base_label.text())
+        finally:
+            self.ltg_input.setText(orig_ltgr_text)
+
+    def _populate_sensitivity_table(self, inputs):
+        if not hasattr(self, "sens_value_labels"):
+            return
+
+        def _pct_or_none(text: str) -> Optional[float]:
+            v = _parse_label_as_float(text)
+            return (v / 100.0) if v is not None else None
+
+        wacc_vals = [_pct_or_none(w.text()) for w in self.sens_wacc_inputs]
+        ltgr_vals = [_pct_or_none(l.text()) for l in self.sens_ltgr_inputs]
+
+        # FV High = @ WACC-1% (col idx 1), LTGR+1% (row idx 3)
+        # FV Low  = @ WACC+1% (col idx 3), LTGR-1% (row idx 1)
+        high_coord = (3, 1)
+        low_coord = (1, 3)
+
+        for row in range(5):
+            for col in range(5):
+                lbl = self.sens_value_labels[row][col]
+                w = wacc_vals[col]
+                l = ltgr_vals[row]
+                if w is None or l is None or w <= 0:
+                    lbl.setText("-")
+                    lbl.setStyleSheet("")
+                    continue
+                fv = self._compute_fv_base_for(w, self.sens_ltgr_inputs[row].text())
+                lbl.setText(_fmt_currency(fv))
+                lbl.setStyleSheet(BOLD_STYLE if (row, col) in (high_coord, low_coord) else "")
+
+        # Wire FV High/Low off the two specific cells above, then do
+        # one real recalc pass to restore the live grid — every call
+        # to _compute_fv_base_for above overwrote the main grid's PV
+        # chain / Terminal Value / bridge cells with an overridden
+        # WACC/LTGR, so the page is currently showing the LAST
+        # sensitivity cell's numbers, not the real live ones.
+        self.bridge_fv_high_label.setText(self.sens_value_labels[high_coord[0]][high_coord[1]].text())
+        self.bridge_fv_low_label.setText(self.sens_value_labels[low_coord[0]][low_coord[1]].text())
+
+        wacc_val = self.get_wacc_value()
+        self._populate_residual_column(inputs)
+        self._populate_pv_chain(wacc_val, inputs)
+        self._populate_terminal_value(wacc_val, inputs)
+        self._populate_fv_bridge(inputs)
+
+    def _populate_fv_bridge(self, inputs):
+        """
+        Sum of PV of FCF: sums the "Present Value of Free Cash Flows"
+        row across every projected column (NFY through the Final
+        Projection Period). Residual is excluded — it's already blank
+        in that row (Residual's PV lives inside the Terminal Value
+        box, not the main grid's PV chain).
+
+        Discounted Residual Value: linked to whichever Terminal Value
+        model is currently selected — reads that model's own
+        "Present Value of Residual Value" output directly, so
+        switching the model dropdown automatically updates this line.
+
+        FV Base label switches Business Enterprise <-> Equity based
+        on the FCFF/FCFE toggle, per Ted's instruction.
+        """
+        pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
+        sum_pv_fcf = 0.0
+        any_val = False
+        for data_idx, label in enumerate(self._headers):
+            if self._is_historical[data_idx] or label == "Residual":
+                continue
+            v = _read_label(self._calc_labels, pv_fcf_idx, data_idx)
+            if v is not None:
+                sum_pv_fcf += v
+                any_val = True
+        sum_pv_fcf = sum_pv_fcf if any_val else None
+        self.bridge_sum_pv_label.setText(_fmt_currency(sum_pv_fcf))
+
+        model = self.tv_model_combo.currentText()
+        disc_resid_lbl = self._tv_outputs.get(model, {}).get("pv_residual_value")
+        disc_resid = _parse_label_as_float(disc_resid_lbl.text()) if disc_resid_lbl is not None else None
+        self.bridge_disc_residual_label.setText(_fmt_currency(disc_resid))
+
+        other_adj_text = self.bridge_other_adj_input.text().strip()
+        other_adj = _parse_label_as_float(other_adj_text) if other_adj_text else 0.0
+
+        if sum_pv_fcf is None and disc_resid is None:
+            fv_base = None
+        else:
+            fv_base = (sum_pv_fcf or 0.0) + (disc_resid or 0.0) + (other_adj or 0.0)
+        self.bridge_fv_base_label.setText(_fmt_currency(fv_base))
+
+        is_fcff = (self._cash_flows_to == "FCFF")
+        self.bridge_fv_base_row_label.setText(
+            "Fair Value of Business Enterprise (Base):" if is_fcff
+            else "Fair Value of Equity (Base):"
+        )
+
+        # FV High / FV Low: pending the WACC/LTGR sensitivity data
+        # table (not built yet) — deliberately left blank rather than
+        # computed off a table that doesn't exist.
 
     def _get_ltgr(self) -> Optional[float]:
         text = self.ltg_input.text().strip().replace("%", "")
