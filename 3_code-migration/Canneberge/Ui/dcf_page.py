@@ -6,7 +6,7 @@ from typing import Optional, Dict
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QScrollArea, QFrame, QCheckBox, QPushButton, QComboBox, QSpinBox,
-    QDialog, QFormLayout, QDialogButtonBox
+    QDialog, QFormLayout, QDialogButtonBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt
 
@@ -373,14 +373,6 @@ class DCFPage(QWidget):
         self._rebuild_table_if_needed()
 
         self.page_layout.addLayout(self._footer_hbox)
-
-        sens_frame = QFrame()
-        sens_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        sens_outer = QVBoxLayout()
-        sens_outer.addWidget(QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=BOLD_STYLE))
-        sens_outer.addWidget(self._build_sensitivity_table())
-        sens_frame.setLayout(sens_outer)
-        self.page_layout.addWidget(sens_frame)
 
         self.page_layout.addStretch(1)
         self.page_container.setLayout(self.page_layout)
@@ -766,7 +758,7 @@ class DCFPage(QWidget):
         res_frame = QFrame()
         res_frame.setFrameShape(QFrame.Shape.StyledPanel)
         res_layout = QVBoxLayout()
-        res_layout.setContentsMargins(FOOTER_BOX_LEFT_PAD, 8, 8, 8)
+        res_layout.setContentsMargins(8, 8, 8, 8)
         res_layout.addWidget(QLabel("Terminal Value", styleSheet=BOLD_STYLE))
 
         h_model = QHBoxLayout()
@@ -811,7 +803,7 @@ class DCFPage(QWidget):
         capex_frame = QFrame()
         capex_frame.setFrameShape(QFrame.Shape.StyledPanel)
         capex_layout = QVBoxLayout()
-        capex_layout.setContentsMargins(FOOTER_BOX_LEFT_PAD, 8, 8, 8)
+        capex_layout.setContentsMargins(8, 8, 8, 8)
         capex_layout.addWidget(QLabel("CapEx Options", styleSheet=BOLD_STYLE))
 
         c1 = QHBoxLayout()
@@ -858,9 +850,25 @@ class DCFPage(QWidget):
         bridge_widget = self._build_fv_bridge()
         self._footer_hbox.addWidget(bridge_widget, 1)
 
+        # Boxes take their own natural (compact) width and float to
+        # the right edge of this column — the blank space this
+        # creates sits OUTSIDE the box border, between the two
+        # columns, not stretched open inside the box like the
+        # left-padding approach did.
+        res_frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        capex_frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+
+        res_row = QHBoxLayout()
+        res_row.addStretch(1)
+        res_row.addWidget(res_frame)
+
+        capex_row = QHBoxLayout()
+        capex_row.addStretch(1)
+        capex_row.addWidget(capex_frame)
+
         right_col = QVBoxLayout()
-        right_col.addWidget(res_frame)
-        right_col.addWidget(capex_frame)
+        right_col.addLayout(res_row)
+        right_col.addLayout(capex_row)
         right_col.addStretch(1)
         self._footer_hbox.addLayout(right_col, 2)
 
@@ -937,6 +945,10 @@ class DCFPage(QWidget):
         h_hl_val.addWidget(self.bridge_fv_low_label)
         h_hl_val.addStretch()
         layout.addLayout(h_hl_val)
+
+        layout.addSpacing(14)
+        layout.addWidget(QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=BOLD_STYLE))
+        layout.addWidget(self._build_sensitivity_table())
 
         layout.addStretch(1)
         widget.setLayout(layout)
@@ -2068,6 +2080,14 @@ class DCFPage(QWidget):
         if nopat is not None:
             fcf = nopat + (depreciation or 0.0) - dfcfnwc - (residual_capex or 0.0) - (other_adj or 0.0)
         self._set_currency("Free Cash Flow", data_idx, fcf)
+
+    def get_residual_revenue(self) -> Optional[float]:
+        """Public accessor for NWC's Residual row — NWC's own Residual
+        Total Revenue is defined as DCF's Residual Revenue directly,
+        not re-derived. Single source of truth stays on this page."""
+        if "Residual" not in self._headers:
+            return None
+        return _read_label(self._calc_labels, self._row_idx.get("Revenue"), self._headers.index("Residual"))
 
     def collect_state(self) -> dict:
         # Capture the "Less: Other Adjustments" projected/Residual

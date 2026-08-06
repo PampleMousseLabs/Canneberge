@@ -14,6 +14,7 @@ from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.wacc_page import WACCPage
 from Canneberge.Ui.dcf_page import DCFPage
+from Canneberge.Ui.nwc_page import NWCPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.Ui.projection_module_page import ProjectionModulePage
 from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
@@ -89,12 +90,20 @@ class MainWindow(QMainWindow):
             update_projection_callback=self._update_projection_controls,
         )
 
+        self.nwc_page = NWCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_dcf_residual_revenue_callback=self.dcf_page.get_residual_revenue,
+            update_projection_callback=self._update_projection_controls,
+        )
+
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
         self.tabs.addTab(self.gt_page, "GT")
         self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.wacc_page, "WACC")
         self.tabs.addTab(self.dcf_page, "DCF")
+        self.tabs.addTab(self.nwc_page, "NWC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -139,6 +148,8 @@ class MainWindow(QMainWindow):
             self.wacc_page._recalculate()
         if self.tabs.widget(index) is self.dcf_page:
             self.dcf_page._recalculate()
+        if self.tabs.widget(index) is self.nwc_page:
+            self.nwc_page._recalculate()
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()
@@ -153,6 +164,7 @@ class MainWindow(QMainWindow):
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
             self.dcf_page._recalculate()
+            self.nwc_page._recalculate()
     def _open_projection_module_dialog(self):
         dialog = ProjectionModulePage(
             projection_data=self._projection_data,
@@ -166,6 +178,7 @@ class MainWindow(QMainWindow):
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
             self.dcf_page._recalculate()
+            self.nwc_page._recalculate()
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
 
