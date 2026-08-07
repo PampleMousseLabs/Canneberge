@@ -153,6 +153,16 @@ class NWCPage(QWidget):
         self._gpc_row_widgets: List[dict] = []
         self._gpc_nwc_values: Dict[str, Dict[int, Optional[float]]] = {}
 
+        # Preserve CA/CL combo selections across table rebuilds.
+        self._saved_ca_selections: List[str] = []
+        self._saved_cl_selections: List[str] = []
+
+        # Prevent combo signals from causing _recalculate() while the
+        # table is being destroyed/rebuilt.
+        self._building_table = False
+        self._saved_ca_selections: List[str] = []
+        self._saved_cl_selections: List[str] = []
+
         # The lower GPC section is built from Home's GPC ticker list.
         # Keep a reference so it can be removed/rebuilt when Home's
         # ticker fields change.
@@ -254,7 +264,14 @@ class NWCPage(QWidget):
 
     def _on_hist_years_changed(self, value: int):
         self._nwc_historical_years = value
+
+        # Rebuild the main table for the new historical-period count.
         self._rebuild_table_if_needed(force=True)
+
+        # GPC section uses the same historical columns as the main NWC
+        # table, so rebuild that lower section too. This method ends
+        # by recalculating the page.
+        self.refresh_gpc_section(force=True)
 
         # GPC has the same historical columns, so rebuild it whenever
         # this page's historical-period count changes.
@@ -263,8 +280,6 @@ class NWCPage(QWidget):
     def _on_proj_years_changed(self, value: int):
         inputs = self.get_project_inputs()
         self._update_projection_callback(inputs.historical_years, value)
-        self._rebuild_table_if_needed(force=True)
-        self._recalculate()
 
     # ------------------------------------------------------------------
     # COLUMNS
@@ -381,19 +396,56 @@ class NWCPage(QWidget):
                 and new_proj == self._built_proj_years):
             return
 
-        num_hist, num_proj = self._generate_columns()
+        # Do not allow nested rebuilds. This prevents weird duplicate
+        # table layouts if a combo signal fires while widgets are being
+        # rebuilt.
+        if self._building_table:
+            return
 
-        if self.table_container is not None:
-            self.page_layout.removeWidget(self.table_container)
-            self.table_container.deleteLater()
+        self._building_table = True
+        try:
+            # Preserve CA/CL dropdown selections before table destruction.
+            if self.table_container is not None:
+                self._saved_ca_selections = [
+                    c.currentData() or "" for c in self._ca_combos
+                ]
+                self._saved_cl_selections = [
+                    c.currentData() or "" for c in self._cl_combos
+                ]
 
-        self.table_container = self._build_table()
-        self.page_layout.insertWidget(self._table_insert_index, self.table_container)
+                self.page_layout.removeWidget(self.table_container)
+                self.table_container.setParent(None)
+                self.table_container.deleteLater()
 
-        self._built_hist_years = new_hist
-        self._built_proj_years = new_proj
+            # Generate the new column set before building the new table.
+            self._generate_columns()
+
+            # IMPORTANT: clear all widget references from the old table
+            # before building the new one. Otherwise later recalc passes
+            # can try to write to deleted QLabel/QComboBox objects.
+            self._calc_labels = {}
+            self._row_idx = {}
+            self._fye_labels = {}
+            self._ca_combos = []
+            self._cl_combos = []
+            self._ca_value_labels = []
+            self._cl_value_labels = []
+
+            self.table_container = self._build_table()
+            self.page_layout.insertWidget(
+                self._table_insert_index,
+                self.table_container,
+            )
+
+            self._built_hist_years = new_hist
+            self._built_proj_years = new_proj
+
+        finally:
+            self._building_table = False
 
     def _build_table(self) -> QWidget:
+        self._fye_labels = {}
+
         container = QWidget()
         grid = QGridLayout()
         grid.setSpacing(4)
@@ -401,6 +453,7 @@ class NWCPage(QWidget):
 
         # Lock Column 0 width so lower section can match geometry exactly (85px + 265px = 350px)
         grid.setColumnMinimumWidth(0, 350)
+        grid.setColumnStretch(0, 0)
 
         num_hist, num_proj = self._num_hist, self._num_proj
 
@@ -463,6 +516,7 @@ class NWCPage(QWidget):
                        margin: bool = False, border_above: bool = False) -> int:
         row = self._current_table_row
         row_lbl = QLabel(label)
+        row_lbl.setFixedWidth(350)
         style_parts = []
         if bold:
             style_parts.append(BOLD_STYLE)
@@ -504,12 +558,30 @@ class NWCPage(QWidget):
 
         combo = QComboBox()
         combo.addItem("-- None --", "")
+
         for key in candidates:
             combo.addItem(_fmt_ca_cl_option(key), key)
-        default_key = defaults[slot]
-        idx = combo.findData(default_key)
+
+        # Default selection from the original model setup.
+        selected_key = defaults[slot]
+
+        # If this table is being rebuilt, prefer the user's prior
+        # selection for this row/slot.
+        if is_asset and slot < len(self._saved_ca_selections):
+            selected_key = self._saved_ca_selections[slot]
+        elif (not is_asset) and slot < len(self._saved_cl_selections):
+            selected_key = self._saved_cl_selections[slot]
+
+        idx = combo.findData(selected_key)
+
+        # Set the selection BEFORE connecting currentIndexChanged.
+        # This is the key fix: restoring combo state must not fire
+        # _recalculate() while the table is still being built.
         combo.setCurrentIndex(idx if idx >= 0 else 0)
+
         combo.setStyleSheet(INPUT_STYLE)
+        combo.setFixedWidth(340)  # fits inside 350px column without forcing growth
+        combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         combo.currentIndexChanged.connect(self._recalculate)
         grid.addWidget(combo, row, 0)
 
@@ -740,6 +812,19 @@ class NWCPage(QWidget):
     # ------------------------------------------------------------------
 
     def _recalculate(self):
+        if self._building_table:
+            return
+
+        self._rebuild_table_if_needed()
+        inputs = self.get_project_inputs()
+
+        # Projection Years is shared with Home / DCF. Keep NWC's
+        # visible Projection Years spinbox synced to that shared value.
+        if self.proj_years_spin.value() != inputs.projection_years:
+            blocked = self.proj_years_spin.blockSignals(True)
+            self.proj_years_spin.setValue(inputs.projection_years)
+            self.proj_years_spin.blockSignals(blocked)
+
         self._rebuild_table_if_needed()
         inputs = self.get_project_inputs()
 

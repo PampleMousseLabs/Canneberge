@@ -47,8 +47,20 @@ class MainWindow(QMainWindow):
             self._open_projection_module_dialog
         )
 
+        # Projection Years is shared between Home, DCF, and NWC.
+        # Historical Years on NWC remains local/unlinked.
+        self.home_page.projection_years_spin.valueChanged.connect(
+            self._on_home_projection_years_changed
+        )
+
         self.source_data_page = SourceDataPage(
             get_project_inputs_callback=self.home_page.get_project_inputs
+        )
+
+        # When Source Data finishes refreshing, NWC must recalculate
+        # before DCF, because DCF pulls Change in NWC from NWC.
+        self.source_data_page.all_sources_finished.connect(
+            self._on_source_data_refresh_finished
         )
 
         self.subject_financials_page = SubjectFinancialsPage(
@@ -108,8 +120,9 @@ class MainWindow(QMainWindow):
         # NWC now exists, so let NWC refresh DCF after NWC inputs change.
         self.nwc_page.set_nwc_changed_callback(self.dcf_page.refresh)
 
-        # Refresh DCF once now that NWC's initial calculations exist.
-        self.dcf_page.refresh()
+        # Initial page calculation order matters:
+        # NWC calculates first, then DCF reads NWC's Change in NWC.
+        self._refresh_nwc_then_dcf()
 
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
@@ -138,7 +151,57 @@ class MainWindow(QMainWindow):
         nwc_page = getattr(self, "nwc_page", None)
         if nwc_page is None:
             return None
-        return nwc_page.get_changes_in_nwc(period)    
+        return nwc_page.get_changes_in_nwc(period) 
+
+    def _refresh_nwc_then_dcf(self):
+        """
+        Refresh NWC first, then DCF.
+
+        DCF depends on NWC's calculated Change in Net Working Capital.
+        Therefore DCF must not be the first page recalculated after
+        source data, projection data, private financials, or projection
+        year counts change.
+        """
+        if hasattr(self, "nwc_page"):
+            # refresh_gpc_section() also recalculates the NWC page.
+            # It rebuilds the GPC ticker rows only if Home's GPC ticker
+            # list changed; otherwise it just recalculates existing rows.
+            self.nwc_page.refresh_gpc_section(force=False)
+
+        if hasattr(self, "dcf_page"):
+            self.dcf_page.refresh()
+
+    def _on_source_data_refresh_finished(self):
+        """
+        Source Data just finished refreshing. Public-company financials
+        may have changed, so recalculate dependent pages. NWC must run
+        before DCF.
+        """
+        if hasattr(self, "subject_financials_page"):
+            self.subject_financials_page.refresh()
+
+        if hasattr(self, "gt_page"):
+            self.gt_page._recalculate()
+
+        if hasattr(self, "gpc_page"):
+            self.gpc_page._recalculate()
+
+        if hasattr(self, "wacc_page"):
+            self.wacc_page._recalculate()
+
+        self._refresh_nwc_then_dcf()   
+
+    def _on_home_projection_years_changed(self, value: int):
+        """
+        Home-page Projection Years changed by the user.
+        Push the new shared projection-year count everywhere that is
+        supposed to track it. NWC Historical Years is intentionally
+        NOT touched here.
+        """
+        self._update_projection_controls(
+            self.home_page.historical_years_spin.value(),
+            value,
+        )
 
     def _build_menu(self):
         menubar = self.menuBar()
@@ -176,7 +239,7 @@ class MainWindow(QMainWindow):
         if self.tabs.widget(index) is self.wacc_page:
             self.wacc_page._recalculate()
         if self.tabs.widget(index) is self.dcf_page:
-            self.dcf_page._recalculate()
+            self._refresh_nwc_then_dcf()
         if self.tabs.widget(index) is self.nwc_page:
             self.nwc_page._recalculate()
 
@@ -192,8 +255,7 @@ class MainWindow(QMainWindow):
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
-            self.dcf_page._recalculate()
-            self.nwc_page._recalculate()
+            self._refresh_nwc_then_dcf()
     def _open_projection_module_dialog(self):
         dialog = ProjectionModulePage(
             projection_data=self._projection_data,
@@ -206,8 +268,8 @@ class MainWindow(QMainWindow):
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
-            self.dcf_page._recalculate()
-            self.nwc_page._recalculate()
+            self._refresh_nwc_then_dcf()
+
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})
 
@@ -227,9 +289,41 @@ class MainWindow(QMainWindow):
         return self._projection_data
 
     def _update_projection_controls(self, hist_years: int, proj_years: int):
-        """Called by DCF Page to update Home Page spinboxes (Last Edit Wins)."""
+        """
+        Shared sync point for projection years.
+
+        - Home Projection Years is the shared source that ProjectInputs
+          exposes to the rest of the app.
+        - DCF can change it via its dialog.
+        - NWC can change it via its own Projection Years spinbox.
+        - NWC Historical Years remains local/unlinked and is NOT synced.
+        """
+        # Keep existing DCF/Home historical-years behavior untouched.
+        home_hist_blocked = self.home_page.historical_years_spin.blockSignals(True)
         self.home_page.historical_years_spin.setValue(hist_years)
+        self.home_page.historical_years_spin.blockSignals(home_hist_blocked)
+
+        # Shared Projection Years -> Home
+        home_proj_blocked = self.home_page.projection_years_spin.blockSignals(True)
         self.home_page.projection_years_spin.setValue(proj_years)
+        self.home_page.projection_years_spin.blockSignals(home_proj_blocked)
+
+        # Shared Projection Years -> NWC visible spinbox
+        if hasattr(self, "nwc_page"):
+            nwc_proj_blocked = self.nwc_page.proj_years_spin.blockSignals(True)
+            self.nwc_page.proj_years_spin.setValue(proj_years)
+            self.nwc_page.proj_years_spin.blockSignals(nwc_proj_blocked)
+
+        # Rebuild/recalculate any pages whose structure depends on
+        # projection-year count.
+        if hasattr(self, "subject_financials_page"):
+            self.subject_financials_page.refresh()
+
+        if hasattr(self, "dcf_page"):
+            self.dcf_page._recalculate()
+
+        if hasattr(self, "nwc_page"):
+            self._refresh_nwc_then_dcf()
 
     def get_subject_debt(self) -> float:
         return self.subject_financials_page.get_subject_debt()
@@ -655,6 +749,7 @@ class MainWindow(QMainWindow):
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()
         self.gpc_page._recalculate()
+        self._refresh_nwc_then_dcf()
 
         # Block on a full source refresh before confirming the session
         # is loaded. QProgressDialog.exec() runs its own local event

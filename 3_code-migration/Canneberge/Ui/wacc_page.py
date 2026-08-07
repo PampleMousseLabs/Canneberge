@@ -845,8 +845,17 @@ class WACCPage(QWidget):
 
         wacc = None
         if weighted_cost_of_equity is not None and weighted_cost_of_debt is not None:
-            wacc = weighted_cost_of_equity + weighted_cost_of_debt
+            raw_wacc = weighted_cost_of_equity + weighted_cost_of_debt
+            # Capped/rounded to xx.xx% — this rounds the VALUE itself,
+            # not just its display text, unlike the earlier full-
+            # precision fix. Ted's explicit ask: DCF/NWC PV figures
+            # have been consistently off vs Excel even with full WACC
+            # precision wired through, so this tests whether Excel's
+            # own PV chain is actually running off a rounded WACC
+            # cell rather than a raw unrounded one. round(x, 4) on the
+            # 0-1 fraction = 2 decimal places once shown as a percent.
+            wacc = round(raw_wacc, 4)
         self.wacc_value = wacc
         self.lbl_wacc_rounded.setText(
-            f"{wacc * 100:.4f}%" if wacc is not None else "NA"
+            f"{wacc * 100:.2f}%" if wacc is not None else "NA"
         )
