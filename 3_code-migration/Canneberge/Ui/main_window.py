@@ -84,18 +84,32 @@ class MainWindow(QMainWindow):
 
         self.dcf_page = DCFPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
-            get_wacc_value_callback=self._get_wacc_value, 
+            get_wacc_value_callback=self._get_wacc_value,
             get_subject_financials_callback=self.subject_financials_page.get_metric_value,
             get_projection_data_callback=self._get_projection_data,
             update_projection_callback=self._update_projection_controls,
+            get_nwc_change_callback=self._get_nwc_change,
         )
 
         self.nwc_page = NWCPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_subject_financials_callback=self.subject_financials_page.get_metric_value,
             get_dcf_residual_revenue_callback=self.dcf_page.get_residual_revenue,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
             update_projection_callback=self._update_projection_controls,
         )
+        # Home's GPC ticker fields control which rows exist in the
+        # NWC GPC section. Refresh NWC whenever a user finishes editing
+        # one of those ticker fields (Enter or clicking away).
+        for ticker_edit in self.home_page.gpc_ticker_edits:
+            ticker_edit.editingFinished.connect(
+                self.nwc_page.refresh_gpc_section
+            )    
+        # NWC now exists, so let NWC refresh DCF after NWC inputs change.
+        self.nwc_page.set_nwc_changed_callback(self.dcf_page.refresh)
+
+        # Refresh DCF once now that NWC's initial calculations exist.
+        self.dcf_page.refresh()
 
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.source_data_page, "Source Data")
@@ -110,6 +124,21 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self._build_menu()
+
+    def _get_nwc_change(self, period: str) -> Optional[float]:
+        """
+        Safe bridge between DCFPage and NWCPage.
+
+        DCFPage is created before NWCPage, so during DCFPage's first
+        constructor recalc self.nwc_page does not exist yet. getattr()
+        safely returns None at that stage. Once NWCPage exists, this
+        returns its calculated raw Change in NWC for the requested
+        period.
+        """
+        nwc_page = getattr(self, "nwc_page", None)
+        if nwc_page is None:
+            return None
+        return nwc_page.get_changes_in_nwc(period)    
 
     def _build_menu(self):
         menubar = self.menuBar()
@@ -515,6 +544,11 @@ class MainWindow(QMainWindow):
     def _apply_dcf_page_state(self, state: dict):
         self.dcf_page.apply_state(state)
 
+    def _collect_nwc_page_state(self) -> dict:
+        return self.nwc_page.collect_state()
+
+    def _apply_nwc_page_state(self, state: dict):
+        self.nwc_page.apply_state(state)
 
     def _on_save_session(self):
         inputs = self.home_page.get_project_inputs()
@@ -523,6 +557,7 @@ class MainWindow(QMainWindow):
         proj_state = self._collect_projection_page_state()
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
+        nwc_state = self._collect_nwc_page_state()
 
         try:
             path = save_session(
@@ -533,6 +568,7 @@ class MainWindow(QMainWindow):
                 projection_page_state=proj_state,
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
+                nwc_page_state=nwc_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -563,6 +599,7 @@ class MainWindow(QMainWindow):
         proj_state = self._collect_projection_page_state()
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
+        nwc_state = self._collect_nwc_page_state()
         try:
             saved_path = save_session(
                 project_inputs=inputs,
@@ -572,6 +609,7 @@ class MainWindow(QMainWindow):
                 projection_page_state=proj_state,
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
+                nwc_page_state=nwc_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -612,6 +650,7 @@ class MainWindow(QMainWindow):
         self._apply_projection_page_state(data.get("projection_page_state", {}))
         self._apply_wacc_page_state(data.get("wacc_page_state", {}))
         self._apply_dcf_page_state(data.get("dcf_page_state", {}))
+        self._apply_nwc_page_state(data.get("nwc_page_state", {}))
 
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()

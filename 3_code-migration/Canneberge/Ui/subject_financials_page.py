@@ -553,11 +553,18 @@ class SubjectFinancialsPage(QWidget):
         (they all read through this method). Restored here — if this
         regresses again, check whether something is overwriting this
         file from an older branch/commit.
+
+        NOTE 2: historical lookups used to hardcode statement="IS",
+        which silently broke for every Balance Sheet key (cash,
+        accounts_receivable, accounts_payable, etc. — anything NWC
+        needs). Now auto-detects IS vs BS from the key itself against
+        IS_LINES/BS_LINES, same schema already defined in app_state.py.
         """
         inputs = self.get_project_inputs()
 
         if period in inputs.historical_period_columns + ["TTM"]:
-            return self.get_historical_line_values(key, "IS").get(period)
+            statement = "BS" if any(k == key for k, *_r in BS_LINES) else "IS"
+            return self.get_historical_line_values(key, statement).get(period)
 
         if period in inputs.projection_period_columns:
             pd = self.get_projection_data()

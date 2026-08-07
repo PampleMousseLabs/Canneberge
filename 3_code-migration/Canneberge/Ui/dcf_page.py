@@ -80,7 +80,6 @@ HIST_BLANK_ROWS = {
 # Net Interest Expense (projected) per Ted's instructions — FCFE
 # mode every cell returns 8008135; FCFF mode the row is hidden AND
 # every cell value is forced to 0 (the placeholder never surfaces).
-NWC_PLACEHOLDER = 80085
 NET_INT_PROJ_PLACEHOLDER = 8008135
 
 
@@ -307,13 +306,20 @@ class DCFPage(QWidget):
                  get_wacc_value_callback,
                  get_subject_financials_callback,
                  get_projection_data_callback,
-                 update_projection_callback):
+                 update_projection_callback, 
+                 get_nwc_change_callback=None):
         super().__init__()
         self.get_project_inputs = get_project_inputs_callback
         self.get_wacc_value = get_wacc_value_callback
         self._get_subject_financials = get_subject_financials_callback
         self._get_projection_data = get_projection_data_callback
         self._update_projection_callback = update_projection_callback
+        # MainWindow supplies this callback. It returns the raw
+        # Change in NWC for a given period from NWCPage.
+        #
+        # During DCFPage's first construction, NWCPage does not exist
+        # yet, so MainWindow safely returns None until it is created.
+        self._get_nwc_change = get_nwc_change_callback or (lambda _period: None)
 
         self._calc_labels = {}
         self._input_fields = {}
@@ -1237,6 +1243,10 @@ class DCFPage(QWidget):
         self._populate_fv_bridge(inputs)
         self._populate_sensitivity_table(inputs)
 
+    def refresh(self):
+        """Public refresh entry point used by MainWindow/NWCPage."""
+        self._recalculate()
+
     # ------------------------------------------------------------------
     # DYNAMIC ROWS
     # ------------------------------------------------------------------
@@ -1521,8 +1531,27 @@ class DCFPage(QWidget):
             self._set_currency("Plus: Depreciation", data_idx, plus_dep)
 
 
-            # NWC placeholder
-            self._set("Less: Increase/(Decrease) in DFCFNWC", data_idx, str(NWC_PLACEHOLDER))
+            # Change in NWC pulled from the NWC page (was 80085 placeholder)
+            nwc_change_val = None
+            if hasattr(self, '_get_nwc_change') and self._get_nwc_change is not None:
+                # Assumes callback returns Optional[float] or a dict by period
+                result = self._get_nwc_change(label if callable(self._get_nwc_change) and not isinstance(self._get_nwc_change, dict) else label)
+                if isinstance(result, dict):
+                    nwc_change_val = result.get(label)
+                else:
+                    nwc_change_val = result
+            if nwc_change_val is not None:
+                self._set_currency("Less: Increase/(Decrease) in DFCFNWC", data_idx, nwc_change_val)
+            else:
+            # Change in NWC comes directly from the NWC schedule.
+            # Same period labels are used on both pages:
+            # LFY-4 ... LFY, NFY ... NFY+N, Residual.
+                nwc_change = self._get_nwc_change(label)
+                self._set_currency(
+                    "Less: Increase/(Decrease) in DFCFNWC",
+                    data_idx,
+                    nwc_change,
+                )
 
             # CapEx
             if self._is_historical[data_idx]:
@@ -2067,7 +2096,13 @@ class DCFPage(QWidget):
         nopat = (ebit_or_ebt - (taxes or 0.0)) if ebit_or_ebt is not None else None
         self._set_currency("Net Operating Profit After Tax (NOPAT)", data_idx, nopat)
 
-        dfcfnwc = float(NWC_PLACEHOLDER)  # already set generically, restated for FCF math below
+        # Residual Change in NWC comes from NWCPage's Residual column.
+        dfcfnwc = self._get_nwc_change("Residual")
+        self._set_currency(
+            "Less: Increase/(Decrease) in DFCFNWC",
+            data_idx,
+            dfcfnwc,
+        )
 
         other_adj_idx = self._row_idx.get("Less: Other Adjustments")
         other_inp = self._input_fields.get(other_adj_idx, {}).get(data_idx)
@@ -2077,8 +2112,14 @@ class DCFPage(QWidget):
             other_adj = _parse_label_as_float(raw) if raw else 0.0
 
         fcf = None
-        if nopat is not None:
-            fcf = nopat + (depreciation or 0.0) - dfcfnwc - (residual_capex or 0.0) - (other_adj or 0.0)
+        if nopat is not None and dfcfnwc is not None:
+            fcf = (
+                nopat
+                + (depreciation or 0.0)
+                - dfcfnwc
+                - (residual_capex or 0.0)
+                - (other_adj or 0.0)
+            )
         self._set_currency("Free Cash Flow", data_idx, fcf)
 
     def get_residual_revenue(self) -> Optional[float]:
