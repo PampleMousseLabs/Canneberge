@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from Canneberge.app_state import Transaction
+from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
 
 METRICS = ["TTM Revenue", "TTM EBITDA", "TTM EBIT"]
 MAX_COLS = 3
@@ -209,6 +210,7 @@ class GTPage(QWidget):
         self.grid.setColumnStretch(COL_ACQUIRER, 2)
 
         self._current_row = 0
+        self._chart_dialog = None
         self._build_header()
         self._build_controls()
         self._build_transaction_section()
@@ -250,6 +252,27 @@ class GTPage(QWidget):
         self.grid.addWidget(self.lbl_date,    r, COL_M1,      1, 2)
         self._current_row += 1
 
+        r = self._current_row
+        self.chart_link = QLabel('<a href="#">GT Multiples Range Chart →</a>')
+        self.chart_link.setStyleSheet("color: #1a4a8a;")
+        self.chart_link.linkActivated.connect(self._on_chart_link_clicked)
+        self.grid.addWidget(self.chart_link, r, COL_M1, 1, 2)
+        self._current_row += 1
+
+    def _on_chart_link_clicked(self, _href=None):
+        first_open = self._chart_dialog is None
+        if first_open:
+            self._chart_dialog = GPCCandlestickChart(
+                parent=self,
+                window_title="GT Multiples Range",
+                chart_title="Range of Selected Transaction Multiples",
+            )
+        if first_open:
+            self._recalculate()  # push current data into the new dialog immediately
+        self._chart_dialog.show()
+        self._chart_dialog.raise_()
+        self._chart_dialog.activateWindow()
+
     def _build_controls(self):
         r = self._current_row
 
@@ -260,7 +283,9 @@ class GTPage(QWidget):
         self.num_multiples_spin.setValue(MAX_COLS)
         self.num_multiples_spin.setStyleSheet(INPUT_STYLE)
         self.num_multiples_spin.setFixedWidth(55)
-        self.num_multiples_spin.valueChanged.connect(self._on_inputs_changed)
+        self.num_multiples_spin.valueChanged.connect(
+            self._on_num_multiples_changed
+        )
 
         self.grid.addWidget(spin_label,             r, COL_EXCLUDE, 1, 2)
         self.grid.addWidget(self.num_multiples_spin, r, COL_DATE)
@@ -270,9 +295,13 @@ class GTPage(QWidget):
         dloc_label = QLabel("Discount for Lack of Control:")
         self.dloc_input = QLineEdit("19.4%")
         self.dloc_input.setFixedWidth(70)
-        self.dloc_input.setStyleSheet(INPUT_STYLE)
         self.dloc_input.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.dloc_input.editingFinished.connect(self._on_inputs_changed)
+        # DLOC is derived from the Dashboard's Control Premium
+        # (DLOC = CP / (1 + CP)) and pushed here — never typed.
+        self.dloc_input.setReadOnly(True)
+        self.dloc_input.setStyleSheet(
+            "background-color: #f0f0f0; color: #444444;"
+        )
 
         dloc_row = QHBoxLayout()
         dloc_row.setContentsMargins(0, 0, 0, 0)
@@ -575,6 +604,31 @@ class GTPage(QWidget):
             self.bridge_labels_high[key] = high_lbl
             self._current_row += 1
 
+    def _set_even_weights(self, n_cols: int):
+        """
+        Reset active GT weights to equal weighting after the user
+        changes How Many Multiples.
+
+        Users may subsequently overwrite individual weights manually.
+        """
+        n_cols = max(1, min(n_cols, MAX_COLS))
+        even_weight = f"{100.0 / n_cols:.1f}%"
+
+        for index, inp in enumerate(self.weight_inputs):
+            if index < n_cols:
+                inp.setText(even_weight)
+            else:
+                inp.setText("")
+
+    def _on_num_multiples_changed(self, value: int):
+        """
+        Number of active GT multiple columns changed.
+
+        The newly active columns default to equal weighting.
+        """
+        self._set_even_weights(value)
+        self._recalculate()        
+
     # ------------------------------------------------------------------
     # CALCULATION ENGINE
     # ------------------------------------------------------------------
@@ -660,18 +714,34 @@ class GTPage(QWidget):
             "Minimum":        lambda v: min(v),
         }
 
+        # Raw (unformatted) stat values per column, captured alongside
+        # the display-label loop below, for the candlestick chart —
+        # avoids re-parsing "3.81x"/"NA" strings back out of QLabels.
+        chart_max, chart_q3, chart_q1, chart_min = [], [], [], []
+
         for stat, func in stat_funcs.items():
             for col_idx in range(n_cols):
                 vals = multiples_per_col[col_idx]
+                result = None
                 if vals:
                     try:
+                        result = func(vals)
                         self.stat_label_widgets[stat][col_idx].setText(
-                            _fmt_multiple(func(vals))
+                            _fmt_multiple(result)
                         )
                     except Exception:
                         self.stat_label_widgets[stat][col_idx].setText("NA")
                 else:
                     self.stat_label_widgets[stat][col_idx].setText("NA")
+
+                if stat == "Maximum":
+                    chart_max.append(result)
+                elif stat == "Third Quartile":
+                    chart_q3.append(result)
+                elif stat == "First Quartile":
+                    chart_q1.append(result)
+                elif stat == "Minimum":
+                    chart_min.append(result)
 
         # Subject metrics — pulled from StockAnalysis (public) or PrivateFinancials (private)
         subject_metrics = self._get_subject_metrics(inputs, n_cols)
@@ -793,6 +863,14 @@ class GTPage(QWidget):
         self.bridge_labels_high["bev_nctrl"].setText(
             _fmt_currency(bev_nctrl_high) if bev_nctrl_high is not None else "NA"
         )
+
+        chart_labels = [
+            self.metric_combos[i].currentText() for i in range(n_cols)
+        ]
+        if self._chart_dialog is not None:
+            self._chart_dialog.update_data(
+                chart_labels, chart_q3, chart_max, chart_min, chart_q1
+            )
 
     def _get_subject_metrics(self, inputs, n_cols) -> list:
         """

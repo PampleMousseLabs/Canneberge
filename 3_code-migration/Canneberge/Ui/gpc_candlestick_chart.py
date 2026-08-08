@@ -31,9 +31,19 @@ WICK_WIDTH = 1.5
 
 
 class GPCCandlestickChart(QDialog):
-    def __init__(self, parent=None):
+    """
+    Generic OHLC-style candlestick chart for a set of "Range of
+    Selected Multiples"-style columns. Despite the module/class name
+    (kept as-is to avoid touching GPCPage's existing import), nothing
+    in here is GPC-specific — GTPage reuses this same class with its
+    own window_title/chart_title rather than a duplicated file.
+    """
+
+    def __init__(self, parent=None, window_title: str = "GPC Multiples Range",
+                 chart_title: str = "Range of Selected Multiples"):
         super().__init__(parent)
-        self.setWindowTitle("GPC Multiples Range")
+        self.setWindowTitle(window_title)
+        self._chart_title = chart_title
         self.setMinimumSize(900, 500)
 
         self.figure = Figure(figsize=(9, 5))
@@ -94,7 +104,7 @@ class GPCCandlestickChart(QDialog):
         self.ax.set_xticks(range(len(plotted_labels)))
         self.ax.set_xticklabels(plotted_labels, rotation=30, ha="right", fontsize=8)
         self.ax.set_ylabel("Multiple (x)")
-        self.ax.set_title("Range of Selected Multiples")
+        self.ax.set_title(self._chart_title)
         self.ax.axhline(0, color="#cccccc", linewidth=0.8, zorder=1)
         self.ax.grid(True, axis="y", alpha=0.3, zorder=0)
 

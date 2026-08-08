@@ -326,7 +326,9 @@ class GPCPage(QWidget):
         self.num_multiples_spin.setValue(MAX_COLS)
         self.num_multiples_spin.setStyleSheet(INPUT_STYLE)
         self.num_multiples_spin.setFixedWidth(55)
-        self.num_multiples_spin.valueChanged.connect(self._on_inputs_changed)
+        self.num_multiples_spin.valueChanged.connect(
+            self._on_num_multiples_changed
+        )
 
         self.grid.addWidget(spin_label,             r, COL_EXCLUDE, 1, 2)
         self.grid.addWidget(self.num_multiples_spin, r, COL_TICKER)
@@ -336,9 +338,13 @@ class GPCPage(QWidget):
         dloc_label = QLabel("Discount for Lack of Control:")
         self.dloc_input = QLineEdit("19.4%")
         self.dloc_input.setFixedWidth(70)
-        self.dloc_input.setStyleSheet(INPUT_STYLE)
         self.dloc_input.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.dloc_input.editingFinished.connect(self._on_inputs_changed)
+        # DLOC is derived from the Dashboard's Control Premium
+        # (DLOC = CP / (1 + CP)) and pushed here — never typed.
+        self.dloc_input.setReadOnly(True)
+        self.dloc_input.setStyleSheet(
+            "background-color: #f0f0f0; color: #444444;"
+        )
 
         dloc_row = QHBoxLayout()
         dloc_row.setContentsMargins(0, 0, 0, 0)
@@ -752,6 +758,32 @@ class GPCPage(QWidget):
             self.bridge_labels_low[key] = low_lbl
             self.bridge_labels_high[key] = high_lbl
             self._current_row += 1
+
+    def _set_even_weights(self, n_cols: int):
+        """
+        Reset active GPC weights to equal weighting after the user
+        changes How Many Multiples.
+
+        Users may subsequently overwrite individual weights manually.
+        """
+        n_cols = max(1, min(n_cols, MAX_COLS))
+        even_weight = f"{100.0 / n_cols:.1f}%"
+
+        for index, inp in enumerate(self.weight_inputs):
+            if index < n_cols:
+                inp.setText(even_weight)
+            else:
+                inp.setText("")
+
+    def _on_num_multiples_changed(self, value: int):
+        """
+        Number of active GPC multiple columns changed.
+
+        The new active columns default to equal weighting. This does
+        not prevent later manual edits to individual weight fields.
+        """
+        self._set_even_weights(value)
+        self._recalculate()        
 
     # ------------------------------------------------------------------
     # CUSTOM MULTIPLE MODE HANDLING

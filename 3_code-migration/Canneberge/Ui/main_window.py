@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
 from Canneberge.Ui.home_page import HomePage
+from Canneberge.Ui.dashboard_page import DashboardPage
 from Canneberge.Ui.source_data_page import SourceDataPage
 from Canneberge.Ui.gt_page import GTPage
 from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
@@ -40,6 +41,7 @@ class MainWindow(QMainWindow):
 
         # Pages
         self.home_page = HomePage()
+        self.dashboard_page = DashboardPage()
         self.home_page.set_private_financials_callback(
             self._open_private_financials_dialog
         )
@@ -123,8 +125,22 @@ class MainWindow(QMainWindow):
         # Initial page calculation order matters:
         # NWC calculates first, then DCF reads NWC's Change in NWC.
         self._refresh_nwc_then_dcf()
+        # Dashboard mirrors WACC/DCF inputs, so it can only be bound
+        # once both of those pages exist.
+        self.dashboard_page.bind_pages(
+            wacc_page=self.wacc_page,
+            dcf_page=self.dcf_page,
+            gpc_page=self.gpc_page,
+            gt_page=self.gt_page,
+            nwc_page=self.nwc_page,
+            get_project_inputs=self.home_page.get_project_inputs,
+            get_stockanalysis_results=self._get_stockanalysis_results,
+            get_subject_debt=self.get_subject_debt,
+            get_subject_metric_value=self._get_subject_metric_value,
+        )
 
         self.tabs.addTab(self.home_page, "Home")
+        self.tabs.addTab(self.dashboard_page, "Dashboard")
         self.tabs.addTab(self.source_data_page, "Source Data")
         self.tabs.addTab(self.gt_page, "GT")
         self.tabs.addTab(self.gpc_page, "GPC")
@@ -242,6 +258,8 @@ class MainWindow(QMainWindow):
             self._refresh_nwc_then_dcf()
         if self.tabs.widget(index) is self.nwc_page:
             self.nwc_page._recalculate()
+        if self.tabs.widget(index) is self.dashboard_page:
+            self.dashboard_page.refresh_from_pages()
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()

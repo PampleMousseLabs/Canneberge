@@ -812,14 +812,6 @@ class DCFPage(QWidget):
         capex_layout.setContentsMargins(8, 8, 8, 8)
         capex_layout.addWidget(QLabel("CapEx Options", styleSheet=BOLD_STYLE))
 
-        c1 = QHBoxLayout()
-        c1.addWidget(QLabel("Residual CapEx at LTGR:"))
-        self.capex_ltg = QLineEdit("425")
-        self.capex_ltg.setStyleSheet(INPUT_STYLE)
-        self.capex_ltg.setFixedWidth(60)
-        c1.addWidget(self.capex_ltg)
-        capex_layout.addLayout(c1)
-
         c2 = QHBoxLayout()
         c2.addWidget(QLabel("Avg of Forecast:"))
         c2.addStretch()
@@ -2156,7 +2148,6 @@ class DCFPage(QWidget):
             "ltg_input": self.ltg_input.text(),
             "tv_model": self.tv_model_combo.currentText(),
             "tv_inputs": tv_inputs_state,
-            "capex_ltg": self.capex_ltg.text(),
             "capex_dep_pct": self.capex_dep_pct.text(),
             "cash_flows_to": self._cash_flows_to,
             "other_adj_inputs": other_adj,
@@ -2167,7 +2158,6 @@ class DCFPage(QWidget):
         if not state:
             return
         self.ltg_input.setText(state.get("ltg_input", "3.0%"))
-        self.capex_ltg.setText(state.get("capex_ltg", "425"))
         self.capex_dep_pct.setText(state.get("capex_dep_pct", "100.0%"))
         self._cash_flows_to = state.get("cash_flows_to", "FCFF")
 
