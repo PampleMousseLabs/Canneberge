@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QProgressDialog
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QActionGroup
 
 from Canneberge.Ui.home_page import HomePage
 from Canneberge.Ui.dashboard_page import DashboardPage
@@ -244,6 +244,32 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut("Ctrl+Q")
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        self._build_view_menu(menubar)
+
+    def _build_view_menu(self, menubar):
+        """
+        Theme switcher. Reads/writes Canneberge/Ui/theme.py's theme_manager
+        singleton. Selecting a theme fires theme_changed, which every
+        theme-aware page listens for to restyle itself live (no restart).
+        """
+        from Canneberge.Ui.theme import theme_manager
+
+        view_menu = menubar.addMenu("View")
+        theme_menu = view_menu.addMenu("Theme")
+
+        action_group = QActionGroup(self)
+        action_group.setExclusive(True)
+
+        for name in theme_manager.theme_names():
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(theme_manager.current.name == name)
+            action.triggered.connect(
+                lambda checked, n=name: theme_manager.set_theme(n)
+            )
+            action_group.addAction(action)
+            theme_menu.addAction(action)
 
     def _on_tab_changed(self, index: int):
         if self.tabs.widget(index) is self.subject_financials_page:

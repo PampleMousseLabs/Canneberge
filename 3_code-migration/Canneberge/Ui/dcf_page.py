@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Ui.theme import theme_manager
+
 # =====================================================================
 # STYLE CONFIG — this is the block to edit for any purely visual
 # change (fonts, sizes, borders, spacers, widths, which rows are
@@ -17,29 +19,79 @@ from PyQt6.QtCore import Qt
 # the page LOOKS — if a visual change requires editing code outside
 # this block, that's a gap in this config, not something to hand-edit
 # elsewhere.
+#
+# Colors are NO LONGER hardcoded here. They come from the active
+# Theme (Canneberge/Ui/theme.py) via theme_manager.current. The
+# get_*_style() functions below read theme_manager.current live, so
+# calling them after a theme switch always returns the new colors.
+# Only structural values (widths, font sizes, which rows get which
+# treatment) stay as local constants — those aren't theme concerns.
 # =====================================================================
 
-# --- Colors / base styles ---
-INPUT_BG_COLOR = "#dce9f7"
-INPUT_TEXT_COLOR = "#1a4a8a"
-HEADER_BG_COLOR = "#f0f0f0"
-BORDER_COLOR = "#000000"
-
-INPUT_STYLE = f"background-color: {INPUT_BG_COLOR}; color: {INPUT_TEXT_COLOR};"
-BOLD_STYLE = "font-weight: bold;"
 HEADER_FONT_SIZE = 11  # px
-HEADER_STYLE = f"font-weight: bold; font-size: {HEADER_FONT_SIZE}px; background-color: {HEADER_BG_COLOR};"
 INDENT_STYLE = "padding-left: 20px;"
 MARGIN_ROW_STYLE = "padding-left: 20px; font-style: italic;"
 MARGIN_CELL_STYLE = "font-style: italic;"
 COL_WIDTH = 95  # px, width of each LFY-4/NFY/etc. data column
 
 # --- Borders ---
-# Change thickness/color here; applies everywhere these styles are used.
+# Change thickness here; color comes from the active theme.
 BORDER_ABOVE_WIDTH = 1   # px, thin underline-above rule (subtotal rows)
 BORDER_BELOW_WIDTH = 2   # px, thick underline-below rule (grand total rows)
-BORDER_ABOVE_STYLE = f"border-top: {BORDER_ABOVE_WIDTH}px solid {BORDER_COLOR};"
-BORDER_BELOW_STYLE = f"border-bottom: {BORDER_BELOW_WIDTH}px solid {BORDER_COLOR};"
+
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_header_style() -> str:
+    t = theme_manager.current
+    return f"font-weight: bold; font-size: {HEADER_FONT_SIZE}px; background-color: {t.header_bg};"
+
+
+def get_border_above_style() -> str:
+    t = theme_manager.current
+    return f"border-top: {BORDER_ABOVE_WIDTH}px solid {t.border_color};"
+
+
+def get_border_below_style() -> str:
+    t = theme_manager.current
+    return f"border-bottom: {BORDER_BELOW_WIDTH}px solid {t.border_color};"
+
+
+def get_link_style() -> str:
+    return theme_manager.current.link_style()
+
+
+def get_note_style() -> str:
+    t = theme_manager.current
+    return f"font-size: 10px; color: {t.note_text};"
+
+
+# =====================================================================
+# LEGACY COMPATIBILITY SHIM — DO NOT ADD NEW USAGES OF THESE
+#
+# nwc_page.py imports BOLD_STYLE, INPUT_STYLE, HEADER_STYLE, and
+# BORDER_COLOR directly from this module (see nwc_page.py's import
+# block). nwc_page.py has NOT been migrated to the theme system yet,
+# so these are frozen to whatever theme is active at import time —
+# they will NOT live-update if the user switches themes while on the
+# NWC tab. That's a known, temporary limitation, not a bug: nwc_page.py
+# gets the same treatment dcf_page.py just got in the next migration
+# pass, and this whole block gets deleted at that point.
+#
+# If any OTHER file starts importing these names from here, that's a
+# sign this shim is being leaned on as a permanent crutch instead of a
+# bridge — migrate that file instead of extending this block.
+# =====================================================================
+BOLD_STYLE = get_bold_style()
+INPUT_STYLE = get_input_style()
+HEADER_STYLE = get_header_style()
+BORDER_COLOR = theme_manager.current.border_color
 
 # Rows that get a thin border ABOVE them, across every historical +
 # projected + Residual data cell (not just the label). "EBIT" covers
@@ -97,7 +149,7 @@ def _fmt_pct(value: Optional[float]) -> str:
 
 def _make_section_label(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet(HEADER_STYLE)
+    lbl.setStyleSheet(get_header_style())
     lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
     return lbl
 
@@ -198,34 +250,34 @@ class ProjectionTogglesDialog(QDialog):
         self.hist_years_spin.setMinimum(0)
         self.hist_years_spin.setMaximum(5)
         self.hist_years_spin.setValue(project_inputs.historical_years)
-        self.hist_years_spin.setStyleSheet(INPUT_STYLE)
+        self.hist_years_spin.setStyleSheet(get_input_style())
         form.addRow("Years of Historicals:", self.hist_years_spin)
 
         self.proj_years_spin = QSpinBox()
         self.proj_years_spin.setMinimum(1)
         self.proj_years_spin.setMaximum(20)
         self.proj_years_spin.setValue(project_inputs.projection_years)
-        self.proj_years_spin.setStyleSheet(INPUT_STYLE)
+        self.proj_years_spin.setStyleSheet(get_input_style())
         form.addRow("Years of Projections:", self.proj_years_spin)
 
         self.cash_flows_combo = QComboBox()
         self.cash_flows_combo.addItems(["FCFF", "FCFE"])
-        self.cash_flows_combo.setStyleSheet(INPUT_STYLE)
+        self.cash_flows_combo.setStyleSheet(get_input_style())
         form.addRow("Cash Flows to:", self.cash_flows_combo)
 
         self.nol_combo = QComboBox()
         self.nol_combo.addItems(["No", "Yes"])
-        self.nol_combo.setStyleSheet(INPUT_STYLE)
+        self.nol_combo.setStyleSheet(get_input_style())
         form.addRow("NOLs?:", self.nol_combo)
 
         self.nwc_combo = QComboBox()
         self.nwc_combo.addItems(["No", "Yes"])
-        self.nwc_combo.setStyleSheet(INPUT_STYLE)
+        self.nwc_combo.setStyleSheet(get_input_style())
         form.addRow("Change in NWC provided by Mgmt:", self.nwc_combo)
 
         self.val_approach_combo = QComboBox()
         self.val_approach_combo.addItems(["DCF", "LBO"])
-        self.val_approach_combo.setStyleSheet(INPUT_STYLE)
+        self.val_approach_combo.setStyleSheet(get_input_style())
         form.addRow("Valuation Approach:", self.val_approach_combo)
 
         layout.addLayout(form)
@@ -327,6 +379,12 @@ class DCFPage(QWidget):
         self._is_historical = []
         self._fye_labels = {}
         self.pv_factor_row_label = None
+        # Theme live-refresh needs these to restyle in place without
+        # rebuilding (rebuilding would destroy any user-typed values
+        # in self._input_fields). Populated alongside their sibling
+        # dicts in _build_table_headers / _build_table_rows.
+        self._row_labels = {}          # {row_idx: QLabel}
+        self._period_header_labels = {}  # {data_idx: QLabel} (row 1, "LFY-4" etc.)
 
         # Row indices into self._rows, captured during _build_table_rows.
         # _recalculate() looks up cells via these so we don't string-match
@@ -353,6 +411,104 @@ class DCFPage(QWidget):
         self._cash_flows_to = "FCFF"
 
         self._build_ui()
+        self._recalculate()
+
+        # Live theme switching. Does NOT rebuild the grid (that would
+        # destroy any values the user has typed into _input_fields) —
+        # it walks the existing widget references and reapplies each
+        # one's stylesheet using the same _row_label_style /
+        # _calc_cell_style logic used at build time.
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    # ------------------------------------------------------------------
+    # THEME
+    # ------------------------------------------------------------------
+
+    def _apply_theme(self, theme=None):
+        """
+        Called whenever the user switches themes (View > Theme). Walks
+        every persistent styled widget on this page and reapplies its
+        stylesheet from the new active theme.
+
+        Deliberately does NOT rebuild the table grid — rebuilding would
+        destroy the QLineEdit widgets in self._input_fields, which can
+        hold values the user has manually typed in (Other Adjustments /
+        Amortization Residual overrides). Restyling in place preserves
+        those values exactly as-is.
+
+        `theme` param is accepted because Qt's signal passes it, but
+        every getter below reads theme_manager.current directly, so
+        it's not actually used — this always reflects the live theme.
+        """
+        # --- Header info row ---
+        self.lbl_client.setStyleSheet(get_bold_style())
+        self.lbl_subject.setStyleSheet(get_bold_style())
+        self.lbl_method.setStyleSheet(get_bold_style())
+        self.lbl_date.setStyleSheet(get_bold_style())
+        self.link_toggles.setStyleSheet(get_link_style())
+
+        # --- Main data grid: period header row ---
+        for lbl in self._period_header_labels.values():
+            lbl.setStyleSheet(get_note_style())
+        for lbl in self._fye_labels.values():
+            lbl.setStyleSheet(get_note_style())
+
+        # --- Main data grid: row labels + calc cells + input cells ---
+        # self._rows holds (label, is_bold, is_input, is_indent, is_margin)
+        # in the same order used at build time — reuse it so restyle
+        # logic can never drift from build logic.
+        for idx, (label, is_bold, is_input, is_indent, is_margin) in enumerate(self._rows):
+            is_bold = is_bold or (label in FORCE_BOLD_ROWS)
+
+            row_lbl = self._row_labels.get(idx)
+            if row_lbl is not None:
+                style = self._row_label_style(label, is_bold, is_indent, is_margin)
+                row_lbl.setStyleSheet(style)
+
+            for data_idx, is_hist_col in enumerate(self._is_historical):
+                inp = self._input_fields.get(idx, {}).get(data_idx)
+                if inp is not None:
+                    inp.setStyleSheet(get_input_style())
+                    continue
+                calc_lbl = self._calc_labels.get(idx, {}).get(data_idx)
+                if calc_lbl is not None:
+                    style = self._calc_cell_style(label, is_bold, is_margin, is_hist_col)
+                    if style:
+                        calc_lbl.setStyleSheet(style)
+
+        # --- Terminal Value box ---
+        self._lbl_tv_header.setStyleSheet(get_bold_style())
+        self.tv_model_combo.setStyleSheet(get_input_style())
+        self.ltg_input.setStyleSheet(get_input_style())
+        for model_inputs in self._tv_inputs.values():
+            for inp in model_inputs.values():
+                inp.setStyleSheet(get_input_style())
+
+        # --- CapEx Options box ---
+        self._lbl_capex_header.setStyleSheet(get_bold_style())
+        self.capex_dep_pct.setStyleSheet(get_input_style())
+
+        # --- Fair Value bridge ---
+        self.bridge_other_adj_input.setStyleSheet(get_input_style())
+        self.bridge_fv_base_row_label.setStyleSheet(
+            get_bold_style() + get_border_above_style()
+        )
+        self.bridge_fv_base_label.setStyleSheet(
+            get_bold_style() + get_border_above_style() + get_border_below_style()
+        )
+
+        # --- Sensitivity table ---
+        self._lbl_sensitivity_header.setStyleSheet(get_bold_style())
+        self._lbl_wacc_ltgr_corner.setStyleSheet(get_bold_style())
+        for inp in self.sens_wacc_inputs:
+            inp.setStyleSheet(get_input_style())
+        for inp in self.sens_ltgr_inputs:
+            inp.setStyleSheet(get_input_style())
+        # sens_value_labels' bold-on-high/low-cell styling is already
+        # recomputed by _populate_sensitivity_table() using
+        # get_bold_style(), and _recalculate() runs that every pass —
+        # so one recalc pass picks up the new theme for those cells
+        # without needing separate handling here.
         self._recalculate()
 
     # ------------------------------------------------------------------
@@ -394,13 +550,13 @@ class DCFPage(QWidget):
         # then Projection Toggles link directly below it.
         info_row = QHBoxLayout()
         self.lbl_client = QLabel()
-        self.lbl_client.setStyleSheet(BOLD_STYLE)
+        self.lbl_client.setStyleSheet(get_bold_style())
         self.lbl_subject = QLabel()
-        self.lbl_subject.setStyleSheet(BOLD_STYLE)
+        self.lbl_subject.setStyleSheet(get_bold_style())
         self.lbl_method = QLabel("Income Approach - Discounted Cash Flow Method")
-        self.lbl_method.setStyleSheet(BOLD_STYLE)
+        self.lbl_method.setStyleSheet(get_bold_style())
         self.lbl_date = QLabel()
-        self.lbl_date.setStyleSheet(BOLD_STYLE)
+        self.lbl_date.setStyleSheet(get_bold_style())
 
         info_row.addWidget(self.lbl_client)
         info_row.addSpacing(20)
@@ -414,7 +570,7 @@ class DCFPage(QWidget):
         toggle_row = QHBoxLayout()
         self.link_toggles = QPushButton("Projection Toggles")
         self.link_toggles.setStyleSheet(
-            "border: none; color: #1a4a8a; text-decoration: underline; background: transparent;"
+            get_link_style()
         )
         self.link_toggles.setCursor(Qt.CursorShape.PointingHandCursor)
         self.link_toggles.clicked.connect(self._open_toggles)
@@ -484,6 +640,8 @@ class DCFPage(QWidget):
         self._calc_labels = {}
         self._input_fields = {}
         self._fye_labels = {}
+        self._row_labels = {}
+        self._period_header_labels = {}
         self.pv_factor_row_label = None
         self._row_idx = {}
         self._ebit_grid_row = None
@@ -531,8 +689,9 @@ class DCFPage(QWidget):
         for data_idx, col_label in enumerate(self._headers):
             lbl = QLabel(col_label)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            lbl.setStyleSheet("font-size: 10px; color: #555555;")
+            lbl.setStyleSheet(get_note_style())
             self.table_grid.addWidget(lbl, r, self._grid_col(data_idx))
+            self._period_header_labels[data_idx] = lbl
         self._current_table_row += 1
 
         # Row 2: FYE — placeholders here, populated by _recalculate().
@@ -541,10 +700,40 @@ class DCFPage(QWidget):
         for data_idx, col_label in enumerate(self._headers):
             lbl = QLabel("")
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            lbl.setStyleSheet("font-size: 10px; color: #555555;")
+            lbl.setStyleSheet(get_note_style())
             self.table_grid.addWidget(lbl, r, self._grid_col(data_idx))
             self._fye_labels[col_label] = lbl
         self._current_table_row += 1
+
+    def _row_label_style(self, label: str, is_bold: bool, is_indent: bool, is_margin: bool) -> str:
+        """
+        Single source of truth for a row LABEL's stylesheet string.
+        Used both when the row is first built and again by
+        _apply_theme() on a theme switch, so the two can never drift
+        apart the way separately-maintained style logic would.
+        """
+        parts = []
+        if is_bold:
+            parts.append(get_bold_style())
+        if is_indent:
+            parts.append(INDENT_STYLE)
+        if is_margin:
+            parts.append(MARGIN_ROW_STYLE)
+        if label in ROWS_WITH_BORDER_ABOVE:
+            parts.append(get_border_above_style())
+        return " ".join(parts)
+
+    def _calc_cell_style(self, label: str, is_bold: bool, is_margin: bool, is_hist_col: bool) -> str:
+        """Single source of truth for a calculated-value cell's stylesheet."""
+        parts = []
+        if is_bold:
+            parts.append(get_bold_style())
+        if is_margin:
+            parts.append(MARGIN_CELL_STYLE)
+        if label in ROWS_WITH_BORDER_ABOVE:
+            if not (label == "Present Value of Free Cash Flows" and is_hist_col):
+                parts.append(get_border_above_style())
+        return " ".join(parts)
 
     def _build_table_rows(self, num_hist: int, num_proj: int):
         # tuple = (label, is_bold, is_input, is_indent, is_margin)
@@ -595,18 +784,11 @@ class DCFPage(QWidget):
 
             row = self._current_table_row
             row_lbl = QLabel(label)
-            style_parts = []
-            if is_bold:
-                style_parts.append(BOLD_STYLE)
-            if is_indent:
-                style_parts.append(INDENT_STYLE)
-            if is_margin:
-                style_parts.append(MARGIN_ROW_STYLE)
-            if label in ROWS_WITH_BORDER_ABOVE:
-                style_parts.append(BORDER_ABOVE_STYLE)
-            if style_parts:
-                row_lbl.setStyleSheet(" ".join(style_parts))
+            row_style = self._row_label_style(label, is_bold, is_indent, is_margin)
+            if row_style:
+                row_lbl.setStyleSheet(row_style)
             self.table_grid.addWidget(row_lbl, row, 0, alignment=Qt.AlignmentFlag.AlignLeft)
+            self._row_labels[idx] = row_lbl
 
             if label == "Present Value Factor":
                 self.pv_factor_row_label = row_lbl
@@ -647,7 +829,7 @@ class DCFPage(QWidget):
 
                 if make_input:
                     inp = QLineEdit()
-                    inp.setStyleSheet(INPUT_STYLE)
+                    inp.setStyleSheet(get_input_style())
                     inp.setFixedWidth(COL_WIDTH - 10)
                     inp.setAlignment(Qt.AlignmentFlag.AlignRight)
                     inp.editingFinished.connect(self._recalculate)
@@ -657,22 +839,14 @@ class DCFPage(QWidget):
                     blank = is_hist_col and label in HIST_BLANK_ROWS
                     calc_lbl = QLabel("" if blank else "-")
                     calc_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    cell_style_parts = []
-                    if is_bold:
-                        cell_style_parts.append(BOLD_STYLE)
-                    if is_margin:
-                        cell_style_parts.append(MARGIN_CELL_STYLE)
-                    if label in ROWS_WITH_BORDER_ABOVE:
-                        # PV of FCF is blank on historical columns by
-                        # design (HIST_BLANK_ROWS) — a border-top CSS
-                        # rule renders on an empty label too, so this
-                        # one row's border only applies to
-                        # projected/Residual columns, unlike the other
-                        # border-above rows which span every column.
-                        if not (label == "Present Value of Free Cash Flows" and is_hist_col):
-                            cell_style_parts.append(BORDER_ABOVE_STYLE)
-                    if cell_style_parts:
-                        calc_lbl.setStyleSheet(" ".join(cell_style_parts))
+                    # PV of FCF is blank on historical columns by design
+                    # (HIST_BLANK_ROWS) — a border-top CSS rule renders on
+                    # an empty label too, so that one row's border only
+                    # applies to projected/Residual columns. Handled
+                    # inside _calc_cell_style via the is_hist_col arg.
+                    cell_style = self._calc_cell_style(label, is_bold, is_margin, is_hist_col)
+                    if cell_style:
+                        calc_lbl.setStyleSheet(cell_style)
                     self.table_grid.addWidget(calc_lbl, row, grid_col)
                     self._calc_labels[idx][data_idx] = calc_lbl
 
@@ -765,7 +939,8 @@ class DCFPage(QWidget):
         res_frame.setFrameShape(QFrame.Shape.StyledPanel)
         res_layout = QVBoxLayout()
         res_layout.setContentsMargins(8, 8, 8, 8)
-        res_layout.addWidget(QLabel("Terminal Value", styleSheet=BOLD_STYLE))
+        self._lbl_tv_header = QLabel("Terminal Value", styleSheet=get_bold_style())
+        res_layout.addWidget(self._lbl_tv_header)
 
         h_model = QHBoxLayout()
         h_model.addWidget(QLabel("Model:"))
@@ -773,7 +948,7 @@ class DCFPage(QWidget):
         self.tv_model_combo.addItems(
             ["Gordon Growth", "EBITDA Multiple", "Revenue Multiple", "H-Model"]
         )
-        self.tv_model_combo.setStyleSheet(INPUT_STYLE)
+        self.tv_model_combo.setStyleSheet(get_input_style())
         self.tv_model_combo.setFixedWidth(MODEL_DROPDOWN_WIDTH)
         self.tv_model_combo.currentTextChanged.connect(self._on_tv_model_changed)
         h_model.addWidget(self.tv_model_combo)
@@ -782,7 +957,7 @@ class DCFPage(QWidget):
         h_ltg = QHBoxLayout()
         h_ltg.addWidget(QLabel("Long Term Growth Rate:"))
         self.ltg_input = QLineEdit("3.0%")
-        self.ltg_input.setStyleSheet(INPUT_STYLE)
+        self.ltg_input.setStyleSheet(get_input_style())
         self.ltg_input.setFixedWidth(60)
         self.ltg_input.editingFinished.connect(self._recalculate)
         h_ltg.addWidget(self.ltg_input)
@@ -810,7 +985,8 @@ class DCFPage(QWidget):
         capex_frame.setFrameShape(QFrame.Shape.StyledPanel)
         capex_layout = QVBoxLayout()
         capex_layout.setContentsMargins(8, 8, 8, 8)
-        capex_layout.addWidget(QLabel("CapEx Options", styleSheet=BOLD_STYLE))
+        self._lbl_capex_header = QLabel("CapEx Options", styleSheet=get_bold_style())
+        capex_layout.addWidget(self._lbl_capex_header)
 
         c2 = QHBoxLayout()
         c2.addWidget(QLabel("Avg of Forecast:"))
@@ -833,7 +1009,7 @@ class DCFPage(QWidget):
         c5 = QHBoxLayout()
         c5.addWidget(QLabel("Dep. as % of CapEx:"))
         self.capex_dep_pct = QLineEdit("100.0%")
-        self.capex_dep_pct.setStyleSheet(INPUT_STYLE)
+        self.capex_dep_pct.setStyleSheet(get_input_style())
         self.capex_dep_pct.setFixedWidth(60)
         c5.addWidget(self.capex_dep_pct)
         capex_layout.addLayout(c5)
@@ -905,19 +1081,19 @@ class DCFPage(QWidget):
         self.bridge_sum_pv_label = row("Sum of Present Value of Free Cash Flows:")
         self.bridge_disc_residual_label = row("Discounted Residual Value:")
         self.bridge_other_adj_input = QLineEdit("")
-        self.bridge_other_adj_input.setStyleSheet(INPUT_STYLE)
+        self.bridge_other_adj_input.setStyleSheet(get_input_style())
         self.bridge_other_adj_input.setFixedWidth(90)
         self.bridge_other_adj_input.editingFinished.connect(self._recalculate)
         row("Other Adjustment:", self.bridge_other_adj_input)
 
         layout.addSpacing(10)
         self.bridge_fv_base_row_label = QLabel("Fair Value of Business Enterprise (Base):")
-        self.bridge_fv_base_row_label.setStyleSheet(BOLD_STYLE + BORDER_ABOVE_STYLE)
+        self.bridge_fv_base_row_label.setStyleSheet(get_bold_style() + get_border_above_style())
         self.bridge_fv_base_row_label.setFixedWidth(LABEL_COL_WIDTH)
         h_base = QHBoxLayout()
         h_base.addWidget(self.bridge_fv_base_row_label)
         self.bridge_fv_base_label = QLabel("-")
-        self.bridge_fv_base_label.setStyleSheet(BOLD_STYLE + BORDER_ABOVE_STYLE + BORDER_BELOW_STYLE)
+        self.bridge_fv_base_label.setStyleSheet(get_bold_style() + get_border_above_style() + get_border_below_style())
         h_base.addWidget(self.bridge_fv_base_label)
         h_base.addStretch()
         layout.addLayout(h_base)
@@ -945,7 +1121,8 @@ class DCFPage(QWidget):
         layout.addLayout(h_hl_val)
 
         layout.addSpacing(14)
-        layout.addWidget(QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=BOLD_STYLE))
+        self._lbl_sensitivity_header = QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=get_bold_style())
+        layout.addWidget(self._lbl_sensitivity_header)
         layout.addWidget(self._build_sensitivity_table())
 
         layout.addStretch(1)
@@ -964,7 +1141,7 @@ class DCFPage(QWidget):
 
     def _tv_input_row(self, form: QFormLayout, model: str, key: str, label_text: str, default: str):
         inp = QLineEdit(default)
-        inp.setStyleSheet(INPUT_STYLE)
+        inp.setStyleSheet(get_input_style())
         inp.setFixedWidth(70)
         inp.editingFinished.connect(self._recalculate)
         form.addRow(label_text, inp)
@@ -1775,7 +1952,8 @@ class DCFPage(QWidget):
         wacc_now = wacc_now if wacc_now is not None else 0.10
         ltgr_now = ltgr_now if ltgr_now is not None else 0.03
 
-        grid.addWidget(QLabel("WACC \\ LTGR", styleSheet=BOLD_STYLE), 0, 0)
+        self._lbl_wacc_ltgr_corner = QLabel("WACC \\ LTGR", styleSheet=get_bold_style())
+        grid.addWidget(self._lbl_wacc_ltgr_corner, 0, 0)
 
         DATA_COL_WIDTH = 78
         FIRST_DATA_COL = 2  # 0 = corner label, 1 = spacer
@@ -1787,7 +1965,7 @@ class DCFPage(QWidget):
             # WACC page's own display precision, per Ted's instruction.
             text = f"{(wacc_now + offset) * 100:.4f}%"
             inp = QLineEdit(text)
-            inp.setStyleSheet(INPUT_STYLE)
+            inp.setStyleSheet(get_input_style())
             inp.setFixedWidth(DATA_COL_WIDTH)
             inp.setAlignment(Qt.AlignmentFlag.AlignRight)
             inp.editingFinished.connect(self._recalculate)
@@ -1801,7 +1979,7 @@ class DCFPage(QWidget):
         for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
             text = f"{(ltgr_now + offset) * 100:.1f}%"
             inp = QLineEdit(text)
-            inp.setStyleSheet(INPUT_STYLE)
+            inp.setStyleSheet(get_input_style())
             inp.setFixedWidth(DATA_COL_WIDTH)
             inp.setAlignment(Qt.AlignmentFlag.AlignRight)
             inp.editingFinished.connect(self._recalculate)
@@ -1902,7 +2080,7 @@ class DCFPage(QWidget):
                     continue
                 fv = self._compute_fv_base_for(w, self.sens_ltgr_inputs[row].text())
                 lbl.setText(_fmt_currency(fv))
-                lbl.setStyleSheet(BOLD_STYLE if (row, col) in (high_coord, low_coord) else "")
+                lbl.setStyleSheet(get_bold_style() if (row, col) in (high_coord, low_coord) else "")
 
         # Wire FV High/Low off the two specific cells above, then do
         # one real recalc pass to restore the live grid — every call
