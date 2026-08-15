@@ -9,6 +9,9 @@ from Canneberge.Ui.main_window import MainWindow
 def main():
     app = QApplication(sys.argv)
 
+    from Canneberge.Ui.theme import theme_manager
+    theme_manager.current.apply_to_app(app)
+
     try:
         window = MainWindow()
         window.show()

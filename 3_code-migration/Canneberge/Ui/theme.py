@@ -24,6 +24,15 @@ from PyQt6.QtCore import QObject, pyqtSignal, QSettings
 class Theme:
     name: str
 
+    # --- Whole-app foundation ---
+    # These two apply everywhere via QPalette (see apply_to_app below),
+    # so every widget without its own explicit stylesheet inherits the
+    # right background/text color automatically. Everything else in
+    # this dataclass is an OVERRIDE on top of these two for specific
+    # roles (inputs, headers, links, etc).
+    window_bg: str      # page/window background, whole app
+    default_text: str   # default body text color, whole app
+
     # --- Core UI ---
     input_bg: str
     input_text: str
@@ -81,12 +90,57 @@ class Theme:
     def dark_header_style(self) -> str:
         return f"background-color: {self.dark_header_bg}; color: {self.dark_header_fg};"
 
+    def apply_to_app(self, app) -> None:
+        """
+        Sets window background + default text color for the WHOLE app,
+        not just DCF. This is the mechanism that closes the "background
+        is unaffected" gap: any widget that does NOT have its own
+        explicit setStyleSheet() call inherits these two colors from
+        Qt's QPalette automatically. Widgets that DO have an explicit
+        stylesheet (inputs, headers, etc.) are unaffected by this and
+        keep using their own theme.* fields as before.
+
+        Call this once at app startup, and again every time
+        theme_manager.theme_changed fires.
+        """
+        from PyQt6.QtGui import QPalette, QColor
+        from PyQt6.QtWidgets import QStyleFactory
+
+        # Fusion renders identically across Windows/macOS/Linux and is
+        # the style QPalette color roles are most reliably respected
+        # by — native styles sometimes ignore palette overrides for
+        # certain roles depending on OS theme.
+        app.setStyle(QStyleFactory.create("Fusion"))
+
+        palette = QPalette()
+        window = QColor(self.window_bg)
+        text = QColor(self.default_text)
+
+        palette.setColor(QPalette.ColorRole.Window, window)
+        palette.setColor(QPalette.ColorRole.WindowText, text)
+        palette.setColor(QPalette.ColorRole.Base, window)
+        palette.setColor(QPalette.ColorRole.AlternateBase, window)
+        palette.setColor(QPalette.ColorRole.Text, text)
+        palette.setColor(QPalette.ColorRole.ButtonText, text)
+        palette.setColor(QPalette.ColorRole.ToolTipBase, window)
+        palette.setColor(QPalette.ColorRole.ToolTipText, text)
+
+        app.setPalette(palette)
+
 
 # =============================================================
 # THEME 1 — Slate & Gold (current palette, unchanged baseline)
 # =============================================================
 SLATE_AND_GOLD = Theme(
     name="Slate & Gold",
+    # NOTE: window_bg/default_text did not exist before this change —
+    # there was no app-wide background set anywhere in the codebase.
+    # #ffffff is a neutral guess matching typical unstyled Qt/Windows
+    # rendering. This is the one thing in Theme 1 that is NOT a
+    # preserved "current" value — check it against what the app
+    # actually looked like before and correct if it doesn't match.
+    window_bg="#ffffff",
+    default_text="#1a1a1a",
     input_bg="#dce9f7",
     input_text="#1a4a8a",
     header_bg="#f0f0f0",
@@ -107,7 +161,7 @@ SLATE_AND_GOLD = Theme(
     chart_range="#8b7fd1",
     chart_conclude="#e6b800",
     chart_share_price="#1a1a8c",
-    chart_grid="#dddddd",
+    chart_grid="#cccccc",
     chart_axis_label="#888888",
 )
 
@@ -117,6 +171,8 @@ SLATE_AND_GOLD = Theme(
 # =============================================================
 ONE_DARK_PRO = Theme(
     name="One Dark Pro",
+    window_bg="#282c34",
+    default_text="#abb2bf",
     input_bg="#3b4048",
     input_text="#61afef",
     header_bg="#282c34",
@@ -147,6 +203,8 @@ ONE_DARK_PRO = Theme(
 # =============================================================
 GITHUB_LIGHT = Theme(
     name="GitHub Light",
+    window_bg="#ffffff",
+    default_text="#24292f",
     input_bg="#ddf4ff",
     input_text="#0969da",
     header_bg="#f6f8fa",
@@ -215,6 +273,16 @@ class ThemeManager(QObject):
             raise ValueError(f"Unknown theme '{name}'. Valid: {list(THEMES.keys())}")
         self.current = THEMES[name]
         self._settings.setValue(self._SETTINGS_KEY, name)
+
+        # Apply window_bg/default_text app-wide immediately. Doing this
+        # here (not leaving it to each page) means background/text
+        # theming works for every page automatically, including the 12
+        # not yet migrated to the per-widget theme system.
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            self.current.apply_to_app(app)
+
         self.theme_changed.emit(self.current)
 
     def theme_names(self) -> list[str]:

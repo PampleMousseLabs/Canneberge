@@ -2111,7 +2111,7 @@ class DashboardPage(QWidget):
                 continue
             line = str(row.get("Line Item", "")).strip().lower()
             raw = str(row.get("TTM", "")).replace(",", "")
-            if line == "market cap":
+            if line == "market capitalization":
                 try:
                     market_cap = float(raw)
                 except (ValueError, TypeError):

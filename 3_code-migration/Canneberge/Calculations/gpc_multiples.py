@@ -15,12 +15,17 @@ from typing import Dict, Optional
 
 from Canneberge.Calculations.gpc_metrics import GPC_METRICS
 
-# Confirmed against live Source Data → Ratios view. "Market Cap" is the
-# starting point for BEV now — we build BEV ourselves instead of trusting
+# Confirmed against live Source Data → Ratios view (screenshot,
+# 8/14/2026: Line Item reads "Market Capitalization", not "Market
+# Cap" — the old value here was a guess that never matched the real
+# scrape, silently nulling BEV -> every GPC multiple -> NA for every
+# ticker, every column, since get_ticker_bev() hard-returns None on a
+# missed lookup here with no fallback). "Market Cap" is the starting
+# point for BEV now — we build BEV ourselves instead of trusting
 # StockAnalysis's own precomputed "Enterprise Value" line, because that
 # line bakes in Short-Term Investments in its net debt calc, which this
 # pass intentionally excludes.
-MARKET_CAP_LINE_KEY = "market cap"
+MARKET_CAP_LINE_KEY = "market capitalization"
 
 # BS line keys, reusing the exact SA_KEY_MAP vocabulary from
 # subject_financials_page.py — same strings, not re-invented here.
@@ -38,7 +43,7 @@ _MINORITY_KEY = "minority_interest"
 _BS_LINE_ITEMS = {
     "current_ltd":      "current portion of long-term debt",
     "st_debt":           "short-term debt",
-    "current_leases":    "current portion of long-term leases",
+    "current_leases":    "current portion of leases",
     "lt_debt":            "long-term debt",
     "lt_leases":          "long-term leases",
     "cash":                "cash & equivalents",

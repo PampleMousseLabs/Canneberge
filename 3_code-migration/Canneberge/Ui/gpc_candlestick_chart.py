@@ -24,8 +24,8 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-FILL_COLOR = "#8b7fd1"
-EDGE_COLOR = "#3509b9"
+from Canneberge.Ui.theme import theme_manager
+
 BODY_WIDTH = 0.5
 WICK_WIDTH = 1.5
 
@@ -49,6 +49,7 @@ class GPCCandlestickChart(QDialog):
         self.figure = Figure(figsize=(9, 5))
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.ax = self.figure.add_subplot(111)
+        self._apply_theme_colors()  # background only at construction; full redraw happens in update_data
 
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
@@ -56,6 +57,22 @@ class GPCCandlestickChart(QDialog):
         self.setLayout(layout)
 
         self._last_data = None
+
+        # Redraw fully on theme switch — matplotlib has no equivalent
+        # of a Qt stylesheet that live-updates, so this just re-runs
+        # update_data() with whatever was last plotted (same pattern
+        # showEvent already uses below).
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, _theme=None):
+        self._apply_theme_colors()
+        if self._last_data is not None:
+            self.update_data(*self._last_data)
+
+    def _apply_theme_colors(self):
+        t = theme_manager.current
+        self.figure.patch.set_facecolor(t.window_bg)
+        self.ax.set_facecolor(t.window_bg)
 
     def update_data(
         self,
@@ -72,7 +89,9 @@ class GPCCandlestickChart(QDialog):
         """
         self._last_data = (labels, opens, highs, lows, closes)
 
+        t = theme_manager.current
         self.ax.clear()
+        self._apply_theme_colors()
 
         plotted_labels = []
         x = 0
@@ -86,7 +105,7 @@ class GPCCandlestickChart(QDialog):
             if h is not None and l is not None:
                 self.ax.plot(
                     [x, x], [l, h],
-                    color=EDGE_COLOR, linewidth=WICK_WIDTH, zorder=2,
+                    color=t.chart_edge, linewidth=WICK_WIDTH, zorder=2,
                 )
 
             if o is not None and c is not None:
@@ -96,17 +115,20 @@ class GPCCandlestickChart(QDialog):
                     body_height = (h - l) * 0.02 if (h is not None and l is not None and h != l) else 0.01
                 self.ax.bar(
                     x, body_height, bottom=body_bottom, width=BODY_WIDTH,
-                    color=FILL_COLOR, edgecolor=EDGE_COLOR, zorder=3,
+                    color=t.chart_fill, edgecolor=t.chart_edge, zorder=3,
                 )
 
             x += 1
 
         self.ax.set_xticks(range(len(plotted_labels)))
         self.ax.set_xticklabels(plotted_labels, rotation=30, ha="right", fontsize=8)
-        self.ax.set_ylabel("Multiple (x)")
-        self.ax.set_title(self._chart_title)
-        self.ax.axhline(0, color="#cccccc", linewidth=0.8, zorder=1)
-        self.ax.grid(True, axis="y", alpha=0.3, zorder=0)
+        self.ax.set_ylabel("Multiple (x)", color=t.default_text)
+        self.ax.set_title(self._chart_title, color=t.default_text)
+        self.ax.axhline(0, color=t.chart_grid, linewidth=0.8, zorder=1)
+        self.ax.grid(True, axis="y", alpha=0.3, zorder=0, color=t.chart_grid)
+        self.ax.tick_params(colors=t.chart_axis_label)
+        for spine in self.ax.spines.values():
+            spine.set_color(t.chart_grid)
 
         self.figure.tight_layout()
         self.canvas.draw()

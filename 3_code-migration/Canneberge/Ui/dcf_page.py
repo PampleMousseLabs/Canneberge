@@ -385,6 +385,7 @@ class DCFPage(QWidget):
         # dicts in _build_table_headers / _build_table_rows.
         self._row_labels = {}          # {row_idx: QLabel}
         self._period_header_labels = {}  # {data_idx: QLabel} (row 1, "LFY-4" etc.)
+        self._section_labels = []      # ["Historical Financials", "Projected Financials"] bars
 
         # Row indices into self._rows, captured during _build_table_rows.
         # _recalculate() looks up cells via these so we don't string-match
@@ -452,6 +453,8 @@ class DCFPage(QWidget):
             lbl.setStyleSheet(get_note_style())
         for lbl in self._fye_labels.values():
             lbl.setStyleSheet(get_note_style())
+        for lbl in self._section_labels:
+            lbl.setStyleSheet(get_header_style())
 
         # --- Main data grid: row labels + calc cells + input cells ---
         # self._rows holds (label, is_bold, is_input, is_indent, is_margin)
@@ -642,6 +645,7 @@ class DCFPage(QWidget):
         self._fye_labels = {}
         self._row_labels = {}
         self._period_header_labels = {}
+        self._section_labels = []
         self.pv_factor_row_label = None
         self._row_idx = {}
         self._ebit_grid_row = None
@@ -674,12 +678,17 @@ class DCFPage(QWidget):
         # projected columns + spacer + Residual — Residual has no
         # separate header, it's covered by this label.
         r = self._current_table_row
+        self._section_labels = []
         if num_hist > 0:
-            self.table_grid.addWidget(_make_section_label("Historical Financials"), r, 1, 1, num_hist)
+            hist_lbl = _make_section_label("Historical Financials")
+            self.table_grid.addWidget(hist_lbl, r, 1, 1, num_hist)
+            self._section_labels.append(hist_lbl)
         proj_span = num_proj + 1 + 1  # projected cols + spacer + residual
+        proj_lbl = _make_section_label("Projected Financials")
         self.table_grid.addWidget(
-            _make_section_label("Projected Financials"), r, 1 + num_hist + 1, 1, proj_span
+            proj_lbl, r, 1 + num_hist + 1, 1, proj_span
         )
+        self._section_labels.append(proj_lbl)
         self._section_header_row = r
         self._current_table_row += 1
 
