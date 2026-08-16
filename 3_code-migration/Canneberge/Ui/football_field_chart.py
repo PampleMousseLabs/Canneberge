@@ -23,9 +23,8 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
-RANGE_COLOR = "#8b7fd1"      # same family as the candlestick chart
-SHARE_PRICE_COLOR = "#1a1a8c"
-CONCLUDED_COLOR = "#e6b800"
+from Canneberge.Ui.theme import theme_manager
+
 BAR_HEIGHT = 0.55
 
 
@@ -42,15 +41,35 @@ class FootballFieldChart(QWidget):
         layout.addWidget(self._canvas)
         self.setLayout(layout)
 
+        # Tracks the last real update_chart(...) call so a theme
+        # switch can redraw with the same data instead of reverting
+        # to the empty placeholder. None until the first real draw.
+        self._last_chart_args = None
+
         self._draw_empty("No data yet")
 
+        # This is an embedded, always-visible widget (unlike the GPC
+        # candlestick chart, which is a popup dialog) - so it needs to
+        # pick up theme switches live the whole time the Dashboard tab
+        # exists, not just while a dialog happens to be open.
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, _theme=None):
+        if self._last_chart_args is not None:
+            self.update_chart(*self._last_chart_args)
+        else:
+            self._draw_empty("No data yet")
+
     def _draw_empty(self, message: str):
+        t = theme_manager.current
         self._figure.clear()
+        self._figure.patch.set_facecolor(t.window_bg)
         ax = self._figure.add_subplot(111)
+        ax.set_facecolor(t.window_bg)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.text(0.5, 0.5, message, ha="center", va="center",
-                color="#888888", transform=ax.transAxes)
+                 color=t.chart_axis_label, transform=ax.transAxes)
         self._canvas.draw()
 
     def update_chart(
@@ -66,6 +85,11 @@ class FootballFieldChart(QWidget):
         share_price_marker: already converted to the display basis.
         concluded_fv: already on the display basis.
         """
+        # Remember these so a theme switch can redraw identically.
+        self._last_chart_args = (rows, share_price_marker, concluded_fv, basis)
+
+        t = theme_manager.current
+
         plotted = [
             (label, low, high)
             for label, low, high in rows
@@ -76,7 +100,9 @@ class FootballFieldChart(QWidget):
             return
 
         self._figure.clear()
+        self._figure.patch.set_facecolor(t.window_bg)
         ax = self._figure.add_subplot(111)
+        ax.set_facecolor(t.window_bg)
 
         # Top row of the data should appear at the top of the chart.
         labels = [r[0] for r in plotted]
@@ -89,17 +115,17 @@ class FootballFieldChart(QWidget):
                 width = max(abs(high) * 0.002, 1e-9)
             ax.barh(
                 y, width, left=low, height=BAR_HEIGHT,
-                color=RANGE_COLOR, edgecolor="none", zorder=2,
+                color=t.chart_fill, edgecolor="none", zorder=2,
             )
 
         ax.set_yticks(y_positions)
         ax.set_yticklabels(labels, fontsize=7)
 
         if share_price_marker is not None:
-            ax.axvline(share_price_marker, color=SHARE_PRICE_COLOR,
+            ax.axvline(share_price_marker, color=t.chart_share_price,
                        linewidth=1.6, zorder=3)
         if concluded_fv is not None:
-            ax.axvline(concluded_fv, color=CONCLUDED_COLOR,
+            ax.axvline(concluded_fv, color=t.chart_conclude,
                        linewidth=2.0, zorder=3)
 
         # Bottom number axis, formatted per basis.
@@ -109,22 +135,26 @@ class FootballFieldChart(QWidget):
         else:
             ax.xaxis.set_major_formatter(
                 lambda x, _pos: f"{x:,.0f}")
-        ax.tick_params(axis="x", labelsize=7)
+        ax.tick_params(axis="x", labelsize=7, colors=t.chart_axis_label)
+        ax.tick_params(axis="y", colors=t.default_text)
         ax.xaxis.set_ticks_position("bottom")
 
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
-        ax.grid(axis="x", color="#dddddd", linewidth=0.6, zorder=0)
+        ax.spines["bottom"].set_color(t.chart_grid)
+        ax.grid(axis="x", color=t.chart_grid, linewidth=0.6, zorder=0)
 
         legend_items = [
-            Patch(facecolor=RANGE_COLOR, label="Range"),
-            Line2D([0], [0], color=SHARE_PRICE_COLOR,
+            Patch(facecolor=t.chart_fill, label="Range"),
+            Line2D([0], [0], color=t.chart_share_price,
                    linewidth=1.6, label="Share Price"),
-            Line2D([0], [0], color=CONCLUDED_COLOR,
+            Line2D([0], [0], color=t.chart_conclude,
                    linewidth=2.0, label="Concluded FV"),
         ]
-        ax.legend(handles=legend_items, loc="lower right",
-                  fontsize=7, frameon=False)
+        legend = ax.legend(handles=legend_items, loc="lower right",
+                            fontsize=7, frameon=False)
+        for text in legend.get_texts():
+            text.set_color(t.default_text)
 
         self._canvas.draw()

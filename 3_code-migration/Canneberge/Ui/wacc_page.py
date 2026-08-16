@@ -29,6 +29,8 @@ from PyQt6.QtWidgets import (
 
 from PyQt6.QtCore import Qt
 
+from Canneberge.Ui.theme import theme_manager
+
 from Canneberge.Calculations.ratio_catalogue import (
     compute_debt_to_tic_book,
     compute_historic_capital_structure,
@@ -91,8 +93,49 @@ W_NUM = 30
 W_TICKER = 70
 W_DATA = 130
 
-HEADER_STYLE = "font-weight: bold; color: #6912b0;"
-SECTION_HEADER_STYLE = "font-weight: bold; font-size: 11px;"
+# =====================================================================
+# STYLE — colors come from the active Theme (Canneberge/Ui/theme.py).
+#
+# Three distinct visual roles in this file, don't conflate them:
+#   - get_purple_header_style(): bold purple TEXT, no background -
+#     the column header labels (Observed Beta, Debt %, etc.) and the
+#     "Selected" row label. Uses theme.section_header_accent via
+#     Theme.header_style() - note this is a different Theme method
+#     than dcf_page.py's own local get_header_style(), which instead
+#     draws a colored BACKGROUND bar. Same-ish name, different role -
+#     named get_purple_header_style() here specifically to avoid that
+#     confusion if this file is ever read side-by-side with dcf_page.py.
+#   - get_section_header_style(): bold + slightly larger, default
+#     text color, no purple, no background - matches gpc_page.py's
+#     and gt_page.py's section bars ("Statistics", "Cost of Equity...").
+#   - get_input_style(): the light-blue editable-field look.
+# =====================================================================
+
+
+def get_purple_header_style() -> str:
+    return theme_manager.current.header_style()
+
+
+def get_section_header_style() -> str:
+    t = theme_manager.current
+    return f"font-weight: bold; font-size: 11px; color: {t.bold_text};"
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_note_style() -> str:
+    t = theme_manager.current
+    return f"color: {t.note_text}; font-style: italic;"
+
+
+def get_excluded_row_style() -> str:
+    return f"color: {theme_manager.current.disabled_text};"
+
+
+def get_included_row_style() -> str:
+    return f"color: {theme_manager.current.default_text};"
 
 
 def _make_hrule() -> QFrame:
@@ -104,7 +147,7 @@ def _make_hrule() -> QFrame:
 
 def _make_section_label(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet(SECTION_HEADER_STYLE)
+    lbl.setStyleSheet(get_section_header_style())
     return lbl
 
 
@@ -113,7 +156,9 @@ def _placeholder_label() -> QLabel:
     lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     return lbl
 
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
 
 
 class PctInputEdit(QLineEdit):
@@ -121,10 +166,13 @@ class PctInputEdit(QLineEdit):
     def __init__(self, placeholder="", parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
-        self.setStyleSheet(INPUT_STYLE)
+        self.setStyleSheet(get_input_style())
         self.setFixedWidth(W_DATA - 10)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.editingFinished.connect(self._format_value)
+        theme_manager.theme_changed.connect(
+            lambda _t: self.setStyleSheet(get_input_style())
+        )
 
     def _format_value(self):
         val = _parse_pct_input(self.text())
@@ -137,10 +185,13 @@ class BetaInputEdit(QLineEdit):
     def __init__(self, placeholder="", parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
-        self.setStyleSheet(INPUT_STYLE)
+        self.setStyleSheet(get_input_style())
         self.setFixedWidth(W_DATA - 10)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.editingFinished.connect(self._format_value)
+        theme_manager.theme_changed.connect(
+            lambda _t: self.setStyleSheet(get_input_style())
+        )
 
     def _format_value(self):
         val = _to_float(self.text())
@@ -243,6 +294,32 @@ class WACCPage(QWidget):
         self._build_ui()
         self._recalculate()
 
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        for lbl in self._section_labels:
+            lbl.setStyleSheet(get_section_header_style())
+        for lbl in self._ticker_col_headers:
+            lbl.setStyleSheet(get_bold_style())
+        for lbl in self._bold_row_labels:
+            lbl.setStyleSheet(get_bold_style())
+        for lbl in self._input_row_labels:
+            lbl.setStyleSheet(get_bold_style())
+        for lbl in self.header_labels.values():
+            lbl.setStyleSheet(get_purple_header_style())
+
+        self.lbl_client.setStyleSheet(get_bold_style())
+        self.lbl_subject.setStyleSheet(get_bold_style())
+        self.lbl_method.setStyleSheet(get_bold_style())
+        self.lbl_date.setStyleSheet(get_bold_style())
+        self.lbl_selected_row.setStyleSheet(get_purple_header_style())
+
+        self.selected_tax_rate_label.setStyleSheet(get_bold_style())
+        self.selected_debt_tic_input.setStyleSheet(get_input_style())
+        self.selected_relevered_beta_input.setStyleSheet(get_input_style())
+
+        self._recalculate()
+
     def _build_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -261,6 +338,8 @@ class WACCPage(QWidget):
         self.grid.setColumnStretch(COL_COMPANY, 2)
 
         self._current_row = 0
+        self._bold_row_labels = []  # val_lbl/lbl pairs from _build_labeled_row(bold=True)
+        self._section_labels = []
         self._build_header()
         self._build_inputs_section()
         self._build_ticker_section()
@@ -284,16 +363,23 @@ class WACCPage(QWidget):
     # SECTION BUILDERS
     # ------------------------------------------------------------------
 
+    def _add_section_label(self, text: str, row: int, col: int,
+                            row_span: int = 1, col_span: int = 1):
+        lbl = _make_section_label(text)
+        self.grid.addWidget(lbl, row, col, row_span, col_span)
+        self._section_labels.append(lbl)
+        return lbl
+
     def _build_header(self):
         r = self._current_row
         self.lbl_client = QLabel()
-        self.lbl_client.setStyleSheet("font-weight: bold;")
+        self.lbl_client.setStyleSheet(get_bold_style())
         self.lbl_subject = QLabel()
-        self.lbl_subject.setStyleSheet("font-weight: bold;")
+        self.lbl_subject.setStyleSheet(get_bold_style())
         self.lbl_method = QLabel("Weighted Average Cost of Capital")
-        self.lbl_method.setStyleSheet("font-weight: bold;")
+        self.lbl_method.setStyleSheet(get_bold_style())
         self.lbl_date = QLabel()
-        self.lbl_date.setStyleSheet("font-weight: bold;")
+        self.lbl_date.setStyleSheet(get_bold_style())
 
         self.grid.addWidget(self.lbl_client,  r, COL_EXCLUDE, 1, 2)
         self.grid.addWidget(self.lbl_subject, r, COL_TICKER,  1, 1)
@@ -320,6 +406,7 @@ class WACCPage(QWidget):
         self.capital_structure_combo.addItems(CAPITAL_STRUCTURE_OPTIONS)
         self.capital_structure_combo.currentIndexChanged.connect(self._on_inputs_changed)
 
+        self._input_row_labels = []
         for label_text, combo in [
             ("Beta Type:",          self.beta_type_combo),
             ("Beta Frequency:",     self.beta_frequency_combo),
@@ -329,7 +416,8 @@ class WACCPage(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setStyleSheet(get_bold_style())
+            self._input_row_labels.append(lbl)
             row_layout.addWidget(lbl)
             row_layout.addWidget(combo)
             row_layout.addStretch()
@@ -352,6 +440,7 @@ class WACCPage(QWidget):
     def _build_ticker_section(self):
         r = self._current_row
 
+        self._ticker_col_headers = []
         for col, text in [
             (COL_EXCLUDE, "Exclude"),
             (COL_NUM,     "#"),
@@ -359,8 +448,9 @@ class WACCPage(QWidget):
             (COL_COMPANY, "Company Name"),
         ]:
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setStyleSheet(get_bold_style())
             self.grid.addWidget(lbl, r, col)
+            self._ticker_col_headers.append(lbl)
 
         header_texts = {
             COL_BETA:             "Observed Beta",
@@ -374,7 +464,7 @@ class WACCPage(QWidget):
         self.header_labels: Dict[int, QLabel] = {}
         for col, text in header_texts.items():
             lbl = QLabel(text)
-            lbl.setStyleSheet(HEADER_STYLE)
+            lbl.setStyleSheet(get_purple_header_style())
             lbl.setWordWrap(True)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.grid.addWidget(lbl, r, col)
@@ -420,8 +510,8 @@ class WACCPage(QWidget):
         self._current_row += 1
 
     def _build_statistics_section(self):
-        self.grid.addWidget(
-            _make_section_label("Statistics"),
+        self._add_section_label(
+            "Statistics",
             self._current_row, COL_EXCLUDE, 1, 10
         )
         self._current_row += 1
@@ -448,9 +538,9 @@ class WACCPage(QWidget):
 
     def _build_selected_section(self):
         r = self._current_row
-        lbl = QLabel("Selected")
-        lbl.setStyleSheet("font-weight: bold; color: #6912b0;")
-        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 3)
+        self.lbl_selected_row = QLabel("Selected")
+        self.lbl_selected_row.setStyleSheet(get_purple_header_style())
+        self.grid.addWidget(self.lbl_selected_row, r, COL_EXCLUDE, 1, 3)
 
         # Only three cells are ever populated on this row: Debt%TIC and
         # Re-Levered Beta are user-typed inputs; Effective Tax Rate is a
@@ -463,7 +553,7 @@ class WACCPage(QWidget):
         self.grid.addWidget(self.selected_debt_tic_input, r, COL_DEBT_TIC)
 
         self.selected_tax_rate_label = _placeholder_label()
-        self.selected_tax_rate_label.setStyleSheet("font-weight: bold;")
+        self.selected_tax_rate_label.setStyleSheet(get_bold_style())
         self.grid.addWidget(self.selected_tax_rate_label, r, COL_TAX_RATE)
 
         self.selected_relevered_beta_input = BetaInputEdit(placeholder="e.g. 1.25")
@@ -488,7 +578,7 @@ class WACCPage(QWidget):
         if note:
             note_lbl = QLabel(note)
             note_lbl.setWordWrap(True)
-            note_lbl.setStyleSheet("color: #555555; font-style: italic;")
+            note_lbl.setStyleSheet(get_note_style())
             row_layout.addWidget(note_lbl, 1)
         else:
             row_layout.addStretch()
@@ -500,14 +590,25 @@ class WACCPage(QWidget):
         lbl = QLabel(label_text)
         lbl.setFixedWidth(self.LABEL_WIDTH)
         if bold:
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setStyleSheet(get_bold_style())
+            # val_lbl is returned and stored by every call site, so
+            # _apply_theme can reach it directly - but this LEFT-hand
+            # descriptive label is never returned by this method, so
+            # without this list it would be a silent orphan (found
+            # this exact bug class in dcf_page.py's section bars and
+            # gpc_page.py's Low/High headers - fixing it here at the
+            # builder level means every current AND future bold=True
+            # call site is covered automatically, no per-call-site
+            # capture needed).
+            self._bold_row_labels.append(lbl)
         row_layout.addWidget(lbl)
 
         val_lbl = QLabel("-")
         val_lbl.setFixedWidth(self.VALUE_WIDTH)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if bold:
-            val_lbl.setStyleSheet("font-weight: bold;")
+            val_lbl.setStyleSheet(get_bold_style())
+            self._bold_row_labels.append(val_lbl)
         row_layout.addWidget(val_lbl)
 
         self._note_or_stretch(row_layout, note)
@@ -548,7 +649,7 @@ class WACCPage(QWidget):
 
         combo = QComboBox()
         combo.addItems(options)
-        combo.setStyleSheet(INPUT_STYLE)
+        combo.setStyleSheet(get_input_style())
         combo.setFixedWidth(220)
         combo.currentIndexChanged.connect(self._on_inputs_changed)
         row_layout.addWidget(combo)
@@ -559,8 +660,8 @@ class WACCPage(QWidget):
         return combo, val_lbl
 
     def _build_cost_of_equity_section(self):
-        self.grid.addWidget(
-            _make_section_label("Cost of Equity (Ke) - MCAPM Method"),
+        self._add_section_label(
+            "Cost of Equity (Ke) - MCAPM Method",
             self._current_row, COL_EXCLUDE, 1, 10
         )
         self._current_row += 1
@@ -597,8 +698,8 @@ class WACCPage(QWidget):
         self._current_row += 1
 
     def _build_cost_of_debt_section(self):
-        self.grid.addWidget(
-            _make_section_label("After-Tax Cost of Debt (Kd)"),
+        self._add_section_label(
+            "After-Tax Cost of Debt (Kd)",
             self._current_row, COL_EXCLUDE, 1, 10
         )
         self._current_row += 1
@@ -615,8 +716,8 @@ class WACCPage(QWidget):
         self._current_row += 1
 
     def _build_wacc_summary_section(self):
-        self.grid.addWidget(
-            _make_section_label("Weighted Average Cost of Capital"),
+        self._add_section_label(
+            "Weighted Average Cost of Capital",
             self._current_row, COL_EXCLUDE, 1, 10
         )
         self._current_row += 1
@@ -738,7 +839,7 @@ class WACCPage(QWidget):
                 self.tick_data_labels[row][COL_RELEVERED_BETA].setText(_fmt_beta(relevered_beta_val))
 
                 excluded = self.tick_exclude_checks[row].isChecked()
-                grey = "color: grey;" if excluded else "color: black;"
+                grey = get_excluded_row_style() if excluded else get_included_row_style()
                 for col in [COL_BETA, COL_DEBT_TIC, COL_DEBT_EQUITY, COL_TAX_RATE,
                             COL_UNLEVERED_BETA, COL_RELEVERED_BETA]:
                     self.tick_data_labels[row][col].setStyleSheet(grey)

@@ -20,6 +20,7 @@ from PyQt6.QtGui import QColor
 
 from Canneberge.app_state import Transaction
 from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
+from Canneberge.Ui.theme import theme_manager
 
 METRICS = ["TTM Revenue", "TTM EBITDA", "TTM EBIT"]
 MAX_COLS = 3
@@ -42,9 +43,51 @@ W_NUM = 30
 W_DATE = 90
 W_METRIC = 120
 
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
+# =====================================================================
+# STYLE — colors come from the active Theme (Canneberge/Ui/theme.py)
+# via theme_manager.current. Same pattern as gpc_page.py/dcf_page.py.
+#
+# NOTE: this is the THIRD independent copy of get_input_style()/CALC_STYLE/
+# get_section_header_style() across the codebase (dcf_page.py, gpc_page.py,
+# now this file) - flagged, not resolved here. Same for
+# MultipleInputEdit/PctInputEdit below, which are byte-identical to
+# gpc_page.py's copies.
+# =====================================================================
+
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_section_header_style() -> str:
+    t = theme_manager.current
+    return f"font-weight: bold; font-size: 11px; color: {t.bold_text};"
+
+
+def get_link_text_style() -> str:
+    return f"color: {theme_manager.current.link_color};"
+
+
+def get_grey_disabled_style() -> str:
+    return theme_manager.current.grey_disabled_style()
+
+
+def get_excluded_row_style() -> str:
+    return f"color: {theme_manager.current.disabled_text};"
+
+
+def get_included_row_style() -> str:
+    return f"color: {theme_manager.current.default_text};"
+
+
+# NOTE: CALC_STYLE ("color: black;") is not referenced anywhere else
+# in this file (confirmed via full-file search) - same dead-constant
+# situation as gpc_page.py's copy. Left in place, not deleted.
 CALC_STYLE = "color: black;"
-SECTION_HEADER_STYLE = "font-weight: bold; font-size: 11px;"
 
 
 def _parse_float(text: str) -> Optional[float]:
@@ -122,22 +165,27 @@ def _make_hrule() -> QFrame:
 
 def _make_section_label(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet(SECTION_HEADER_STYLE)
+    lbl.setStyleSheet(get_section_header_style())
     return lbl
 
 
 class MultipleInputEdit(QLineEdit):
     """
     Input field that formats its value as ##.##x on focus-out.
-    Light blue background, blue font.
+
+    NOTE: byte-identical to gpc_page.py's class of the same name -
+    same duplication flagged there, not resolved here.
     """
     def __init__(self, placeholder="", parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
-        self.setStyleSheet(INPUT_STYLE)
+        self.setStyleSheet(get_input_style())
         self.setFixedWidth(W_METRIC - 10)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.editingFinished.connect(self._format_value)
+        theme_manager.theme_changed.connect(
+            lambda _t: self.setStyleSheet(get_input_style())
+        )
 
     def _format_value(self):
         val = _parse_float(self.text())
@@ -147,17 +195,17 @@ class MultipleInputEdit(QLineEdit):
 
 
 class PctInputEdit(QLineEdit):
-    """
-    Input field that formats its value as ##.#% on focus-out.
-    Light blue background, blue font.
-    """
+    """Input field that formats its value as ##.#% on focus-out."""
     def __init__(self, placeholder="", parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
-        self.setStyleSheet(INPUT_STYLE)
+        self.setStyleSheet(get_input_style())
         self.setFixedWidth(W_METRIC - 10)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.editingFinished.connect(self._format_value)
+        theme_manager.theme_changed.connect(
+            lambda _t: self.setStyleSheet(get_input_style())
+        )
 
     def _format_value(self):
         val = _parse_pct(self.text())
@@ -187,6 +235,29 @@ class GTPage(QWidget):
         self._build_ui()
         self._recalculate()
 
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        for lbl in self._section_labels:
+            lbl.setStyleSheet(get_section_header_style())
+        for hdr in self._bridge_low_high_headers:
+            hdr.setStyleSheet(get_bold_style())
+        for lbl in self._ticker_col_headers:
+            lbl.setStyleSheet(get_bold_style())
+        for combo in self.metric_combos:
+            combo.setStyleSheet(get_input_style())
+
+        self.lbl_client.setStyleSheet(get_bold_style())
+        self.lbl_subject.setStyleSheet(get_bold_style())
+        self.lbl_method.setStyleSheet(get_bold_style())
+        self.lbl_date.setStyleSheet(get_bold_style())
+        self.chart_link.setStyleSheet(get_link_text_style())
+
+        self.num_multiples_spin.setStyleSheet(get_input_style())
+        self.dloc_input.setStyleSheet(get_grey_disabled_style())
+
+        self._recalculate()
+
     def _build_ui(self):
         # Scroll area so content isn't clipped on small screens
         scroll = QScrollArea()
@@ -211,6 +282,9 @@ class GTPage(QWidget):
 
         self._current_row = 0
         self._chart_dialog = None
+        self._section_labels = []
+        self._bridge_low_high_headers = []
+        self._ticker_col_headers = []
         self._build_header()
         self._build_controls()
         self._build_transaction_section()
@@ -235,16 +309,29 @@ class GTPage(QWidget):
     # SECTION BUILDERS
     # ------------------------------------------------------------------
 
+    def _add_section_label(self, text: str, row: int, col: int,
+                            row_span: int = 1, col_span: int = 1):
+        """
+        Wraps _make_section_label() + grid placement + registration
+        into one call - matches gpc_page.py's identical helper. A new
+        section label can't be added without also being captured for
+        theme restyle.
+        """
+        lbl = _make_section_label(text)
+        self.grid.addWidget(lbl, row, col, row_span, col_span)
+        self._section_labels.append(lbl)
+        return lbl
+
     def _build_header(self):
         r = self._current_row
         self.lbl_client = QLabel()
-        self.lbl_client.setStyleSheet("font-weight: bold;")
+        self.lbl_client.setStyleSheet(get_bold_style())
         self.lbl_subject = QLabel()
-        self.lbl_subject.setStyleSheet("font-weight: bold;")
+        self.lbl_subject.setStyleSheet(get_bold_style())
         self.lbl_method = QLabel("Guideline Transaction Method")
-        self.lbl_method.setStyleSheet("font-weight: bold;")
+        self.lbl_method.setStyleSheet(get_bold_style())
         self.lbl_date = QLabel()
-        self.lbl_date.setStyleSheet("font-weight: bold;")
+        self.lbl_date.setStyleSheet(get_bold_style())
 
         self.grid.addWidget(self.lbl_client,  r, COL_EXCLUDE, 1, 2)
         self.grid.addWidget(self.lbl_subject, r, COL_DATE,    1, 1)
@@ -254,7 +341,7 @@ class GTPage(QWidget):
 
         r = self._current_row
         self.chart_link = QLabel('<a href="#">GT Multiples Range Chart →</a>')
-        self.chart_link.setStyleSheet("color: #1a4a8a;")
+        self.chart_link.setStyleSheet(get_link_text_style())
         self.chart_link.linkActivated.connect(self._on_chart_link_clicked)
         self.grid.addWidget(self.chart_link, r, COL_M1, 1, 2)
         self._current_row += 1
@@ -281,7 +368,7 @@ class GTPage(QWidget):
         self.num_multiples_spin.setMinimum(1)
         self.num_multiples_spin.setMaximum(MAX_COLS)
         self.num_multiples_spin.setValue(MAX_COLS)
-        self.num_multiples_spin.setStyleSheet(INPUT_STYLE)
+        self.num_multiples_spin.setStyleSheet(get_input_style())
         self.num_multiples_spin.setFixedWidth(55)
         self.num_multiples_spin.valueChanged.connect(
             self._on_num_multiples_changed
@@ -299,9 +386,7 @@ class GTPage(QWidget):
         # DLOC is derived from the Dashboard's Control Premium
         # (DLOC = CP / (1 + CP)) and pushed here — never typed.
         self.dloc_input.setReadOnly(True)
-        self.dloc_input.setStyleSheet(
-            "background-color: #f0f0f0; color: #444444;"
-        )
+        self.dloc_input.setStyleSheet(get_grey_disabled_style())
 
         dloc_row = QHBoxLayout()
         dloc_row.setContentsMargins(0, 0, 0, 0)
@@ -326,14 +411,14 @@ class GTPage(QWidget):
         r = self._current_row
 
         # Section label
-        self.grid.addWidget(
-            _make_section_label("Transaction Multiple(s)"),
+        self._add_section_label(
+            "Transaction Multiple(s)",
             r, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
         r = self._current_row
 
-        # Column headers
+        self._ticker_col_headers = []
         for col, text in [
             (COL_EXCLUDE,   "Exclude"),
             (COL_NUM,       "#"),
@@ -342,8 +427,9 @@ class GTPage(QWidget):
             (COL_ACQUIRER,  "Acquirer"),
         ]:
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setStyleSheet(get_bold_style())
             self.grid.addWidget(lbl, r, col)
+            self._ticker_col_headers.append(lbl)
 
         # Metric dropdown headers (green inputs)
         self.metric_combos = []
@@ -351,7 +437,7 @@ class GTPage(QWidget):
             combo = QComboBox()
             combo.addItems(METRICS)
             combo.setCurrentIndex(i)
-            combo.setStyleSheet(INPUT_STYLE)
+            combo.setStyleSheet(get_input_style())
             combo.setFixedWidth(W_METRIC - 5)
             combo.currentIndexChanged.connect(self._on_inputs_changed)
             self.metric_combos.append(combo)
@@ -406,8 +492,8 @@ class GTPage(QWidget):
         self._current_row += 1
 
     def _build_statistics_section(self):
-        self.grid.addWidget(
-            _make_section_label("Statistics"),
+        self._add_section_label(
+            "Statistics",
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
@@ -436,8 +522,8 @@ class GTPage(QWidget):
         self._current_row += 1
 
     def _build_selected_multiples_section(self):
-        self.grid.addWidget(
-            _make_section_label("Selected Multiples"),
+        self._add_section_label(
+            "Selected Multiples",
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
@@ -467,8 +553,8 @@ class GTPage(QWidget):
         self._current_row += 1
 
     def _build_subject_section(self):
-        self.grid.addWidget(
-            _make_section_label("Subject Company"),
+        self._add_section_label(
+            "Subject Company",
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
@@ -514,8 +600,8 @@ class GTPage(QWidget):
         self._current_row += 1
 
     def _build_weighting_section(self):
-        self.grid.addWidget(
-            _make_section_label("Weighting"),
+        self._add_section_label(
+            "Weighting",
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
@@ -558,8 +644,8 @@ class GTPage(QWidget):
         self._current_row += 1
 
     def _build_bridge_section(self):
-        self.grid.addWidget(
-            _make_section_label("Bridge"),
+        self._add_section_label(
+            "Bridge",
             self._current_row, COL_EXCLUDE, 1, 8
         )
         self._current_row += 1
@@ -568,12 +654,13 @@ class GTPage(QWidget):
         low_hdr = QLabel("Low")
         high_hdr = QLabel("High")
         for hdr in (low_hdr, high_hdr):
-            hdr.setStyleSheet("font-weight: bold;")
+            hdr.setStyleSheet(get_bold_style())
             hdr.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
         self.grid.addWidget(high_hdr, r, COL_M0)
         self.grid.addWidget(low_hdr, r, COL_M1)
+        self._bridge_low_high_headers = [low_hdr, high_hdr]
         self._current_row += 1
 
         bridge_rows = [
@@ -672,7 +759,7 @@ class GTPage(QWidget):
 
             if row < len(transactions):
                 tx = transactions[row]
-                grey = "color: grey;" if excluded else "color: black;"
+                grey = get_excluded_row_style() if excluded else get_included_row_style()
 
                 self.tx_row_labels[row]["closing_date"].setText(tx.closing_date)
                 self.tx_row_labels[row]["target"].setText(tx.target)
@@ -686,7 +773,7 @@ class GTPage(QWidget):
                     if excluded:
                         self.tx_mult_labels[row][col_idx].setText("NM")
                         self.tx_mult_labels[row][col_idx].setStyleSheet(
-                            "color: grey;"
+                            get_excluded_row_style()
                         )
                     else:
                         multiple = tx.implied_multiple(metric)
@@ -694,7 +781,7 @@ class GTPage(QWidget):
                             _fmt_multiple(multiple)
                         )
                         self.tx_mult_labels[row][col_idx].setStyleSheet(
-                            "color: black;"
+                            get_included_row_style()
                         )
                         if multiple is not None:
                             multiples_per_col[col_idx].append(multiple)

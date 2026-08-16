@@ -152,6 +152,12 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self.tabs)
 
+        from Canneberge.Ui.theme import theme_manager
+        self.tabs.setStyleSheet(theme_manager.current.tab_bar_style())
+        theme_manager.theme_changed.connect(
+            lambda theme: self.tabs.setStyleSheet(theme.tab_bar_style())
+        )
+
         self._build_menu()
 
     def _get_nwc_change(self, period: str) -> Optional[float]:

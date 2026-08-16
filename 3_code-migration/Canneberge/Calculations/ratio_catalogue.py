@@ -299,7 +299,14 @@ _CAPSTRUCT_BS_LINE_ITEMS = {
     "cash":          "cash & equivalents",
     "total_equity":  "shareholders' equity",
 }
-_MARKET_CAP_LINE_ITEM = "market cap"
+# NOTE (8/15/2026): this was "market cap" - same stale guess found
+# and fixed in gpc_multiples.py's MARKET_CAP_LINE_KEY and
+# dashboard_page.py's shares-outstanding lookup. The real scraped
+# Line Item text is "Market Capitalization". This is the third
+# independent copy of the same wrong string found across the
+# codebase - all three (plus debug_capital_structure.py, which
+# imports this constant directly) were silently wrong the same way.
+_MARKET_CAP_LINE_ITEM = "market capitalization"
 
 def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
     """

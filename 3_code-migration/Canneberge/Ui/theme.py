@@ -90,6 +90,37 @@ class Theme:
     def dark_header_style(self) -> str:
         return f"background-color: {self.dark_header_bg}; color: {self.dark_header_fg};"
 
+    def tab_bar_style(self) -> str:
+        """
+        QPalette does not reliably drive QTabBar's drawn tab shapes
+        across styles/platforms - that's the "text recolors but the
+        tab background stays beige" gap. QSS targeting QTabBar::tab
+        pseudo-states directly is the actual mechanism. Apply via
+        self.tabs.setStyleSheet(theme.tab_bar_style()) and reapply on
+        theme_changed - QSS does not auto-update from QPalette changes.
+        """
+        return f"""
+            QTabWidget::pane {{
+                border: 1px solid {self.border_color};
+                background-color: {self.window_bg};
+            }}
+            QTabBar::tab {{
+                background-color: {self.header_bg};
+                color: {self.default_text};
+                padding: 6px 16px;
+                border: 1px solid {self.border_color};
+                border-bottom: none;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {self.window_bg};
+                font-weight: bold;
+            }}
+            QTabBar::tab:!selected:hover {{
+                background-color: {self.input_bg};
+                color: {self.input_text};
+            }}
+        """
+
     def apply_to_app(self, app) -> None:
         """
         Sets window background + default text color for the WHOLE app,
