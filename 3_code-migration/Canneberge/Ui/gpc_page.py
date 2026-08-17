@@ -66,13 +66,10 @@ def get_bold_style() -> str:
 
 
 def get_section_header_style() -> str:
-    # NOTE: unlike DCF's header bars, GPC's section labels have never
-    # had a background color — just bold + slightly larger text. This
-    # preserves that (reuses bold_text, no header_bg involved) rather
-    # than forcing DCF's banner look onto a page that was never
-    # designed with one.
-    t = theme_manager.current
-    return f"font-weight: bold; font-size: 11px; color: {t.bold_text};"
+    # Delegates to the ONE canonical header treatment (theme.py's
+    # Theme.header_style()) - DCF's bold-on-colored-bar look, now
+    # used everywhere, not a GPC-specific plain-bold variant.
+    return theme_manager.current.header_style()
 
 
 def get_link_text_style() -> str:

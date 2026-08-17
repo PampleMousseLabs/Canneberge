@@ -96,29 +96,27 @@ W_DATA = 130
 # =====================================================================
 # STYLE — colors come from the active Theme (Canneberge/Ui/theme.py).
 #
-# Three distinct visual roles in this file, don't conflate them:
-#   - get_purple_header_style(): bold purple TEXT, no background -
-#     the column header labels (Observed Beta, Debt %, etc.) and the
-#     "Selected" row label. Uses theme.section_header_accent via
-#     Theme.header_style() - note this is a different Theme method
-#     than dcf_page.py's own local get_header_style(), which instead
-#     draws a colored BACKGROUND bar. Same-ish name, different role -
-#     named get_purple_header_style() here specifically to avoid that
-#     confusion if this file is ever read side-by-side with dcf_page.py.
-#   - get_section_header_style(): bold + slightly larger, default
-#     text color, no purple, no background - matches gpc_page.py's
-#     and gt_page.py's section bars ("Statistics", "Cost of Equity...").
+# Two shared visual roles across the whole app now (consolidated
+# 8/15/2026 - previously each page had its own header treatment,
+# which is exactly the inconsistency this rework was meant to kill):
+#   - get_section_header_style(): the ONE canonical section-divider
+#     bar - bold text on a colored background (DCF's original look).
+#     Delegates to theme.header_style(), same as dcf_page.py,
+#     gpc_page.py, and gt_page.py's section bars. No page-local
+#     variant of this exists anymore.
+#   - get_bold_style(): plain bold, default text color, no
+#     background - used for narrower column-header labels
+#     (Observed Beta, Debt/Equity, the "Selected" row label) to match
+#     gpc_page.py's/gt_page.py's Exclude/#/Ticker convention, rather
+#     than giving every column its own colored bar.
 #   - get_input_style(): the light-blue editable-field look.
 # =====================================================================
 
 
-def get_purple_header_style() -> str:
-    return theme_manager.current.header_style()
-
-
 def get_section_header_style() -> str:
-    t = theme_manager.current
-    return f"font-weight: bold; font-size: 11px; color: {t.bold_text};"
+    # Delegates to the ONE canonical header treatment - same method
+    # every page's section-divider bars now use.
+    return theme_manager.current.header_style()
 
 
 def get_bold_style() -> str:
@@ -297,6 +295,9 @@ class WACCPage(QWidget):
         theme_manager.theme_changed.connect(self._apply_theme)
 
     def _apply_theme(self, theme=None):
+        self.beta_type_combo.setStyleSheet(get_input_style())
+        self.beta_frequency_combo.setStyleSheet(get_input_style())
+        self.capital_structure_combo.setStyleSheet(get_input_style())
         for lbl in self._section_labels:
             lbl.setStyleSheet(get_section_header_style())
         for lbl in self._ticker_col_headers:
@@ -306,13 +307,13 @@ class WACCPage(QWidget):
         for lbl in self._input_row_labels:
             lbl.setStyleSheet(get_bold_style())
         for lbl in self.header_labels.values():
-            lbl.setStyleSheet(get_purple_header_style())
+            lbl.setStyleSheet(get_bold_style())
 
         self.lbl_client.setStyleSheet(get_bold_style())
         self.lbl_subject.setStyleSheet(get_bold_style())
         self.lbl_method.setStyleSheet(get_bold_style())
         self.lbl_date.setStyleSheet(get_bold_style())
-        self.lbl_selected_row.setStyleSheet(get_purple_header_style())
+        self.lbl_selected_row.setStyleSheet(get_bold_style())
 
         self.selected_tax_rate_label.setStyleSheet(get_bold_style())
         self.selected_debt_tic_input.setStyleSheet(get_input_style())
@@ -396,14 +397,17 @@ class WACCPage(QWidget):
 
         self.beta_type_combo = QComboBox()
         self.beta_type_combo.addItems(BETA_TYPE_OPTIONS)
+        self.beta_type_combo.setStyleSheet(get_input_style())
         self.beta_type_combo.currentIndexChanged.connect(self._on_inputs_changed)
 
         self.beta_frequency_combo = QComboBox()
         self.beta_frequency_combo.addItems(BETA_FREQUENCY_OPTIONS)
+        self.beta_frequency_combo.setStyleSheet(get_input_style())
         self.beta_frequency_combo.currentIndexChanged.connect(self._on_inputs_changed)
 
         self.capital_structure_combo = QComboBox()
         self.capital_structure_combo.addItems(CAPITAL_STRUCTURE_OPTIONS)
+        self.capital_structure_combo.setStyleSheet(get_input_style())
         self.capital_structure_combo.currentIndexChanged.connect(self._on_inputs_changed)
 
         self._input_row_labels = []
@@ -464,7 +468,7 @@ class WACCPage(QWidget):
         self.header_labels: Dict[int, QLabel] = {}
         for col, text in header_texts.items():
             lbl = QLabel(text)
-            lbl.setStyleSheet(get_purple_header_style())
+            lbl.setStyleSheet(get_bold_style())
             lbl.setWordWrap(True)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.grid.addWidget(lbl, r, col)
@@ -539,7 +543,7 @@ class WACCPage(QWidget):
     def _build_selected_section(self):
         r = self._current_row
         self.lbl_selected_row = QLabel("Selected")
-        self.lbl_selected_row.setStyleSheet(get_purple_header_style())
+        self.lbl_selected_row.setStyleSheet(get_bold_style())
         self.grid.addWidget(self.lbl_selected_row, r, COL_EXCLUDE, 1, 3)
 
         # Only three cells are ever populated on this row: Debt%TIC and

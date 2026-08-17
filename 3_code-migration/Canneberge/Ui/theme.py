@@ -37,14 +37,13 @@ class Theme:
     input_bg: str
     input_text: str
     header_bg: str
-    header_fg: str
     bold_text: str            # color used alongside font-weight: bold labels
     link_color: str
     border_color: str
+    emphasis_border: str      # purple-toned border marking a special/subtotal row (NWC total row, etc.) - distinct from plain border_color
     disabled_bg: str
     disabled_text: str
     note_text: str            # italic/muted helper text (e.g. "Pro" nulled notes)
-    section_header_accent: str  # the purple #6912b0 role on WACC/GPC/etc.
     dark_header_bg: str       # dashboard DARK_HEADER_BG role
     dark_header_fg: str       # dashboard DARK_HEADER_FG role
     grey_disabled_bg: str     # the separate #f0f0f0 / #9a9a9a "greyed out" role
@@ -67,7 +66,24 @@ class Theme:
         return f"background-color: {self.input_bg}; color: {self.input_text};"
 
     def header_style(self) -> str:
-        return f"font-weight: bold; color: {self.section_header_accent};"
+        """
+        THE canonical section-header treatment for the whole app -
+        bold text on a colored background bar, DCF's original look.
+        Every page's wide section-divider bars ("Statistics",
+        "Cost of Equity...", etc.) route through this ONE method.
+        No page gets its own variant - if a page's header looks wrong
+        with this, fix header_bg/default_text, don't fork a new style.
+        """
+        return (
+            f"font-weight: bold; font-size: 11px; "
+            f"background-color: {self.header_bg}; color: {self.default_text};"
+        )
+
+    def emphasis_border_above_style(self, width_px: int = 1) -> str:
+        return f"border-top: {width_px}px solid {self.emphasis_border};"
+
+    def emphasis_border_below_style(self, width_px: int = 3) -> str:
+        return f"border-bottom: {width_px}px solid {self.emphasis_border};"
 
     def bold_style(self) -> str:
         return f"font-weight: bold; color: {self.bold_text};"
@@ -175,14 +191,13 @@ SLATE_AND_GOLD = Theme(
     input_bg="#dce9f7",
     input_text="#1a4a8a",
     header_bg="#f0f0f0",
-    header_fg="#1a1a1a",
     bold_text="#000000",
     link_color="#1a4a8a",
     border_color="#000000",
+    emphasis_border="#4b1f7a",
     disabled_bg="#f0f0f0",
     disabled_text="#9a9a9a",
     note_text="#555555",
-    section_header_accent="#6912b0",
     dark_header_bg="#2f2fa0",
     dark_header_fg="#ffffff",
     grey_disabled_bg="#f0f0f0",
@@ -206,19 +221,18 @@ ONE_DARK_PRO = Theme(
     default_text="#abb2bf",
     input_bg="#3b4048",
     input_text="#61afef",
-    header_bg="#282c34",
-    header_fg="#abb2bf",
+    header_bg="#3e4451",
     bold_text="#abb2bf",
     link_color="#61afef",
     border_color="#181a1f",
-    disabled_bg="#2c313a",
-    disabled_text="#5c6370",
-    note_text="#98c379",
-    section_header_accent="#c678dd",
-    dark_header_bg="#21252b",
-    dark_header_fg="#e5c07b",
-    grey_disabled_bg="#2c313a",
-    grey_disabled_text="#5c6370",
+    emphasis_border="#c678dd",
+    disabled_bg="#33383f",
+    disabled_text="#7f8794",
+    note_text="#33ff00",
+    dark_header_bg="#3a3d91",
+    dark_header_fg="#ffffff",
+    grey_disabled_bg="#33383f",
+    grey_disabled_text="#7f8794",
     chart_fill="#c678dd",
     chart_edge="#e5c07b",
     chart_range="#61afef",
@@ -239,14 +253,13 @@ GITHUB_LIGHT = Theme(
     input_bg="#ddf4ff",
     input_text="#0969da",
     header_bg="#f6f8fa",
-    header_fg="#24292f",
     bold_text="#24292f",
     link_color="#0969da",
     border_color="#d0d7de",
+    emphasis_border="#8250df",
     disabled_bg="#f6f8fa",
     disabled_text="#8c959f",
     note_text="#57606a",
-    section_header_accent="#8250df",
     dark_header_bg="#24292f",
     dark_header_fg="#f6f8fa",
     grey_disabled_bg="#f6f8fa",

@@ -64,13 +64,44 @@ from PyQt6.QtCore import Qt
 
 from Canneberge.app_state import BS_LINES
 from Canneberge.Ui.gpc_page import _quartile
+from Canneberge.Ui.theme import theme_manager
 from Canneberge.Ui.dcf_page import (
-    BOLD_STYLE, INPUT_STYLE, HEADER_STYLE, INDENT_STYLE, MARGIN_ROW_STYLE,
-    MARGIN_CELL_STYLE, COL_WIDTH, BORDER_COLOR,
+    INDENT_STYLE, MARGIN_ROW_STYLE, MARGIN_CELL_STYLE, COL_WIDTH,
     _fmt_currency, _fmt_pct, _safe_div, _sub_strict as _sub, _mul_strict as _mul,
     _parse_label_as_float, _read_label,
 )
 from Canneberge.Ui.subject_financials_page import SA_KEY_MAP, _parse_val
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_header_style() -> str:
+    # Delegates to the ONE canonical header treatment - same method
+    # DCF/GPC/GT/WACC's section bars all use.
+    return theme_manager.current.header_style()
+
+
+def get_border_above_style() -> str:
+    return f"border-top: 1px solid {theme_manager.current.border_color};"
+
+
+def get_emphasis_border_style() -> str:
+    t = theme_manager.current
+    return t.emphasis_border_above_style(1) + " " + t.emphasis_border_below_style(3)
+
+
+def get_excluded_row_style() -> str:
+    return f"color: {theme_manager.current.disabled_text};"
+
+
+def get_included_row_style() -> str:
+    return f"color: {theme_manager.current.default_text};"
 
 # Current Asset / Current Liability candidate keys — these are
 # literally BS_LINES' own current-asset and current-liability
@@ -107,10 +138,9 @@ GPC_NWC_KEYS = {
     "rev":   "revenue",                # Revenue                     (IS)
 }
 
-# Purple borders for the GPC section's "Surplus/(Deficit)" total line
-NWC_BORDER_PURPLE = "#4b1f7a"
-BORDER_ABOVE_STYLE_PURPLE = f"border-top: 1px solid {NWC_BORDER_PURPLE};"
-BORDER_BELOW_STYLE_PURPLE = f"border-bottom: 3px solid {NWC_BORDER_PURPLE};"
+# Emphasis border for the GPC section's "Surplus/(Deficit)" total line
+# now comes from theme.emphasis_border via get_emphasis_border_style()
+# (see top of file) - not a local hardcoded hex anymore.
 
 
 def _fmt_ca_cl_option(key: str) -> str:
@@ -181,6 +211,67 @@ class NWCPage(QWidget):
         self._build_ui()
         self._recalculate()
 
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        for lbl in getattr(self, "_section_labels", []):
+            lbl.setStyleSheet(get_header_style())
+        for lbl in getattr(self, "_period_header_labels", {}).values():
+            lbl.setStyleSheet(get_bold_style())
+        if hasattr(self, "_lbl_fye"):
+            self._lbl_fye.setStyleSheet(get_bold_style())
+        if hasattr(self, "lbl_client_header"):
+            self.lbl_client_header.setStyleSheet(get_bold_style())
+        if hasattr(self, "lbl_gpc_section_title"):
+            self.lbl_gpc_section_title.setStyleSheet(get_header_style())
+        for lbl in getattr(self, "_gpc_col_headers", []):
+            lbl.setStyleSheet(get_bold_style())
+        for lbl in getattr(self, "_gpc_stat_row_labels", []):
+            lbl.setStyleSheet(get_bold_style())
+        if hasattr(self, "lbl_selected_row"):
+            self.lbl_selected_row.setStyleSheet(get_bold_style())
+        if hasattr(self, "lbl_surplus"):
+            self.lbl_surplus.setStyleSheet(
+                f"{get_bold_style()} {get_emphasis_border_style()}"
+            )
+        if hasattr(self, "nwc_surplus_deficit_label"):
+            self.nwc_surplus_deficit_label.setStyleSheet(
+                f"{get_bold_style()} {get_emphasis_border_style()}"
+            )
+
+        self.cash_treatment_combo.setStyleSheet(get_input_style())
+        self.nwc_basis_combo.setStyleSheet(get_input_style())
+        self.selected_nwc_pct_input.setStyleSheet(get_input_style())
+        for combo in self._ca_combos:
+            combo.setStyleSheet(get_input_style())
+        for combo in self._cl_combos:
+            combo.setStyleSheet(get_input_style())
+
+        # Row labels + calc-cell colors: restyled directly from stored
+        # (bold, margin, border_above) flags, NOT via _recalculate().
+        # _recalculate() only rebuilds the grid when hist/proj years
+        # actually changed (see _rebuild_table_if_needed's force=False
+        # gate) - a plain call would silently no-op here and leave
+        # every row/cell frozen at its build-time color, same trap
+        # DCF's grid had to avoid.
+        for row_idx, row_lbl in getattr(self, "_row_labels", {}).items():
+            bold, margin, border_above = self._row_style_flags[row_idx]
+            style = self._row_style(bold, margin, border_above)
+            if style:
+                row_lbl.setStyleSheet(style)
+        for row_idx, cells in getattr(self, "_calc_labels", {}).items():
+            bold, margin, border_above = self._row_style_flags.get(row_idx, (False, False, False))
+            style = self._cell_style(bold, margin, border_above)
+            if style:
+                for cell in cells.values():
+                    cell.setStyleSheet(style)
+
+        # Everything else (GPC ticker grey/included coloring, FYE
+        # values) IS safe to pick up via a plain recalc - those are
+        # genuinely recomputed/re-styled every call, unlike the grid
+        # rows above.
+        self._recalculate()
+
     # ------------------------------------------------------------------
     # PAGE STRUCTURE
     # ------------------------------------------------------------------
@@ -220,7 +311,8 @@ class NWCPage(QWidget):
         inputs = self.get_project_inputs()
 
         title_row = QHBoxLayout()
-        title_row.addWidget(QLabel(inputs.client, styleSheet=BOLD_STYLE))
+        self.lbl_client_header = QLabel(inputs.client, styleSheet=get_bold_style())
+        title_row.addWidget(self.lbl_client_header)
         title_row.addWidget(QLabel(inputs.subject_company_name))
         title_row.addWidget(QLabel("Net Working Capital Schedule"))
         title_row.addStretch(1)
@@ -247,7 +339,7 @@ class NWCPage(QWidget):
         controls.addWidget(QLabel("NWC Cash Treatment:"))
         self.cash_treatment_combo = QComboBox()
         self.cash_treatment_combo.addItems(["Excluding Cash", "Including Cash"])
-        self.cash_treatment_combo.setStyleSheet(INPUT_STYLE)
+        self.cash_treatment_combo.setStyleSheet(get_input_style())
         self.cash_treatment_combo.currentTextChanged.connect(self._recalculate)
         controls.addWidget(self.cash_treatment_combo)
 
@@ -255,7 +347,7 @@ class NWCPage(QWidget):
         controls.addWidget(QLabel("NWC Basis:"))
         self.nwc_basis_combo = QComboBox()
         self.nwc_basis_combo.addItems(["% of Revenue", "Turnover Ratios"])
-        self.nwc_basis_combo.setStyleSheet(INPUT_STYLE)
+        self.nwc_basis_combo.setStyleSheet(get_input_style())
         self.nwc_basis_combo.currentTextChanged.connect(self._recalculate)
         controls.addWidget(self.nwc_basis_combo)
 
@@ -425,6 +517,8 @@ class NWCPage(QWidget):
             # can try to write to deleted QLabel/QComboBox objects.
             self._calc_labels = {}
             self._row_idx = {}
+            self._row_labels = {}
+            self._row_style_flags = {}
             self._fye_labels = {}
             self._ca_combos = []
             self._cl_combos = []
@@ -457,24 +551,29 @@ class NWCPage(QWidget):
 
         num_hist, num_proj = self._num_hist, self._num_proj
 
-        hist_band = QLabel("Historical Financials", styleSheet=HEADER_STYLE, alignment=Qt.AlignmentFlag.AlignCenter)
+        hist_band = QLabel("Historical Financials", styleSheet=get_header_style(), alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(hist_band, 0, 1, 1, num_hist)
 
-        proj_band = QLabel("Projected Financials", styleSheet=HEADER_STYLE, alignment=Qt.AlignmentFlag.AlignCenter)
+        proj_band = QLabel("Projected Financials", styleSheet=get_header_style(), alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(proj_band, 0, 1 + num_hist + 1, 1, num_proj)
 
-        res_band = QLabel("", styleSheet=HEADER_STYLE)
+        res_band = QLabel("", styleSheet=get_header_style())
         grid.addWidget(res_band, 0, 1 + num_hist + 1 + num_proj + 1)
 
+        self._section_labels = [hist_band, proj_band, res_band]
+
+        self._period_header_labels = {}
         for data_idx, label in enumerate(self._headers):
             grid_col = self._grid_col(data_idx)
             lbl = QLabel(label, alignment=Qt.AlignmentFlag.AlignRight)
             if not self._is_historical[data_idx]:
-                lbl.setStyleSheet(BOLD_STYLE)
+                lbl.setStyleSheet(get_bold_style())
+                self._period_header_labels[data_idx] = lbl
             lbl.setFixedWidth(COL_WIDTH)
             grid.addWidget(lbl, 1, grid_col)
 
-        grid.addWidget(QLabel("FYE", styleSheet=BOLD_STYLE), 2, 0)
+        self._lbl_fye = QLabel("FYE", styleSheet=get_bold_style())
+        grid.addWidget(self._lbl_fye, 2, 0)
         for data_idx, label in enumerate(self._headers):
             grid_col = self._grid_col(data_idx)
             fye_lbl = QLabel("", alignment=Qt.AlignmentFlag.AlignRight)
@@ -485,6 +584,8 @@ class NWCPage(QWidget):
         self._current_table_row = 3
         self._calc_labels = {}
         self._row_idx = {}
+        self._row_labels = {}
+        self._row_style_flags = {}
         self._ca_combos = []
         self._cl_combos = []
         self._ca_value_labels = []
@@ -512,20 +613,36 @@ class NWCPage(QWidget):
         container.setLayout(grid)
         return container
 
+    def _row_style(self, bold: bool, margin: bool, border_above: bool) -> str:
+        """Single source of truth for a row's style string - used both
+        at build time and by _apply_theme(), so they can't drift apart."""
+        parts = []
+        if bold:
+            parts.append(get_bold_style())
+        if margin:
+            parts.append(MARGIN_ROW_STYLE)
+        if border_above:
+            parts.append(get_border_above_style())
+        return " ".join(parts)
+
+    def _cell_style(self, bold: bool, margin: bool, border_above: bool) -> str:
+        parts = []
+        if bold:
+            parts.append(get_bold_style())
+        if margin:
+            parts.append(MARGIN_CELL_STYLE)
+        if border_above:
+            parts.append(get_border_above_style())
+        return " ".join(parts)
+
     def _add_calc_row(self, grid: QGridLayout, label: str, bold: bool = False,
                        margin: bool = False, border_above: bool = False) -> int:
         row = self._current_table_row
         row_lbl = QLabel(label)
         row_lbl.setFixedWidth(350)
-        style_parts = []
-        if bold:
-            style_parts.append(BOLD_STYLE)
-        if margin:
-            style_parts.append(MARGIN_ROW_STYLE)
-        if border_above:
-            style_parts.append(f"border-top: 1px solid {BORDER_COLOR};")
-        if style_parts:
-            row_lbl.setStyleSheet(" ".join(style_parts))
+        style = self._row_style(bold, margin, border_above)
+        if style:
+            row_lbl.setStyleSheet(style)
         grid.addWidget(row_lbl, row, 0, alignment=Qt.AlignmentFlag.AlignLeft)
 
         cells: Dict[int, QLabel] = {}
@@ -533,21 +650,20 @@ class NWCPage(QWidget):
             grid_col = self._grid_col(data_idx)
             lbl = QLabel("-", alignment=Qt.AlignmentFlag.AlignRight)
             lbl.setFixedWidth(COL_WIDTH)
-            cell_style = []
-            if bold:
-                cell_style.append(BOLD_STYLE)
-            if margin:
-                cell_style.append(MARGIN_CELL_STYLE)
-            if border_above:
-                cell_style.append(f"border-top: 1px solid {BORDER_COLOR};")
+            cell_style = self._cell_style(bold, margin, border_above)
             if cell_style:
-                lbl.setStyleSheet(" ".join(cell_style))
+                lbl.setStyleSheet(cell_style)
             grid.addWidget(lbl, row, grid_col)
             cells[data_idx] = lbl
 
         row_idx = row
         self._calc_labels[row_idx] = cells
         self._row_idx[label] = row_idx
+        # Needed for _apply_theme() to restyle without a full rebuild
+        # (a full rebuild is gated behind force=True and would wipe
+        # any user-typed values - see _rebuild_table_if_needed).
+        self._row_labels[row_idx] = row_lbl
+        self._row_style_flags[row_idx] = (bold, margin, border_above)
         self._current_table_row += 1
         return row_idx
 
@@ -579,7 +695,7 @@ class NWCPage(QWidget):
         # _recalculate() while the table is still being built.
         combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-        combo.setStyleSheet(INPUT_STYLE)
+        combo.setStyleSheet(get_input_style())
         combo.setFixedWidth(340)  # fits inside 350px column without forcing growth
         combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         combo.currentIndexChanged.connect(self._recalculate)
@@ -613,7 +729,10 @@ class NWCPage(QWidget):
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(6)
 
-        outer.addWidget(QLabel("Net Working Capital % of Revenue", styleSheet=BOLD_STYLE))
+        self.lbl_gpc_section_title = QLabel(
+            "Net Working Capital % of Revenue", styleSheet=get_header_style()
+        )
+        outer.addWidget(self.lbl_gpc_section_title)
 
         grid = QGridLayout()
         grid.setSpacing(4)
@@ -624,13 +743,18 @@ class NWCPage(QWidget):
             gpc_periods = ["LFY - 4", "LFY - 3", "LFY - 2", "LFY - 1", "LFY", "TTM"]
 
         # 1. Header Row
-        grid.addWidget(QLabel("Exclude (X)", styleSheet=BOLD_STYLE), 0, 0, alignment=Qt.AlignmentFlag.AlignLeft)
-        grid.addWidget(QLabel("Guideline Public Company", styleSheet=BOLD_STYLE), 0, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+        self._gpc_col_headers = []
+        lbl_exclude = QLabel("Exclude (X)", styleSheet=get_bold_style())
+        lbl_gpc_name = QLabel("Guideline Public Company", styleSheet=get_bold_style())
+        grid.addWidget(lbl_exclude, 0, 0, alignment=Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(lbl_gpc_name, 0, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+        self._gpc_col_headers.extend([lbl_exclude, lbl_gpc_name])
 
         for i, period_str in enumerate(gpc_periods):
-            lbl = QLabel(period_str, styleSheet=BOLD_STYLE, alignment=Qt.AlignmentFlag.AlignRight)
+            lbl = QLabel(period_str, styleSheet=get_bold_style(), alignment=Qt.AlignmentFlag.AlignRight)
             lbl.setFixedWidth(COL_WIDTH)
             grid.addWidget(lbl, 0, 2 + i)
+            self._gpc_col_headers.append(lbl)
 
         # Explicit geometry locking:
         # Col 0 (Exclude) + Col 1 (Ticker) = 85 + 265 = 350px (exact match to top table Col 0)
@@ -683,8 +807,11 @@ class NWCPage(QWidget):
 
         # 3. Statistics Rows
         self._gpc_stat_labels = {}
+        self._gpc_stat_row_labels = []
         for stat_label in ("Maximum", "Third Quartile", "Average", "Median", "First Quartile", "Minimum"):
-            grid.addWidget(QLabel(stat_label, styleSheet=BOLD_STYLE), r, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+            stat_lbl = QLabel(stat_label, styleSheet=get_bold_style())
+            grid.addWidget(stat_lbl, r, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+            self._gpc_stat_row_labels.append(stat_lbl)
             row_labels = []
             for i in range(len(gpc_periods)):
                 lbl = QLabel("-", alignment=Qt.AlignmentFlag.AlignRight)
@@ -703,10 +830,11 @@ class NWCPage(QWidget):
 
         # 4. "Selected" Row — locked inside grid under TTM
         r += 1
-        grid.addWidget(QLabel("Selected", styleSheet=BOLD_STYLE), r, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.lbl_selected_row = QLabel("Selected", styleSheet=get_bold_style())
+        grid.addWidget(self.lbl_selected_row, r, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.selected_nwc_pct_input = QLineEdit("15.0%")
-        self.selected_nwc_pct_input.setStyleSheet(INPUT_STYLE)
+        self.selected_nwc_pct_input.setStyleSheet(get_input_style())
         self.selected_nwc_pct_input.setFixedWidth(COL_WIDTH)
         self.selected_nwc_pct_input.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.selected_nwc_pct_input.editingFinished.connect(self._recalculate)
@@ -726,14 +854,14 @@ class NWCPage(QWidget):
         grid.addWidget(self.actual_nwc_label, r, ttm_col_idx)
 
         r += 1
-        lbl_surplus = QLabel("Net Working Capital Surplus/(Deficit)")
-        lbl_surplus.setStyleSheet(f"{BOLD_STYLE} {BORDER_ABOVE_STYLE_PURPLE} {BORDER_BELOW_STYLE_PURPLE}")
-        grid.addWidget(lbl_surplus, r, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.lbl_surplus = QLabel("Net Working Capital Surplus/(Deficit)")
+        self.lbl_surplus.setStyleSheet(f"{get_bold_style()} {get_emphasis_border_style()}")
+        grid.addWidget(self.lbl_surplus, r, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.nwc_surplus_deficit_label = QLabel("-", alignment=Qt.AlignmentFlag.AlignRight)
         self.nwc_surplus_deficit_label.setFixedWidth(COL_WIDTH)
         self.nwc_surplus_deficit_label.setStyleSheet(
-            f"{BOLD_STYLE} {BORDER_ABOVE_STYLE_PURPLE} {BORDER_BELOW_STYLE_PURPLE}"
+            f"{get_bold_style()} {get_emphasis_border_style()}"
         )
         grid.addWidget(self.nwc_surplus_deficit_label, r, ttm_col_idx)
 
@@ -938,7 +1066,7 @@ class NWCPage(QWidget):
             ticker = row_meta["ticker"]
             excluded = row_meta["exclude"].isChecked()
 
-            row_style = "color: grey;" if excluded else "color: black;"
+            row_style = get_excluded_row_style() if excluded else get_included_row_style()
             ticker_lbl = row_meta.get("ticker_label")
             if ticker_lbl is not None:
                 ticker_lbl.setStyleSheet(row_style)

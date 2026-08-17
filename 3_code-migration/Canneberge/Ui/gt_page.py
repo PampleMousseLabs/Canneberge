@@ -64,8 +64,9 @@ def get_bold_style() -> str:
 
 
 def get_section_header_style() -> str:
-    t = theme_manager.current
-    return f"font-weight: bold; font-size: 11px; color: {t.bold_text};"
+    # Delegates to the ONE canonical header treatment - same method
+    # DCF, GPC, and WACC now all use for section-divider bars.
+    return theme_manager.current.header_style()
 
 
 def get_link_text_style() -> str:

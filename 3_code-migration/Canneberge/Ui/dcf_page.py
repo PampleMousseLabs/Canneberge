@@ -49,8 +49,10 @@ def get_bold_style() -> str:
 
 
 def get_header_style() -> str:
-    t = theme_manager.current
-    return f"font-weight: bold; font-size: {HEADER_FONT_SIZE}px; background-color: {t.header_bg};"
+    # Delegates to the ONE canonical header treatment (theme.py's
+    # Theme.header_style()) instead of building a DCF-local version -
+    # this IS what every other page's section headers now use too.
+    return theme_manager.current.header_style()
 
 
 def get_border_above_style() -> str:
@@ -70,28 +72,6 @@ def get_link_style() -> str:
 def get_note_style() -> str:
     t = theme_manager.current
     return f"font-size: 10px; color: {t.note_text};"
-
-
-# =====================================================================
-# LEGACY COMPATIBILITY SHIM — DO NOT ADD NEW USAGES OF THESE
-#
-# nwc_page.py imports BOLD_STYLE, INPUT_STYLE, HEADER_STYLE, and
-# BORDER_COLOR directly from this module (see nwc_page.py's import
-# block). nwc_page.py has NOT been migrated to the theme system yet,
-# so these are frozen to whatever theme is active at import time —
-# they will NOT live-update if the user switches themes while on the
-# NWC tab. That's a known, temporary limitation, not a bug: nwc_page.py
-# gets the same treatment dcf_page.py just got in the next migration
-# pass, and this whole block gets deleted at that point.
-#
-# If any OTHER file starts importing these names from here, that's a
-# sign this shim is being leaned on as a permanent crutch instead of a
-# bridge — migrate that file instead of extending this block.
-# =====================================================================
-BOLD_STYLE = get_bold_style()
-INPUT_STYLE = get_input_style()
-HEADER_STYLE = get_header_style()
-BORDER_COLOR = theme_manager.current.border_color
 
 # Rows that get a thin border ABOVE them, across every historical +
 # projected + Residual data cell (not just the label). "EBIT" covers

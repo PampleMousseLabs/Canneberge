@@ -18,6 +18,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Ui.theme import theme_manager
+
 from Canneberge.Ui.wacc_page import (
     CORPORATE_RATE_SERIES,
     BETA_TYPE_OPTIONS,
@@ -70,25 +72,50 @@ TV_MODELS = [
     "H-Model",
 ]
 
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
-DARK_HEADER_BG = "#2f2fa0"
-DARK_HEADER_FG = "#ffffff"
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
 
-SECTION_HEADER_STYLE = (
-    f"background-color: {DARK_HEADER_BG}; "
-    f"color: {DARK_HEADER_FG}; "
-    "font-weight: bold; "
-    "font-size: 12px; "
-    "padding: 4px;"
-)
 
-SUBHEADER_STYLE = (
-    "font-weight: bold; "
-    "font-size: 11px; "
-    "color: #1a1a1a;"
-)
+def get_panel_header_style() -> str:
+    # Dashboard's own big panel-title bars ("Income Approach", "Market
+    # Approach", "Future Space") - a deliberately distinct, larger-
+    # scope role from the canonical section-divider header_style()
+    # used everywhere else (this is a top-level panel landmark, not a
+    # mid-page data-table divider). Finally wires theme.py's
+    # dark_header_bg/dark_header_fg fields, which existed but had zero
+    # call sites anywhere in the app until now.
+    t = theme_manager.current
+    return (
+        f"background-color: {t.dark_header_bg}; "
+        f"color: {t.dark_header_fg}; "
+        "font-weight: bold; "
+        "font-size: 12px; "
+        "padding: 4px;"
+    )
 
-BORDER = "1px solid #2b2b2b"
+
+def get_section_header_style() -> str:
+    # Delegates to the ONE canonical header treatment - same method
+    # DCF/GPC/GT/WACC/NWC's section-divider bars all use. This is a
+    # SMALLER, in-panel sub-header ("WACC", "CapEx Options"), distinct
+    # from get_panel_header_style() above.
+    return theme_manager.current.header_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_link_text_style() -> str:
+    return f"color: {theme_manager.current.link_color};"
+
+
+def get_grey_disabled_style() -> str:
+    return theme_manager.current.grey_disabled_style()
+
+
+def get_border_style() -> str:
+    return f"1px solid {theme_manager.current.border_color}"
 
 
 # ----------------------------------------------------------------------
@@ -97,9 +124,12 @@ BORDER = "1px solid #2b2b2b"
 
 def _hdr(text: str) -> QLabel:
     label = QLabel(text)
-    label.setStyleSheet(SECTION_HEADER_STYLE)
+    label.setStyleSheet(get_panel_header_style())
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setFixedHeight(26)
+    theme_manager.theme_changed.connect(
+        lambda _t: label.setStyleSheet(get_panel_header_style())
+    )
     return label
 
 
@@ -108,9 +138,12 @@ def _link_label(text: str) -> QLabel:
     Creates a clickable hyperlink-style label.
     """
     label = QLabel(f'<a href="#">{text}</a>')
-    label.setStyleSheet("color: #1a4a8a;")
+    label.setStyleSheet(get_link_text_style())
     label.setTextInteractionFlags(
         Qt.TextInteractionFlag.LinksAccessibleByMouse
+    )
+    theme_manager.theme_changed.connect(
+        lambda _t: label.setStyleSheet(get_link_text_style())
     )
     return label
 
@@ -122,7 +155,7 @@ def _value_line(width: int = 90) -> QLineEdit:
     edit = QLineEdit("-")
     edit.setFixedWidth(width)
     edit.setFixedHeight(22)
-    edit.setStyleSheet(INPUT_STYLE)
+    edit.setStyleSheet(get_input_style())
     edit.setAlignment(
         Qt.AlignmentFlag.AlignRight |
         Qt.AlignmentFlag.AlignVCenter
@@ -130,6 +163,17 @@ def _value_line(width: int = 90) -> QLineEdit:
     edit.setSizePolicy(
         QSizePolicy.Policy.Fixed,
         QSizePolicy.Policy.Fixed,
+    )
+    # Self-subscribing means every current AND future call site is
+    # covered automatically - no per-call-site capture needed across
+    # this 2300-line file. isEnabled() check preserves the
+    # disabled/greyed-out visual state some rows are deliberately put
+    # into (see _set_row_enabled) instead of blindly re-enabling their
+    # look on every theme switch.
+    theme_manager.theme_changed.connect(
+        lambda _t: edit.setStyleSheet(
+            get_input_style() if edit.isEnabled() else get_grey_disabled_style()
+        )
     )
     return edit
 
@@ -145,10 +189,15 @@ def _small_spin(
     spin.setValue(value)
     spin.setFixedWidth(width)
     spin.setFixedHeight(22)
-    spin.setStyleSheet(INPUT_STYLE)
+    spin.setStyleSheet(get_input_style())
     spin.setSizePolicy(
         QSizePolicy.Policy.Fixed,
         QSizePolicy.Policy.Fixed,
+    )
+    theme_manager.theme_changed.connect(
+        lambda _t: spin.setStyleSheet(
+            get_input_style() if spin.isEnabled() else get_grey_disabled_style()
+        )
     )
     return spin
 
@@ -166,10 +215,15 @@ def _combo(
 
     combo.setFixedWidth(width)
     combo.setFixedHeight(22)
-    combo.setStyleSheet(INPUT_STYLE)
+    combo.setStyleSheet(get_input_style())
     combo.setSizePolicy(
         QSizePolicy.Policy.Fixed,
         QSizePolicy.Policy.Fixed,
+    )
+    theme_manager.theme_changed.connect(
+        lambda _t: combo.setStyleSheet(
+            get_input_style() if combo.isEnabled() else get_grey_disabled_style()
+        )
     )
     return combo
 
@@ -212,7 +266,7 @@ class WACCOptionsDialog(QDialog):
         beta_type_row = QHBoxLayout()
         beta_type_label = QLabel("Beta Type:")
         beta_type_label.setFixedWidth(125)
-        beta_type_label.setStyleSheet("font-weight: bold;")
+        beta_type_label.setStyleSheet(get_bold_style())
 
         self.beta_type_combo = _combo(
             BETA_TYPE_OPTIONS,
@@ -229,7 +283,7 @@ class WACCOptionsDialog(QDialog):
         beta_frequency_row = QHBoxLayout()
         beta_frequency_label = QLabel("Beta Frequency:")
         beta_frequency_label.setFixedWidth(125)
-        beta_frequency_label.setStyleSheet("font-weight: bold;")
+        beta_frequency_label.setStyleSheet(get_bold_style())
 
         self.beta_frequency_combo = _combo(
             BETA_FREQUENCY_OPTIONS,
@@ -246,7 +300,7 @@ class WACCOptionsDialog(QDialog):
         capital_structure_row = QHBoxLayout()
         capital_structure_label = QLabel("Capital Structure:")
         capital_structure_label.setFixedWidth(125)
-        capital_structure_label.setStyleSheet("font-weight: bold;")
+        capital_structure_label.setStyleSheet(get_bold_style())
 
         self.capital_structure_combo = _combo(
             CAPITAL_STRUCTURE_OPTIONS,
@@ -355,6 +409,21 @@ class DashboardPage(QWidget):
 
         self._build_ui()
 
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        # Most of this file's persistent widgets restyle themselves -
+        # see the self-subscribing _hdr()/_link_label()/_value_line()/
+        # _small_spin()/_combo() factory functions above, which every
+        # call site in this file goes through. What's left here are
+        # the handful of widgets built with an inline one-off
+        # setStyleSheet() call instead of going through a factory.
+        self.wacc_label.setStyleSheet(get_bold_style())
+        self.income_wacc_value.setStyleSheet(get_bold_style())
+        self.lbl_dcf_options_title.setStyleSheet(get_section_header_style())
+        self.lbl_capex_options_title.setStyleSheet(get_section_header_style())
+        self.fv_bottom_label.setStyleSheet(get_bold_style())
+
     # ------------------------------------------------------------------
     # Main layout
     # ------------------------------------------------------------------
@@ -434,7 +503,7 @@ class DashboardPage(QWidget):
         # Border applies to the frame only. Child QLabels inherit
         # otherwise, which puts a box around every static text item.
         frame.setStyleSheet(
-            f"QFrame {{ border: {BORDER}; background: white; }}"
+            f"QFrame {{ border: {get_border_style()}; background: white; }}"
             "QLabel { border: none; }"
         )
         frame.setFixedWidth(width)
@@ -610,10 +679,10 @@ class DashboardPage(QWidget):
         row += 1
 
         # WACC output
-        wacc_label = QLabel("WACC")
-        wacc_label.setFixedWidth(LABEL_WIDTH)
-        wacc_label.setStyleSheet("font-weight: bold;")
-        grid.addWidget(wacc_label, row, 0)
+        self.wacc_label = QLabel("WACC")
+        self.wacc_label.setFixedWidth(LABEL_WIDTH)
+        self.wacc_label.setStyleSheet(get_bold_style())
+        grid.addWidget(self.wacc_label, row, 0)
 
         self.income_wacc_value = QLabel("-")
         self.income_wacc_value.setFixedWidth(VALUE_WIDTH)
@@ -621,7 +690,7 @@ class DashboardPage(QWidget):
             Qt.AlignmentFlag.AlignRight |
             Qt.AlignmentFlag.AlignVCenter
         )
-        self.income_wacc_value.setStyleSheet("font-weight: bold;")
+        self.income_wacc_value.setStyleSheet(get_bold_style())
         grid.addWidget(self.income_wacc_value, row, 1)
 
         outer.addLayout(grid)
@@ -1118,11 +1187,9 @@ class DashboardPage(QWidget):
             widget.setEnabled(enabled)
 
             if enabled:
-                widget.setStyleSheet(INPUT_STYLE)
+                widget.setStyleSheet(get_input_style())
             else:
-                widget.setStyleSheet(
-                    "background-color: #f0f0f0; color: #9a9a9a;"
-                )
+                widget.setStyleSheet(get_grey_disabled_style())
 
     def _push_to_market_page(self, kind: str, apply_fn):
         if self._syncing:
@@ -1415,9 +1482,9 @@ class DashboardPage(QWidget):
         outer.setContentsMargins(8, 4, 8, 4)
         outer.setSpacing(4)
 
-        title = QLabel("DCF Options")
-        title.setStyleSheet(SUBHEADER_STYLE)
-        outer.addWidget(title)
+        self.lbl_dcf_options_title = QLabel("DCF Options")
+        self.lbl_dcf_options_title.setStyleSheet(get_section_header_style())
+        outer.addWidget(self.lbl_dcf_options_title)
 
         # Terminal Value model
         model_row = QHBoxLayout()
@@ -1478,9 +1545,9 @@ class DashboardPage(QWidget):
         outer.addLayout(self.tv_short_term_growth_row)
 
         # CapEx Options
-        capex_title = QLabel("CapEx Options")
-        capex_title.setStyleSheet(SUBHEADER_STYLE)
-        outer.addWidget(capex_title)
+        self.lbl_capex_options_title = QLabel("CapEx Options")
+        self.lbl_capex_options_title.setStyleSheet(get_section_header_style())
+        outer.addWidget(self.lbl_capex_options_title)
 
         (
             self.capex_depreciation_row,
@@ -1514,7 +1581,7 @@ class DashboardPage(QWidget):
         input_widget = QLineEdit(default_text)
         input_widget.setFixedWidth(90)
         input_widget.setFixedHeight(22)
-        input_widget.setStyleSheet(INPUT_STYLE)
+        input_widget.setStyleSheet(get_input_style())
         input_widget.setAlignment(Qt.AlignmentFlag.AlignRight)
         input_widget.setSizePolicy(
             QSizePolicy.Policy.Fixed,
@@ -1998,7 +2065,7 @@ class DashboardPage(QWidget):
             "FV of Business Enterprise (Base):"
         )
         self.fv_bottom_label.setStyleSheet(
-            "font-weight: bold;"
+            get_bold_style()
         )
         self.fv_bottom_label.setFixedWidth(210)
 
@@ -2296,5 +2363,3 @@ class DashboardPage(QWidget):
             self.fv_bottom_label.setText(
                 "FV of Business Enterprise (Base):"
             )
-
-    
