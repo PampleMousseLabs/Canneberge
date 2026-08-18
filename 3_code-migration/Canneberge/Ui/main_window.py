@@ -694,6 +694,48 @@ class MainWindow(QMainWindow):
     def _apply_nwc_page_state(self, state: dict):
         self.nwc_page.apply_state(state)
 
+    def _collect_dashboard_page_state(self) -> dict:
+        dp = self.dashboard_page
+        return {
+            "gpc_weights": [w.text() for w in dp.gpc_weight_inputs],
+            "gt_weights": [w.text() for w in dp.gt_weight_inputs],
+            "recon_weights": {
+                name: widget.text()
+                for name, widget in dp.recon_weight_inputs.items()
+            },
+            "control_premium": dp.control_premium_input.text(),
+            "display_basis": dp.display_combo.currentText(),
+        }
+
+    def _apply_dashboard_page_state(self, state: dict):
+        if not state:
+            return
+        dp = self.dashboard_page
+
+        gpc_weights = state.get("gpc_weights", [])
+        for widget, text in zip(dp.gpc_weight_inputs, gpc_weights):
+            if text:
+                widget.setText(text)
+
+        gt_weights = state.get("gt_weights", [])
+        for widget, text in zip(dp.gt_weight_inputs, gt_weights):
+            if text:
+                widget.setText(text)
+
+        recon_weights = state.get("recon_weights", {})
+        for name, text in recon_weights.items():
+            widget = dp.recon_weight_inputs.get(name)
+            if widget is not None and text:
+                widget.setText(text)
+
+        if state.get("control_premium"):
+            dp.control_premium_input.setText(state["control_premium"])
+
+        if state.get("display_basis"):
+            idx = dp.display_combo.findText(state["display_basis"])
+            if idx >= 0:
+                dp.display_combo.setCurrentIndex(idx)
+
     def _on_save_session(self):
         inputs = self.home_page.get_project_inputs()
         gt_state   = self._collect_gt_page_state()
@@ -702,6 +744,7 @@ class MainWindow(QMainWindow):
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
         nwc_state = self._collect_nwc_page_state()
+        dashboard_state = self._collect_dashboard_page_state()
 
         try:
             path = save_session(
@@ -713,6 +756,7 @@ class MainWindow(QMainWindow):
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
                 nwc_page_state=nwc_state,
+                dashboard_page_state=dashboard_state,
                 filepath=self._current_session_path,
             )
             self._current_session_path = path
@@ -744,6 +788,7 @@ class MainWindow(QMainWindow):
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
         nwc_state = self._collect_nwc_page_state()
+        dashboard_state = self._collect_dashboard_page_state()
         try:
             saved_path = save_session(
                 project_inputs=inputs,
@@ -754,6 +799,7 @@ class MainWindow(QMainWindow):
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
                 nwc_page_state=nwc_state,
+                dashboard_page_state=dashboard_state,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -795,6 +841,7 @@ class MainWindow(QMainWindow):
         self._apply_wacc_page_state(data.get("wacc_page_state", {}))
         self._apply_dcf_page_state(data.get("dcf_page_state", {}))
         self._apply_nwc_page_state(data.get("nwc_page_state", {}))
+        self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
 
         self.subject_financials_page.refresh()
         self.gt_page._recalculate()

@@ -17,8 +17,20 @@ from typing import Optional
 import yfinance as yf
 
 from Canneberge.app_state import ProjectInputs, Transaction, parse_ticker_text
+from Canneberge.Ui.theme import theme_manager
 
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_link_style() -> str:
+    return theme_manager.current.link_style()
+
 
 
 class HomePage(QWidget):
@@ -27,6 +39,26 @@ class HomePage(QWidget):
         self._private_financials_callback = None
         self._projection_module_callback = None   # ADD THIS LINE
         self._build_ui()
+
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        self.numeric_scale_combo.setStyleSheet(get_input_style())
+        self.draft_final_combo.setStyleSheet(get_input_style())
+        self.standard_value_combo.setStyleSheet(get_input_style())
+        self.taxable_combo.setStyleSheet(get_input_style())
+        self.basis_value_combo.setStyleSheet(get_input_style())
+        self.company_status_combo.setStyleSheet(get_input_style())
+        self.historical_years_spin.setStyleSheet(get_input_style())
+        self.projection_years_spin.setStyleSheet(get_input_style())
+        self.private_financials_btn.setStyleSheet(
+            get_link_style() + " text-align: left;"
+        )
+        self.projection_module_btn.setStyleSheet(
+            get_link_style() + " text-align: left;"
+        )
+        for lbl in self._gt_col_headers:
+            lbl.setStyleSheet(get_bold_style())
 
     def set_private_financials_callback(self, callback):
         """Called by MainWindow to wire the private financials dialog opener."""
@@ -53,9 +85,11 @@ class HomePage(QWidget):
 
         self.numeric_scale_combo = QComboBox()
         self.numeric_scale_combo.addItems(["Millions", "Thousands", "Actual"])
+        self.numeric_scale_combo.setStyleSheet(get_input_style())
 
         self.draft_final_combo = QComboBox()
         self.draft_final_combo.addItems(["Draft", "Final"])
+        self.draft_final_combo.setStyleSheet(get_input_style())
 
         self.standard_value_combo = QComboBox()
         self.standard_value_combo.addItems([
@@ -63,6 +97,7 @@ class HomePage(QWidget):
             "Investment Value",
             "Intrinsic Value"
         ])
+        self.standard_value_combo.setStyleSheet(get_input_style())
 
         self.taxable_combo = QComboBox()
         self.taxable_combo.addItems([
@@ -70,6 +105,7 @@ class HomePage(QWidget):
             "Taxable",
             "Nontaxable"
         ])
+        self.taxable_combo.setStyleSheet(get_input_style())
 
         self.basis_value_combo = QComboBox()
         self.basis_value_combo.addItems([
@@ -77,6 +113,7 @@ class HomePage(QWidget):
             "Business Enterprise Value",
             "Equity Value"
         ])
+        self.basis_value_combo.setStyleSheet(get_input_style())
 
         general_form.addRow("Client", self.client_input)
         general_form.addRow("Subject Company Name", self.subject_name_input)
@@ -102,6 +139,7 @@ class HomePage(QWidget):
             "Private Company",
             "Publicly Traded"
         ])
+        self.company_status_combo.setStyleSheet(get_input_style())
         self.company_status_combo.currentTextChanged.connect(
             self._on_company_status_changed
         )
@@ -118,8 +156,7 @@ class HomePage(QWidget):
         # Private financials link button (shown when Private Company)
         self.private_financials_btn = QPushButton("Enter Financial Data →")
         self.private_financials_btn.setStyleSheet(
-            "border: none; color: #1a4a8a; text-decoration: underline; "
-            "text-align: left; background: transparent;"
+            get_link_style() + " text-align: left;"
         )
         self.private_financials_btn.setCursor(
             Qt.CursorShape.PointingHandCursor
@@ -132,8 +169,7 @@ class HomePage(QWidget):
         # positioned below Enter Financial Data)
         self.projection_module_btn = QPushButton("Projection Module →")
         self.projection_module_btn.setStyleSheet(
-            "border: none; color: #1a4a8a; text-decoration: underline; "
-            "text-align: left; background: transparent;"
+            get_link_style() + " text-align: left;"
         )
         self.projection_module_btn.setCursor(
             Qt.CursorShape.PointingHandCursor
@@ -221,10 +257,12 @@ class HomePage(QWidget):
 
         headers = ["#", "Closing Date", "Target Company", "Acquirer",
                    "BEV", "TTM Revenue", "TTM EBITDA", "TTM EBIT"]
+        self._gt_col_headers = []
         for col, header in enumerate(headers):
             lbl = QLabel(header)
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setStyleSheet(get_bold_style())
             gt_grid.addWidget(lbl, 0, col)
+            self._gt_col_headers.append(lbl)
 
         self.gt_rows = []
 
@@ -332,14 +370,14 @@ class HomePage(QWidget):
         self.historical_years_spin.setMaximum(5)
         self.historical_years_spin.setValue(5)
         self.historical_years_spin.setFixedWidth(60)
-        self.historical_years_spin.setStyleSheet(INPUT_STYLE)
+        self.historical_years_spin.setStyleSheet(get_input_style())
 
         self.projection_years_spin = QSpinBox()
         self.projection_years_spin.setMinimum(1)
         self.projection_years_spin.setMaximum(20)
         self.projection_years_spin.setValue(5)
         self.projection_years_spin.setFixedWidth(60)
-        self.projection_years_spin.setStyleSheet(INPUT_STYLE)
+        self.projection_years_spin.setStyleSheet(get_input_style())
 
         projection_form.addRow("Historical Years", self.historical_years_spin)
         projection_form.addRow("Projection Years", self.projection_years_spin)

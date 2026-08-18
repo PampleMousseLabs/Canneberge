@@ -27,6 +27,7 @@ def save_session(
     wacc_page_state: dict,
     dcf_page_state: dict,
     nwc_page_state: dict,
+    dashboard_page_state: dict,
     filepath: Optional[Path] = None,
 ) -> Path:
     """
@@ -102,6 +103,7 @@ def save_session(
         "wacc_page_state":       wacc_page_state,
         "dcf_page_state":        dcf_page_state,
         "nwc_page_state":        nwc_page_state,
+        "dashboard_page_state":  dashboard_page_state,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -133,6 +135,7 @@ def load_session(filepath: Path) -> dict:
     wacc_raw = payload.get("wacc_page_state", {})
     dcf_raw  = payload.get("dcf_page_state", {})
     nwc_raw  = payload.get("nwc_page_state", {})
+    dashboard_raw = payload.get("dashboard_page_state", {})
 
     pf = PrivateFinancials(
         is_data=pf_raw.get("is_data", {}),
@@ -148,6 +151,7 @@ def load_session(filepath: Path) -> dict:
         "wacc_page_state":       wacc_raw,
         "dcf_page_state":        dcf_raw,
         "nwc_page_state":        nwc_raw,
+        "dashboard_page_state":  dashboard_raw,
     }
 
 

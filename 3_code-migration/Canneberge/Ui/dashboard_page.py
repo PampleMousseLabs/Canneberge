@@ -502,16 +502,23 @@ class DashboardPage(QWidget):
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         # Border applies to the frame only. Child QLabels inherit
         # otherwise, which puts a box around every static text item.
-        frame.setStyleSheet(
-            f"QFrame {{ border: {get_border_style()}; background: white; }}"
-            "QLabel { border: none; }"
-        )
+        frame.setStyleSheet(self._panel_frame_style())
         frame.setFixedWidth(width)
         frame.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
         )
+        theme_manager.theme_changed.connect(
+            lambda _t: frame.setStyleSheet(self._panel_frame_style())
+        )
         return frame
+
+    def _panel_frame_style(self) -> str:
+        return (
+            f"QFrame {{ border: {get_border_style()}; "
+            f"background: {theme_manager.current.window_bg}; }}"
+            "QLabel { border: none; }"
+        )
 
     # ------------------------------------------------------------------
     # Income Approach
