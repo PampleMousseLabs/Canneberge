@@ -12,6 +12,9 @@ def main():
     from Canneberge.Ui.theme import theme_manager
     theme_manager.current.apply_to_app(app)
 
+    from Canneberge.Ui.font_scale import font_scale
+    font_scale.apply_to_app(app)
+
     try:
         window = MainWindow()
         window.show()

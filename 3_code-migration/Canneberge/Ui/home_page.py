@@ -79,8 +79,8 @@ class HomePage(QWidget):
         general_form = QFormLayout()
 
         self.client_input = QLineEdit("Ted & Co.")
-        self.subject_name_input = QLineEdit("SpaceX")
-        self.main_title_input = QLineEdit("Sensitivity Analysis of SpaceX")
+        self.subject_name_input = QLineEdit("COMPANY NAME")
+        self.main_title_input = QLineEdit(f"Sensitivity Analysis of {self.subject_name_input.text()}")
         self.valuation_date_input = QLineEdit("7/21/2026")
 
         self.numeric_scale_combo = QComboBox()

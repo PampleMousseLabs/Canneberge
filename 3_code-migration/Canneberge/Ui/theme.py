@@ -15,6 +15,7 @@ literal - that's exactly the drift pattern this file exists to kill.
 
 from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal, QSettings
+from Canneberge.Ui.font_scale import font_scale, SECTION_HEADER_BASE_PX
 
 
 # =============================================================
@@ -75,7 +76,7 @@ class Theme:
         with this, fix header_bg/default_text, don't fork a new style.
         """
         return (
-            f"font-weight: bold; font-size: 11px; "
+            f"font-weight: bold; font-size: {font_scale.px(SECTION_HEADER_BASE_PX)}px; "
             f"background-color: {self.header_bg}; color: {self.default_text};"
         )
 
@@ -225,12 +226,12 @@ ONE_DARK_PRO = Theme(
     bold_text="#abb2bf",
     link_color="#61afef",
     border_color="#181a1f",
-    emphasis_border="#c678dd",
+    emphasis_border="#181a1f",
     disabled_bg="#33383f",
     disabled_text="#7f8794",
-    note_text="#33ff00",
-    dark_header_bg="#3b4048",
-    dark_header_fg="#abb2bf",
+    note_text="#98c379",
+    dark_header_bg="#282c34",
+    dark_header_fg="#ffffff",
     grey_disabled_bg="#33383f",
     grey_disabled_text="#7f8794",
     chart_fill="#c678dd",

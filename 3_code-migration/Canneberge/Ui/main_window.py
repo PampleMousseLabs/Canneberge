@@ -277,6 +277,36 @@ class MainWindow(QMainWindow):
             action_group.addAction(action)
             theme_menu.addAction(action)
 
+        self._build_font_size_menu(view_menu)
+
+    def _build_font_size_menu(self, view_menu):
+        """
+        Font-size control. Reads/writes Canneberge/Ui/font_scale.py's
+        font_scale singleton - deliberately separate from the theme
+        switcher above, since text size is a readability preference
+        independent of color theme.
+        """
+        from Canneberge.Ui.font_scale import font_scale
+
+        font_menu = view_menu.addMenu("Font Size")
+
+        increase_action = QAction("Increase", self)
+        increase_action.setShortcut("Ctrl+=")
+        increase_action.triggered.connect(font_scale.increase)
+        font_menu.addAction(increase_action)
+
+        decrease_action = QAction("Decrease", self)
+        decrease_action.setShortcut("Ctrl+-")
+        decrease_action.triggered.connect(font_scale.decrease)
+        font_menu.addAction(decrease_action)
+
+        font_menu.addSeparator()
+
+        reset_action = QAction("Reset to Default", self)
+        reset_action.setShortcut("Ctrl+0")
+        reset_action.triggered.connect(font_scale.reset)
+        font_menu.addAction(reset_action)
+
     def _on_tab_changed(self, index: int):
         if self.tabs.widget(index) is self.subject_financials_page:
             self.subject_financials_page.refresh()

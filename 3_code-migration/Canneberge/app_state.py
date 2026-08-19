@@ -217,8 +217,8 @@ class ProjectionData:
 class ProjectInputs:
     # General
     client: str = "Ted & Co."
-    subject_company_name: str = "SpaceX"
-    main_title: str = "Sensitivity Analysis of SpaceX"
+    subject_company_name: str = "COMPANY NAME"
+    main_title: str = f"Sensitivity Analysis of {subject_company_name}"
     valuation_date: str = "7/21/2026"
     numeric_scale: str = "Millions"
     draft_final: str = "Draft"

@@ -22,9 +22,45 @@ from Canneberge.Calculations.subject_is_bs_calc import (
     _sub,
 )
 from Canneberge.app_state import ProjectInputs, PrivateFinancials, ProjectionData, IS_LINES, BS_LINES
+from Canneberge.Ui.theme import theme_manager
 
-BOLD_STYLE = "font-weight: bold;"
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+# NOTE: SECTION_STYLE below has zero call sites anywhere in this file
+# (confirmed via full-file search) - same dead-constant situation as
+# CALC_STYLE in gpc_page.py/gt_page.py. Left in place, not deleted.
 SECTION_STYLE = "font-weight: bold; font-size: 11px;"
+
+
+def get_toggle_button_style() -> str:
+    """
+    The IS/BS toggle buttons (self.btn_is/self.btn_bs) had NO styling
+    at all before this - riding raw native OS button chrome, which is
+    exactly the "sore thumb against a dark theme" problem the QTabBar
+    fix and WACC's combo-box fix both addressed earlier. These are
+    QPushButton(checkable=True) acting as a segmented control, so this
+    needs explicit :checked/:!checked states, not a single flat style.
+    """
+    t = theme_manager.current
+    return f"""
+        QPushButton {{
+            background-color: {t.window_bg};
+            color: {t.default_text};
+            border: 1px solid {t.border_color};
+            padding: 4px 14px;
+        }}
+        QPushButton:checked {{
+            background-color: {t.input_bg};
+            color: {t.input_text};
+            font-weight: bold;
+        }}
+        QPushButton:!checked:hover {{
+            background-color: {t.grey_disabled_bg};
+        }}
+    """
 
 
 def _fmt(value) -> str:
@@ -150,6 +186,19 @@ class SubjectFinancialsPage(QWidget):
         self._current_statement = "IS"
         self._build_ui()
 
+        theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, theme=None):
+        self.btn_is.setStyleSheet(get_toggle_button_style())
+        self.btn_bs.setStyleSheet(get_toggle_button_style())
+        # No metadata-tracking needed for the row/header labels below
+        # the toggle - refresh() fully discards and rebuilds the
+        # entire display widget from scratch every call (this is a
+        # read-only display page, no typed input values at risk),
+        # so a plain refresh() picks up every get_bold_style() call
+        # with the current theme automatically.
+        self.refresh()
+
     def _build_ui(self):
         outer = QVBoxLayout()
 
@@ -160,6 +209,8 @@ class SubjectFinancialsPage(QWidget):
 
         self.btn_is = QPushButton("IS")
         self.btn_bs = QPushButton("BS")
+        self.btn_is.setStyleSheet(get_toggle_button_style())
+        self.btn_bs.setStyleSheet(get_toggle_button_style())
 
         for btn, stmt in [(self.btn_is, "IS"), (self.btn_bs, "BS")]:
             btn.setCheckable(True)
@@ -285,7 +336,7 @@ class SubjectFinancialsPage(QWidget):
         grid.addWidget(QLabel("Line Item"), 0, 0)
         for col_idx, period in enumerate(periods):
             lbl = QLabel(period)
-            lbl.setStyleSheet(BOLD_STYLE)
+            lbl.setStyleSheet(get_bold_style())
             lbl.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
@@ -299,7 +350,7 @@ class SubjectFinancialsPage(QWidget):
             row = row_idx + 1
             name_lbl = QLabel(label)
             if bold:
-                name_lbl.setStyleSheet(BOLD_STYLE)
+                name_lbl.setStyleSheet(get_bold_style())
             grid.addWidget(name_lbl, row, 0)
 
             for col_idx, period in enumerate(periods):
@@ -310,7 +361,7 @@ class SubjectFinancialsPage(QWidget):
                     Qt.AlignmentFlag.AlignVCenter
                 )
                 if bold:
-                    val_lbl.setStyleSheet(BOLD_STYLE)
+                    val_lbl.setStyleSheet(get_bold_style())
                 grid.addWidget(val_lbl, row, col_idx + 1)
 
     # ------------------------------------------------------------------

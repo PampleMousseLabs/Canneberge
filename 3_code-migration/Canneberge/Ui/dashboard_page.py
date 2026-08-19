@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.font_scale import font_scale, PANEL_HEADER_BASE_PX
 
 from Canneberge.Ui.wacc_page import (
     CORPORATE_RATE_SERIES,
@@ -89,7 +90,7 @@ def get_panel_header_style() -> str:
         f"background-color: {t.dark_header_bg}; "
         f"color: {t.dark_header_fg}; "
         "font-weight: bold; "
-        "font-size: 12px; "
+        f"font-size: {font_scale.px(PANEL_HEADER_BASE_PX)}px; "
         "padding: 4px;"
     )
 

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.font_scale import font_scale, NOTE_BASE_PX
 
 # =====================================================================
 # STYLE CONFIG — this is the block to edit for any purely visual
@@ -71,7 +72,7 @@ def get_link_style() -> str:
 
 def get_note_style() -> str:
     t = theme_manager.current
-    return f"font-size: 10px; color: {t.note_text};"
+    return f"font-size: {font_scale.px(NOTE_BASE_PX)}px; color: {t.note_text};"
 
 # Rows that get a thin border ABOVE them, across every historical +
 # projected + Residual data cell (not just the label). "EBIT" covers

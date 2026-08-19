@@ -65,6 +65,7 @@ from PyQt6.QtCore import Qt
 from Canneberge.app_state import BS_LINES
 from Canneberge.Ui.gpc_page import _quartile
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.font_scale import font_scale, NOTE_BASE_PX
 from Canneberge.Ui.dcf_page import (
     INDENT_STYLE, MARGIN_ROW_STYLE, MARGIN_CELL_STYLE, COL_WIDTH,
     _fmt_currency, _fmt_pct, _safe_div, _sub_strict as _sub, _mul_strict as _mul,
@@ -75,6 +76,17 @@ from Canneberge.Ui.subject_financials_page import SA_KEY_MAP, _parse_val
 
 def get_bold_style() -> str:
     return theme_manager.current.bold_style()
+
+
+def get_note_style() -> str:
+    # Matches dcf_page.py's period-header treatment exactly - these
+    # two pages share the same column-header role (LFY-4/NFY+1/etc.)
+    # and were found rendering it two different ways (this page used
+    # to bold only the forward columns and leave historical ones
+    # completely unstyled; DCF uniformly muted every column). This is
+    # now the single shared answer for that role.
+    t = theme_manager.current
+    return f"font-size: {font_scale.px(NOTE_BASE_PX)}px; color: {t.note_text};"
 
 
 def get_input_style() -> str:
@@ -217,7 +229,7 @@ class NWCPage(QWidget):
         for lbl in getattr(self, "_section_labels", []):
             lbl.setStyleSheet(get_header_style())
         for lbl in getattr(self, "_period_header_labels", {}).values():
-            lbl.setStyleSheet(get_bold_style())
+            lbl.setStyleSheet(get_note_style())
         if hasattr(self, "_lbl_fye"):
             self._lbl_fye.setStyleSheet(get_bold_style())
         if hasattr(self, "lbl_client_header"):
@@ -566,9 +578,8 @@ class NWCPage(QWidget):
         for data_idx, label in enumerate(self._headers):
             grid_col = self._grid_col(data_idx)
             lbl = QLabel(label, alignment=Qt.AlignmentFlag.AlignRight)
-            if not self._is_historical[data_idx]:
-                lbl.setStyleSheet(get_bold_style())
-                self._period_header_labels[data_idx] = lbl
+            lbl.setStyleSheet(get_note_style())
+            self._period_header_labels[data_idx] = lbl
             lbl.setFixedWidth(COL_WIDTH)
             grid.addWidget(lbl, 1, grid_col)
 
