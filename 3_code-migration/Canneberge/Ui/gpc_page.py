@@ -18,6 +18,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.shared_input_widgets import (
+    MultipleInputEdit, PctInputEdit, CurrencyInputEdit,
+    _parse_float, _parse_pct,
+)
 
 from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
 
@@ -103,36 +107,6 @@ def get_included_row_style() -> str:
 CALC_STYLE = "color: black;"
 
 
-def _parse_float(text: str) -> Optional[float]:
-    text = str(text).strip().replace(",", "").replace("x", "")
-    if not text:
-        return None
-    try:
-        val = float(text)
-    except ValueError:
-        return None
-    if math.isnan(val) or math.isinf(val):
-        return None
-    return val
-
-
-def _parse_pct(text: str) -> Optional[float]:
-    text = str(text).strip().replace(",", "")
-    if not text:
-        return None
-    try:
-        if "%" in text:
-            val = float(text.replace("%", "")) / 100
-        else:
-            val = float(text)
-            val = val / 100 if val > 1 else val
-    except ValueError:
-        return None
-    if math.isnan(val) or math.isinf(val):
-        return None
-    return val
-
-
 def _fmt_multiple(value: Optional[float]) -> str:
     if value is None or math.isnan(value) or math.isinf(value):
         return "NA"
@@ -195,82 +169,6 @@ def _make_section_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(get_section_header_style())
     return lbl
-
-
-class MultipleInputEdit(QLineEdit):
-    """
-    Same widget as gt_page.py's version — formats ##.##x on focus-out.
-
-    NOTE: this class is duplicated verbatim in gt_page.py (per the
-    original docstring above). That's the same copy-pasted-constant
-    drift risk already fixed for INPUT_STYLE, just at the class level
-    instead of the string level. Not resolved here (out of scope for
-    this pass) - flag for when gt_page.py gets migrated: these should
-    become one shared class, not two independently-maintained copies.
-    """
-    def __init__(self, placeholder="", parent=None):
-        super().__init__(parent)
-        self.setPlaceholderText(placeholder)
-        self.setStyleSheet(get_input_style())
-        self.setFixedWidth(W_METRIC - 10)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.editingFinished.connect(self._format_value)
-        # Self-subscribing to theme changes (rather than requiring
-        # GPCPage to track every grid instance in a list) means this
-        # restyles correctly no matter how many of these exist or
-        # where they're placed - removes an entire class of "did I
-        # remember to add this widget to the restyle loop" bugs.
-        theme_manager.theme_changed.connect(
-            lambda _t: self.setStyleSheet(get_input_style())
-        )
-
-    def _format_value(self):
-        val = _parse_float(self.text())
-        if val is not None:
-            self.setText(f"{val:.2f}x")
-
-
-class PctInputEdit(QLineEdit):
-    """Same widget as gt_page.py's version — formats ##.#% on focus-out."""
-    def __init__(self, placeholder="", parent=None):
-        super().__init__(parent)
-        self.setPlaceholderText(placeholder)
-        self.setStyleSheet(get_input_style())
-        self.setFixedWidth(W_METRIC - 10)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.editingFinished.connect(self._format_value)
-        theme_manager.theme_changed.connect(
-            lambda _t: self.setStyleSheet(get_input_style())
-        )
-
-    def _format_value(self):
-        val = _parse_pct(self.text())
-        if val is not None:
-            self.setText(f"{val*100:.1f}%")
-
-
-class CurrencyInputEdit(QLineEdit):
-    """
-    New widget, not in gt_page.py. Used when a column is set to
-    Custom Multiple — the Subject Company Financial Data cell for
-    that column needs to accept a typed number (no metric to pull),
-    formatted like currency rather than a multiple.
-    """
-    def __init__(self, placeholder="", parent=None):
-        super().__init__(parent)
-        self.setPlaceholderText(placeholder)
-        self.setStyleSheet(get_input_style())
-        self.setFixedWidth(W_METRIC - 10)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.editingFinished.connect(self._format_value)
-        theme_manager.theme_changed.connect(
-            lambda _t: self.setStyleSheet(get_input_style())
-        )
-
-    def _format_value(self):
-        val = _parse_float(self.text())
-        if val is not None:
-            self.setText(f"{val:,.0f}")
 
 
 class GPCPage(QWidget):
@@ -581,7 +479,7 @@ class GPCPage(QWidget):
                 self.grid.addWidget(lbl, r, col)
                 mult_lbls.append(lbl)
 
-                inp = MultipleInputEdit(placeholder="e.g. 4.0x")
+                inp = MultipleInputEdit(placeholder="e.g. 4.0x", width=W_METRIC - 10)
                 inp.editingFinished.connect(self._on_inputs_changed)
                 inp.setVisible(False)
                 self.grid.addWidget(inp, r, col)
@@ -646,7 +544,7 @@ class GPCPage(QWidget):
             self.grid.addWidget(QLabel(label_text), r, COL_EXCLUDE, 1, 3)
 
             for col in METRIC_COLS:
-                inp = MultipleInputEdit(placeholder="e.g. 4.0x")
+                inp = MultipleInputEdit(placeholder="e.g. 4.0x", width=W_METRIC - 10)
                 inp.editingFinished.connect(self._on_inputs_changed)
                 inputs_list.append(inp)
                 self.grid.addWidget(
@@ -684,7 +582,7 @@ class GPCPage(QWidget):
             self.grid.addWidget(lbl, r, col)
             self.subject_metric_labels.append(lbl)
 
-            inp = CurrencyInputEdit(placeholder="e.g. 1000")
+            inp = CurrencyInputEdit(placeholder="e.g. 1000", width=W_METRIC - 10)
             inp.editingFinished.connect(self._on_inputs_changed)
             inp.setVisible(False)
             self.grid.addWidget(inp, r, col)
@@ -730,7 +628,7 @@ class GPCPage(QWidget):
         self.weight_inputs = []
         default_weight = f"{100 / MAX_COLS:.1f}%"
         for col in METRIC_COLS:
-            inp = PctInputEdit(placeholder="e.g. 14.3%")
+            inp = PctInputEdit(placeholder="e.g. 14.3%", width=W_METRIC - 10)
             inp.setText(default_weight)
             inp.editingFinished.connect(self._on_inputs_changed)
             self.weight_inputs.append(inp)
@@ -839,7 +737,7 @@ class GPCPage(QWidget):
             QLabel("Plus: NWC Surplus (Deficit) — PLACEHOLDER"),
             r, COL_EXCLUDE, 1, 4
         )
-        self.nwc_input = CurrencyInputEdit(placeholder="e.g. 0")
+        self.nwc_input = CurrencyInputEdit(placeholder="e.g. 0", width=W_METRIC - 10)
         self.nwc_input.editingFinished.connect(self._on_inputs_changed)
         self.grid.addWidget(self.nwc_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
         self._current_row += 1
@@ -850,7 +748,7 @@ class GPCPage(QWidget):
             QLabel("Plus: Non-Operating Assets, Net — PLACEHOLDER"),
             r, COL_EXCLUDE, 1, 4
         )
-        self.non_op_assets_input = CurrencyInputEdit(placeholder="e.g. 0")
+        self.non_op_assets_input = CurrencyInputEdit(placeholder="e.g. 0", width=W_METRIC - 10)
         self.non_op_assets_input.editingFinished.connect(self._on_inputs_changed)
         self.grid.addWidget(self.non_op_assets_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
         self._current_row += 1

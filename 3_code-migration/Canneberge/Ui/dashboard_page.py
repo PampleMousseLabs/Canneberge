@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.shared_input_widgets import MultipleInputEdit
 from Canneberge.Ui.font_scale import font_scale, PANEL_HEADER_BASE_PX
 
 from Canneberge.Ui.wacc_page import (
@@ -1805,8 +1806,13 @@ class DashboardPage(QWidget):
             grid.addWidget(combo, row, 0)
             combo_list.append(combo)
 
-            low = _value_line(value_column_width)
-            high = _value_line(value_column_width)
+            # Low/High are actual multiples ("3.54x") - use the real
+            # formatting widget instead of a plain _value_line(), or
+            # typing directly into these on the Dashboard (they're
+            # editable, not just a display mirror - see
+            # _push_to_market_page) never gets the "x" suffix applied.
+            low = MultipleInputEdit(width=value_column_width)
+            high = MultipleInputEdit(width=value_column_width)
             weight = _value_line(value_column_width)
 
             grid.addWidget(low, row, 1)
@@ -2091,7 +2097,7 @@ class DashboardPage(QWidget):
     def _derive_dloc(self) -> Optional[float]:
         """DLOC = CP / (1 + CP). The inverse relationship between a
         control premium and the discount for lack of control."""
-        from Canneberge.Ui.gt_page import _parse_pct
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
         cp = _parse_pct(self.control_premium_input.text())
         if cp is None or cp <= -1.0:
             return None
@@ -2268,7 +2274,7 @@ class DashboardPage(QWidget):
             return
 
         from Canneberge.Ui.dcf_page import _parse_label_as_float as parse
-        from Canneberge.Ui.gt_page import _parse_pct
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
 
         bridge_inputs = self._collect_bridge_inputs()
         self._bridge_rows = compute_bridge(

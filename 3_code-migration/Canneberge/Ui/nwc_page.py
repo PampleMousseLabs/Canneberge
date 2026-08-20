@@ -325,7 +325,8 @@ class NWCPage(QWidget):
         title_row = QHBoxLayout()
         self.lbl_client_header = QLabel(inputs.client, styleSheet=get_bold_style())
         title_row.addWidget(self.lbl_client_header)
-        title_row.addWidget(QLabel(inputs.subject_company_name))
+        self.lbl_subject_name = QLabel(inputs.subject_company_name)
+        title_row.addWidget(self.lbl_subject_name)
         title_row.addWidget(QLabel("Net Working Capital Schedule"))
         title_row.addStretch(1)
         self.page_layout.addLayout(title_row)
@@ -956,6 +957,15 @@ class NWCPage(QWidget):
 
         self._rebuild_table_if_needed()
         inputs = self.get_project_inputs()
+
+        # These were being set once at construction and never
+        # touched again - if Client or Subject Company Name
+        # changed on the Home page after this tab was first built,
+        # this title would silently show stale text forever (found
+        # via a screenshot showing "COMPANY NAME" instead of the
+        # real subject name).
+        self.lbl_client_header.setText(inputs.client)
+        self.lbl_subject_name.setText(inputs.subject_company_name)
 
         # Projection Years is shared with Home / DCF. Keep NWC's
         # visible Projection Years spinbox synced to that shared value.

@@ -16,9 +16,61 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 from Canneberge.app_state import PrivateFinancials, IS_LINES, BS_LINES
+from Canneberge.Ui.theme import theme_manager
 
-INPUT_STYLE = "background-color: #dce9f7; color: #1a4a8a;"
-BOLD_STYLE = "font-weight: bold;"
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_note_bold_style() -> str:
+    # TTM header/cells - bold + the same muted tone get_note_style()
+    # uses elsewhere, just without the smaller font-size (this is a
+    # column header/data cell, not a footnote).
+    t = theme_manager.current
+    return f"font-weight: bold; color: {t.note_text};"
+
+
+def get_link_bold_style() -> str:
+    # YTD header - bold + link_color, distinguishing it from the
+    # plain historical/TTM columns.
+    t = theme_manager.current
+    return f"font-weight: bold; color: {t.link_color};"
+
+
+def get_ytd_input_style() -> str:
+    # Same input look as everywhere else, plus a visible border in
+    # input_text's color so YTD columns read as visually distinct
+    # from plain historical input columns.
+    t = theme_manager.current
+    return f"{t.input_style()} border: 1px solid {t.input_text};"
+
+
+def get_toggle_button_style() -> str:
+    # Matches subject_financials_page.py's IS/BS toggle exactly - same
+    # role, same fix (these had zero styling at all before, riding
+    # raw native OS button chrome).
+    t = theme_manager.current
+    return f"""
+        QPushButton {{
+            background-color: {t.window_bg};
+            color: {t.default_text};
+            border: 1px solid {t.border_color};
+            padding: 4px 14px;
+        }}
+        QPushButton:checked {{
+            background-color: {t.input_bg};
+            color: {t.input_text};
+            font-weight: bold;
+        }}
+        QPushButton:!checked:hover {{
+            background-color: {t.grey_disabled_bg};
+        }}
+    """
 
 def _parse_float(text: str) -> Optional[float]:
     text = str(text).strip().replace(",", "")
@@ -165,6 +217,8 @@ class PrivateFinancialsInputPage(QDialog):
         self.stmt_group.setExclusive(True)
         self.btn_is = QPushButton("IS")
         self.btn_bs = QPushButton("BS")
+        self.btn_is.setStyleSheet(get_toggle_button_style())
+        self.btn_bs.setStyleSheet(get_toggle_button_style())
 
         for btn, stmt in [(self.btn_is, "IS"), (self.btn_bs, "BS")]:
             btn.setCheckable(True)
@@ -178,10 +232,7 @@ class PrivateFinancialsInputPage(QDialog):
         top_bar.addStretch()
 
         save_btn = QPushButton("Save")
-        save_btn.setStyleSheet(
-            "background-color: #1a4a8a; color: white; "
-            "font-weight: bold; padding: 4px 16px;"
-        )
+        save_btn.setStyleSheet(theme_manager.current.primary_button_style())
         save_btn.clicked.connect(self._on_save)
 
         cancel_btn = QPushButton("Cancel")
@@ -230,19 +281,15 @@ class PrivateFinancialsInputPage(QDialog):
         grid.addWidget(QLabel("Line Item"), 0, 0)
         for col_idx, period in enumerate(periods):
             lbl = QLabel(period)
-            lbl.setStyleSheet(BOLD_STYLE)
+            lbl.setStyleSheet(get_bold_style())
             lbl.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
             # TTM and YTD headers styled differently to distinguish
             if period == "TTM":
-                lbl.setStyleSheet(
-                    "font-weight: bold; color: #555555;"
-                )
+                lbl.setStyleSheet(get_note_bold_style())
             elif period.startswith("YTD"):
-                lbl.setStyleSheet(
-                    "font-weight: bold; color: #1a4a8a;"
-                )
+                lbl.setStyleSheet(get_link_bold_style())
             grid.addWidget(lbl, 0, col_idx + 1)
 
         grid.setColumnStretch(0, 2)
@@ -255,7 +302,7 @@ class PrivateFinancialsInputPage(QDialog):
 
             name_lbl = QLabel(label)
             if bold:
-                name_lbl.setStyleSheet(BOLD_STYLE)
+                name_lbl.setStyleSheet(get_bold_style())
             grid.addWidget(name_lbl, row, 0)
 
             self._inputs[stmt][key] = {}
@@ -275,9 +322,9 @@ class PrivateFinancialsInputPage(QDialog):
                         Qt.AlignmentFlag.AlignRight |
                         Qt.AlignmentFlag.AlignVCenter
                     )
-                    style = BOLD_STYLE if bold else ""
+                    style = get_bold_style() if bold else ""
                     if is_ttm_calc:
-                        style += " color: #555555;"
+                        style += f" color: {theme_manager.current.note_text};"
                     val_lbl.setStyleSheet(style)
                     grid.addWidget(val_lbl, row, col_idx + 1)
                     self._calc_labels[stmt][key][period] = val_lbl
@@ -286,13 +333,9 @@ class PrivateFinancialsInputPage(QDialog):
                     # YTD columns get same input style but slightly
                     # different border to visually separate
                     if is_ytd:
-                        inp.setStyleSheet(
-                            "background-color: #dce9f7; "
-                            "color: #1a4a8a; "
-                            "border: 1px solid #1a4a8a;"
-                        )
+                        inp.setStyleSheet(get_ytd_input_style())
                     else:
-                        inp.setStyleSheet(INPUT_STYLE)
+                        inp.setStyleSheet(get_input_style())
                     inp.setAlignment(Qt.AlignmentFlag.AlignRight)
                     inp.setFixedWidth(88)
                     inp.editingFinished.connect(

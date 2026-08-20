@@ -21,6 +21,10 @@ from PyQt6.QtGui import QColor
 from Canneberge.app_state import Transaction
 from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
 from Canneberge.Ui.theme import theme_manager
+from Canneberge.Ui.shared_input_widgets import (
+    MultipleInputEdit, PctInputEdit,
+    _parse_float, _parse_pct,
+)
 
 METRICS = ["TTM Revenue", "TTM EBITDA", "TTM EBIT"]
 MAX_COLS = 3
@@ -91,29 +95,6 @@ def get_included_row_style() -> str:
 CALC_STYLE = "color: black;"
 
 
-def _parse_float(text: str) -> Optional[float]:
-    text = str(text).strip().replace(",", "").replace("x", "")
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def _parse_pct(text: str) -> Optional[float]:
-    text = str(text).strip().replace(",", "")
-    if not text:
-        return None
-    try:
-        if "%" in text:
-            return float(text.replace("%", "")) / 100
-        val = float(text)
-        return val / 100 if val > 1 else val
-    except ValueError:
-        return None
-
-
 def _fmt_multiple(value: Optional[float]) -> str:
     if value is None:
         return "NA"
@@ -168,50 +149,6 @@ def _make_section_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(get_section_header_style())
     return lbl
-
-
-class MultipleInputEdit(QLineEdit):
-    """
-    Input field that formats its value as ##.##x on focus-out.
-
-    NOTE: byte-identical to gpc_page.py's class of the same name -
-    same duplication flagged there, not resolved here.
-    """
-    def __init__(self, placeholder="", parent=None):
-        super().__init__(parent)
-        self.setPlaceholderText(placeholder)
-        self.setStyleSheet(get_input_style())
-        self.setFixedWidth(W_METRIC - 10)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.editingFinished.connect(self._format_value)
-        theme_manager.theme_changed.connect(
-            lambda _t: self.setStyleSheet(get_input_style())
-        )
-
-    def _format_value(self):
-        val = _parse_float(self.text())
-        if val is not None:
-            self.setText(f"{val:.2f}x")
-        # if empty/invalid, leave as-is so placeholder shows
-
-
-class PctInputEdit(QLineEdit):
-    """Input field that formats its value as ##.#% on focus-out."""
-    def __init__(self, placeholder="", parent=None):
-        super().__init__(parent)
-        self.setPlaceholderText(placeholder)
-        self.setStyleSheet(get_input_style())
-        self.setFixedWidth(W_METRIC - 10)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.editingFinished.connect(self._format_value)
-        theme_manager.theme_changed.connect(
-            lambda _t: self.setStyleSheet(get_input_style())
-        )
-
-    def _format_value(self):
-        val = _parse_pct(self.text())
-        if val is not None:
-            self.setText(f"{val*100:.1f}%")
 
 
 class GTPage(QWidget):
@@ -540,7 +477,7 @@ class GTPage(QWidget):
             self.grid.addWidget(QLabel(label_text), r, COL_EXCLUDE, 1, 4)
 
             for i, col in enumerate(METRIC_COLS):
-                inp = MultipleInputEdit(placeholder="e.g. 4.0x")
+                inp = MultipleInputEdit(placeholder="e.g. 4.0x", width=W_METRIC - 10)
                 inp.editingFinished.connect(self._on_inputs_changed)
                 inputs_list.append(inp)
                 self.grid.addWidget(
@@ -614,7 +551,7 @@ class GTPage(QWidget):
         self.weight_inputs = []
         default_weight = f"{100 / MAX_COLS:.1f}%"
         for col in METRIC_COLS:
-            inp = PctInputEdit(placeholder="e.g. 33.3%")
+            inp = PctInputEdit(placeholder="e.g. 33.3%", width=W_METRIC - 10)
             inp.setText(default_weight)
             inp.editingFinished.connect(self._on_inputs_changed)
             self.weight_inputs.append(inp)

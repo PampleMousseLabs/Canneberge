@@ -53,14 +53,25 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.app_state import ProjectInputs, ProjectionData
+from Canneberge.Ui.theme import theme_manager
 
-# ---------------------------------------------------------------------------
-# Style constants
-# ---------------------------------------------------------------------------
-INPUT_STYLE     = "background-color: #dce9f7; color: #1a4a8a;"
-PCT_INPUT_STYLE = "background-color: #ede7fe; color: #3509b9;"
-BOLD_STYLE      = "font-weight: bold;"
-SOURCE_STYLE    = "color: #555555;"   # greyed read-only historical/sourced values
+
+def get_input_style() -> str:
+    return theme_manager.current.input_style()
+
+
+def get_pct_input_style() -> str:
+    return theme_manager.current.pct_input_style()
+
+
+def get_bold_style() -> str:
+    return theme_manager.current.bold_style()
+
+
+def get_source_style() -> str:
+    # Greyed read-only historical/sourced values - reuses grey_disabled_text,
+    # same role private_financials_input_page.py's TTM column plays.
+    return f"color: {theme_manager.current.grey_disabled_text};"
 
 COL_WIDTH     = 100
 LABEL_STRETCH = 2
@@ -318,10 +329,7 @@ class ProjectionModulePage(QDialog):
         top_bar.addStretch()
 
         save_btn = QPushButton("Save")
-        save_btn.setStyleSheet(
-            "background-color: #1a4a8a; color: white; "
-            "font-weight: bold; padding: 4px 16px;"
-        )
+        save_btn.setStyleSheet(theme_manager.current.primary_button_style())
         save_btn.clicked.connect(self._on_save)
 
         cancel_btn = QPushButton("Cancel")
@@ -350,10 +358,10 @@ class ProjectionModulePage(QDialog):
         grid.addWidget(QLabel("Line Item"), 0, 0)
         for col_idx, period in enumerate(self._all_periods):
             lbl = QLabel(period)
-            lbl.setStyleSheet(BOLD_STYLE)
+            lbl.setStyleSheet(get_bold_style())
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if period == "TTM":
-                lbl.setStyleSheet("font-weight: bold; color: #555555;")
+                lbl.setStyleSheet(f"font-weight: bold; color: {theme_manager.current.note_text};")
             grid.addWidget(lbl, 0, col_idx + 1)
 
         grid.setColumnStretch(0, LABEL_STRETCH)
@@ -383,7 +391,7 @@ class ProjectionModulePage(QDialog):
         self._labels.setdefault("revenue_growth", {})
 
         rev_lbl = QLabel("Revenue")
-        rev_lbl.setStyleSheet(BOLD_STYLE)
+        rev_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(rev_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             cell = self._make_revenue_cell(period)
@@ -406,7 +414,7 @@ class ProjectionModulePage(QDialog):
         self._labels.setdefault("gp_improvement_hist", {})
 
         gp_lbl = QLabel("Gross Profit")
-        gp_lbl.setStyleSheet(BOLD_STYLE)
+        gp_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(gp_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
@@ -451,7 +459,7 @@ class ProjectionModulePage(QDialog):
         self._labels.setdefault("ebitda_improvement_sourced", {})
 
         ebitda_lbl = QLabel("EBITDA")
-        ebitda_lbl.setStyleSheet(BOLD_STYLE)
+        ebitda_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(ebitda_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
@@ -488,7 +496,7 @@ class ProjectionModulePage(QDialog):
         self._labels.setdefault("da_pct_hist", {})
 
         da_lbl = QLabel("D&A")
-        da_lbl.setStyleSheet(BOLD_STYLE)
+        da_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(da_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
@@ -521,7 +529,7 @@ class ProjectionModulePage(QDialog):
         self._labels.setdefault("capex_pct_hist", {})
 
         capex_lbl = QLabel("CapEx")
-        capex_lbl.setStyleSheet(BOLD_STYLE)
+        capex_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(capex_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
@@ -556,14 +564,14 @@ class ProjectionModulePage(QDialog):
         lbl = QLabel("")
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if sourced:
-            lbl.setStyleSheet(SOURCE_STYLE)
+            lbl.setStyleSheet(get_source_style())
         return lbl
 
     def _make_input(self, period: str, field_key: str, pct: bool = False) -> QLineEdit:
         inp = QLineEdit()
         inp.setAlignment(Qt.AlignmentFlag.AlignRight)
         inp.setFixedWidth(COL_WIDTH - 4)
-        inp.setStyleSheet(PCT_INPUT_STYLE if pct else INPUT_STYLE)
+        inp.setStyleSheet(get_pct_input_style() if pct else get_input_style())
         inp.editingFinished.connect(
             lambda fk=field_key, p=period: self._on_input_edited(fk, p)
         )

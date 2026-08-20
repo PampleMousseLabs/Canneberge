@@ -49,6 +49,8 @@ class Theme:
     dark_header_fg: str       # dashboard DARK_HEADER_FG role
     grey_disabled_bg: str     # the separate #f0f0f0 / #9a9a9a "greyed out" role
     grey_disabled_text: str
+    pct_input_bg: str          # percentage-specific input fields (projection_module_page.py)
+    pct_input_text: str
 
     # --- Charts (football field + GPC candlestick) ---
     chart_fill: str           # candlestick fill / range bar fill
@@ -95,8 +97,24 @@ class Theme:
             "text-decoration: underline; background: transparent;"
         )
 
+    def primary_button_style(self) -> str:
+        """
+        Solid, filled "primary action" button (Save, etc.) - reuses
+        link_color as the fill rather than adding a new field, since
+        it was already exactly this color (#1a4a8a) hardcoded
+        independently in at least two files (private_financials_input_page.py
+        and projection_module_page.py) before this existed.
+        """
+        return (
+            f"background-color: {self.link_color}; color: white; "
+            "font-weight: bold; padding: 4px 16px;"
+        )
+
     def disabled_style(self) -> str:
         return f"background-color: {self.disabled_bg}; color: {self.disabled_text};"
+
+    def pct_input_style(self) -> str:
+        return f"background-color: {self.pct_input_bg}; color: {self.pct_input_text};"
 
     def grey_disabled_style(self) -> str:
         return f"background-color: {self.grey_disabled_bg}; color: {self.grey_disabled_text};"
@@ -203,6 +221,8 @@ SLATE_AND_GOLD = Theme(
     dark_header_fg="#ffffff",
     grey_disabled_bg="#f0f0f0",
     grey_disabled_text="#444444",
+    pct_input_bg="#ede7fe",
+    pct_input_text="#3509b9",
     chart_fill="#8b7fd1",
     chart_edge="#3509b9",
     chart_range="#8b7fd1",
@@ -226,14 +246,16 @@ ONE_DARK_PRO = Theme(
     bold_text="#abb2bf",
     link_color="#61afef",
     border_color="#181a1f",
-    emphasis_border="#181a1f",
+    emphasis_border="#c678dd",
     disabled_bg="#33383f",
     disabled_text="#7f8794",
     note_text="#98c379",
-    dark_header_bg="#282c34",
+    dark_header_bg="#3a3d91",
     dark_header_fg="#ffffff",
     grey_disabled_bg="#33383f",
     grey_disabled_text="#7f8794",
+    pct_input_bg="#3d3556",
+    pct_input_text="#c678dd",
     chart_fill="#c678dd",
     chart_edge="#e5c07b",
     chart_range="#61afef",
@@ -265,6 +287,8 @@ GITHUB_LIGHT = Theme(
     dark_header_fg="#f6f8fa",
     grey_disabled_bg="#f6f8fa",
     grey_disabled_text="#8c959f",
+    pct_input_bg="#f3f0fc",
+    pct_input_text="#8250df",
     chart_fill="#8250df",
     chart_edge="#6639ba",
     chart_range="#54aeff",
