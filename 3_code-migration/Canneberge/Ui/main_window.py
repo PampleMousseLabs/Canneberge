@@ -13,7 +13,7 @@ from Canneberge.Ui.source_data_page import SourceDataPage
 from Canneberge.Ui.gt_page import GTPage
 from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
 from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
-from Canneberge.Ui.wacc_page import WACCPage
+from Canneberge.Ui.wacc_page import WACCPage, BETA_COLUMN_MAP
 from Canneberge.Ui.dcf_page import DCFPage
 from Canneberge.Ui.nwc_page import NWCPage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
@@ -22,6 +22,8 @@ from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
 from Canneberge.utils.session import (
     save_session, load_session, list_sessions, SESSION_DIR
 )
+from Canneberge.Calculations.reverse_dcf import extract_ticker_inputs
+from Canneberge.Calculations.gpc_multiples import _to_float
 from typing import Optional
 
 
@@ -103,6 +105,8 @@ class MainWindow(QMainWindow):
             get_projection_data_callback=self._get_projection_data,
             update_projection_callback=self._update_projection_controls,
             get_nwc_change_callback=self._get_nwc_change,
+            get_reverse_dcf_inputs_callback=self._get_reverse_dcf_inputs,
+            get_gpc_tickers_callback=self._get_gpc_tickers,
         )
 
         self.nwc_page = NWCPage(
@@ -174,6 +178,82 @@ class MainWindow(QMainWindow):
         if nwc_page is None:
             return None
         return nwc_page.get_changes_in_nwc(period) 
+
+    def _get_gpc_tickers(self) -> list:
+        """
+        Returns the active GPC ticker list for the Reverse-DCF loop
+        (up to 15 GPCs feeding comparison charts). Backed by Home
+        page's ProjectInputs, same source every other page reads
+        active_public_tickers from — no separate ticker list is
+        maintained for Reverse-DCF specifically.
+        """
+        inputs = self.home_page.get_project_inputs()
+        return list(getattr(inputs, "active_public_tickers", []) or [])
+
+    def _get_reverse_dcf_inputs(self, ticker: str) -> Optional[dict]:
+        """
+        Bridge between DCFPage's Reverse-DCF dialog and existing
+        source data — mirrors debug_reverse_dcf.py's extraction
+        exactly, just reading from the app's already-cached/refreshed
+        results (SourceDataPage.all_results / WACCPage's live combo
+        selections) instead of firing fresh network calls per ticker.
+
+        Per Ted's Reverse-DCF beta rule (see reverse_dcf debug module
+        docstring): uses the ticker's OWN observed (currently levered)
+        equity beta, selected via WACCPage's live Beta Type / Beta
+        Frequency combo choice — NOT WACCPage's Re-Levered Beta column,
+        which normalizes GPC betas to the SUBJECT's target structure
+        for the Subject's own Ke/WACC calc. Reverse-DCF needs each
+        ticker's own beta, consistent with its own market price and
+        capital structure — same reasoning that drove BETA_COLUMN_MAP
+        being the only WACC page piece the debug script imported.
+
+        Returns None if inputs can't be assembled (e.g. ticker not
+        yet present in cached source data) — caller falls back to
+        DCF page's own grid-derived inputs.
+        """
+        if not ticker:
+            return None
+
+        try:
+            sa_results = self._get_stockanalysis_results()
+            ms_rows = self._get_marketscreener_results()
+            fred_rows = self._get_fred_results()
+            beta_vol_rows = self._get_beta_vol_results()
+
+            beta_type = self.wacc_page.beta_type_combo.currentText()
+            beta_frequency = self.wacc_page.beta_frequency_combo.currentText()
+            beta_col = BETA_COLUMN_MAP.get((beta_type, beta_frequency))
+
+            observed_beta = None
+            if beta_col is not None:
+                beta_lookup = {}
+                for row in beta_vol_rows:
+                    t = str(row.get("Ticker", "")).strip().upper()
+                    if t:
+                        beta_lookup[t] = row
+                observed_beta = _to_float(beta_lookup.get(ticker.upper(), {}).get(beta_col))
+
+            erp_text = self.wacc_page.input_equity_risk_premium.text().strip().replace("%", "")
+            erp_val = None
+            if erp_text:
+                try:
+                    erp_val = float(erp_text) / 100.0
+                except ValueError:
+                    erp_val = None
+
+            return extract_ticker_inputs(
+                ticker=ticker,
+                sa_results=sa_results,
+                ms_rows=ms_rows,
+                fred_rows=fred_rows,
+                wacc_beta_val=observed_beta,
+                erp_val=erp_val,
+                nwc_exclude_cash=True,
+            )
+        except Exception as e:
+            print(f"_get_reverse_dcf_inputs({ticker}) failed: {e}")
+            return None
 
     def _refresh_nwc_then_dcf(self):
         """
@@ -344,11 +424,24 @@ class MainWindow(QMainWindow):
             get_subject_historical_line=self._get_subject_historical_line,
             parent=self,
         )
-        if dialog.exec():
+
+        def _on_saved():
             self.subject_financials_page.refresh()
             self.gt_page._recalculate()
             self.gpc_page._recalculate()
             self._refresh_nwc_then_dcf()
+
+        dialog.accepted.connect(_on_saved)
+        # .show() instead of .exec() - non-modal, so the rest of the
+        # app stays usable while this is open (matches the football
+        # field / GPC / GT chart popups). NOTE: this does NOT make
+        # edits flow through live as you type - that's still a
+        # Save/Cancel-gated commit, same as before, just no longer
+        # blocking the rest of the app while it's open. True
+        # live-flow-through (recalculating DCF/GT/GPC on every
+        # keystroke, no Save button) is a separate, larger change -
+        # not done here.
+        dialog.show()
 
     def _get_stockanalysis_results(self) -> dict:
         return self.source_data_page.all_results.get("stockanalysis", {})

@@ -39,7 +39,7 @@ from Canneberge.Calculations.chart_helper import (
     compute_bridge,
     weighted_conclusion,
 )
-from Canneberge.Ui.football_field_chart import FootballFieldChart
+from Canneberge.Ui.football_field_chart import FootballFieldChart, FootballFieldChartDialog
 
 # ----------------------------------------------------------------------
 # Dashboard constants
@@ -390,6 +390,8 @@ class DashboardPage(QWidget):
     def __init__(self):
         super().__init__()
 
+        self._football_field_dialog = None
+
         # WACC popup state. This is dashboard-local for now.
         # It will later be synchronized with WACCPage.
         self._wacc_options_state = (
@@ -485,11 +487,16 @@ class DashboardPage(QWidget):
         )
 
         self.football_chart = FootballFieldChart()
-        bottom_row.addWidget(
-            self.football_chart,
-            0,
-            alignment=Qt.AlignmentFlag.AlignTop,
+
+        football_field_container = QVBoxLayout()
+        football_field_link = _link_label("Football Field Chart")
+        football_field_link.linkActivated.connect(
+            self._open_football_field_dialog
         )
+        football_field_container.addWidget(football_field_link)
+        football_field_container.addWidget(self.football_chart)
+
+        bottom_row.addLayout(football_field_container, 0)
 
         bottom_row.addStretch(1)
         root.addLayout(bottom_row)
@@ -1855,6 +1862,53 @@ class DashboardPage(QWidget):
 
         self._gt_page._on_chart_link_clicked()
 
+    def _open_football_field_dialog(self, *_):
+        """
+        Pop the football field out into its own window. Matches
+        gpc_page.py's/gt_page.py's chart-popup pattern exactly: reuse
+        one persistent dialog instance (created once, shown/raised on
+        subsequent clicks) rather than opening a fresh blocking modal
+        every time - .exec() was wrong here, it would freeze the rest
+        of the app until closed, unlike the candlestick popups which
+        stay open and editable alongside the model.
+        """
+        first_open = self._football_field_dialog is None
+        if first_open:
+            self._football_field_dialog = FootballFieldChartDialog(self)
+
+        self._push_football_field_data(self._football_field_dialog)
+
+        self._football_field_dialog.show()
+        self._football_field_dialog.raise_()
+        self._football_field_dialog.activateWindow()
+
+    def _push_football_field_data(self, target):
+        """
+        Shared by the embedded chart and the popup - whichever
+        FootballFieldChart(Dialog) is passed in gets the same current
+        data. _update_football_field() below calls this for the
+        embedded chart on every recalc, and also pushes into the
+        popup if one happens to be open, same as GPC/GT's pattern for
+        keeping an open chart dialog live.
+        """
+        basis = self.display_combo.currentText()
+        bridge_inputs = self._collect_bridge_inputs()
+        concluded_fv = getattr(self, "_last_concluded_fv", None)
+
+        rows = [
+            (row.name, *row.values_for_basis(basis))
+            for row in getattr(self, "_bridge_rows", [])
+        ]
+
+        target.update_chart(
+            rows=rows,
+            share_price_marker=self._share_price_on_basis(
+                bridge_inputs, basis
+            ),
+            concluded_fv=concluded_fv,
+            basis=basis,
+        )
+
     # ------------------------------------------------------------------
     # Temporary top-right space probe
     # ------------------------------------------------------------------
@@ -2329,6 +2383,7 @@ class DashboardPage(QWidget):
 
         concluded = weighted_conclusion(pairs, weights)
         self.fv_value.setText(fmt(concluded))
+        self._last_concluded_fv = concluded
 
         self._update_football_field(bridge_inputs, basis, concluded)
 
@@ -2355,18 +2410,9 @@ class DashboardPage(QWidget):
         return market_cap + debt - cash
 
     def _update_football_field(self, bridge_inputs, basis, concluded_fv):
-        rows = [
-            (row.name, *row.values_for_basis(basis))
-            for row in getattr(self, "_bridge_rows", [])
-        ]
-        self.football_chart.update_chart(
-            rows=rows,
-            share_price_marker=self._share_price_on_basis(
-                bridge_inputs, basis
-            ),
-            concluded_fv=concluded_fv,
-            basis=basis,
-        )
+        self._push_football_field_data(self.football_chart)
+        if self._football_field_dialog is not None:
+            self._push_football_field_data(self._football_field_dialog)
 
     def _on_display_toggle(self, mode: str):
         if mode == "Equity":

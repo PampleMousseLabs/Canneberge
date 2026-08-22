@@ -41,7 +41,7 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
     """
     raw keys expected (all optional, missing = None):
         revenue, cogs, cogs_adjustment, sga, rd, other_operating,
-        operating_expense_adj, depreciation, amortization,
+        operating_expense_adj, d&a_for_ebitda, amortization,
         interest_expense, interest_income, other_income, taxes,
         nonrecurring
 
@@ -57,7 +57,7 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
 
     ebitda = _sub(gross_profit, operating_expenses)
 
-    da = _add(raw.get("depreciation"), raw.get("amortization"))
+    da = _add(raw.get("d&a_for_ebitda"), raw.get("amortization"))
     ebit = _sub(ebitda, da)
 
     pretax_income = _add(

@@ -121,7 +121,7 @@ def get_included_row_style() -> str:
 # — that's the full schema StockAnalysis's BS scrape has for each).
 CA_CANDIDATES = [
     "cash", "st_investments", "accounts_receivable", "receivables",
-    "other_receivables", "inventory", "other_current_assets",
+    "other_receivables", "inventory", "other_current_assets", "prepaid_expenses",
 ]
 CL_CANDIDATES = [
     "st_debt", "current_ltd", "current_leases", "accounts_payable",

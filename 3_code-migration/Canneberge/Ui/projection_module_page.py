@@ -69,9 +69,9 @@ def get_bold_style() -> str:
 
 
 def get_source_style() -> str:
-    # Greyed read-only historical/sourced values - reuses grey_disabled_text,
+    # Greyed read-only historical/sourced values - reuses note_text,
     # same role private_financials_input_page.py's TTM column plays.
-    return f"color: {theme_manager.current.grey_disabled_text};"
+    return f"color: {theme_manager.current.note_text};"
 
 COL_WIDTH     = 100
 LABEL_STRETCH = 2
@@ -591,6 +591,13 @@ class ProjectionModulePage(QDialog):
             self._labels["revenue"][period] = lbl
             return lbl
         inp = self._make_input(period, "revenue")
+        # Deliberate override: Revenue is a dollar amount, so
+        # _make_input() gives it the blue "dollar" style by default -
+        # Ted asked for these specific boxes (user-typed revenue past
+        # the MarketScreener-covered window) to use the purple combo
+        # instead. Not touching _make_input()'s general convention,
+        # every other dollar field in this file stays blue.
+        inp.setStyleSheet(get_pct_input_style())
         self._inputs["revenue"][period] = inp
         return inp
 

@@ -17,7 +17,7 @@ Number axis on the bottom.
 
 from typing import Optional, List, Tuple
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QDialog
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
@@ -158,3 +158,23 @@ class FootballFieldChart(QWidget):
             text.set_color(t.default_text)
 
         self._canvas.draw()
+
+
+class FootballFieldChartDialog(QDialog):
+    """
+    Popup version of the embedded Dashboard football field chart -
+    same class doing the actual drawing (FootballFieldChart), just
+    hosted in a dialog shell instead of painted into the page. Mirrors
+    GPCCandlestickChart's pattern (gpc_candlestick_chart.py).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Football Field Chart")
+        self.resize(900, 500)
+
+        layout = QVBoxLayout(self)
+        self.chart = FootballFieldChart(self)
+        layout.addWidget(self.chart)
+
+    def update_chart(self, rows, share_price_marker, concluded_fv, basis):
+        self.chart.update_chart(rows, share_price_marker, concluded_fv, basis)
