@@ -19,7 +19,18 @@ from Canneberge.Calculations.reverse_dcf import (
     compute_reconciliation_a,
     solve_gordon_growth_ltgr,
     solve_h_model,
+    compute_ttm_fcfe,
 )
+from Canneberge.Calculations.chart_helper import (
+    compute_gpc_chart_data,
+    compute_indexed_series,
+    compute_indexed_summary_stats,
+)
+from Canneberge.Calculations.valuation_surface import (
+    compute_gg_surface_data,
+    compute_gg_surface_data_from_explicit,
+)
+from Canneberge.Ui.valuation_surface_chart import GGSurfaceChart
 from Canneberge.Calculations.ratio_catalogue import (
     debt_free_nwc_incl_cash,
     debt_free_nwc_excl_cash,
@@ -224,84 +235,126 @@ class ProjectionTogglesDialog(QDialog):
 
 class ReverseDCFDialog(QDialog):
     """
-    Simple box with Solve for dropdown. No data entry for blue inputs —
-    they come from extract_ticker_inputs() via MainWindow callback.
-    When fcfe_n_not_positive or other flag -> NA + flag to status bar.
+    Reverse-DCF dashboard. Left panel: per-ticker data table + Gordon/H-Model
+    solver. Right panel: Combo Chart (bars=absolute values, line=growth rates).
+    Ticker dropdown is dynamically populated from all_inputs keys (GPCs + subject).
     """
-    def __init__(self, parent=None, initial_inputs: Optional[Dict]=None, full_fade_convention: bool=True):
+    # Attribute controlling the subject line color — change this one
+    # string to retheme the subject line across both charts instantly.
+    _SUBJECT_LINE_COLOR_ATTR = "chart_conclude"
+
+    def __init__(self, parent=None, all_inputs: Optional[Dict[str, Dict]]=None,
+                 full_fade_convention: bool=True, subject_ticker: str=""):
         super().__init__(parent)
         self.setWindowTitle("Reverse-DCF — Market-Implied Growth")
-        self.setMinimumWidth(820)
-        self.inputs = initial_inputs
+        self.setMinimumSize(1100, 650)
+        self.all_inputs = all_inputs or {}
         self.full_fade_convention = full_fade_convention
+        self.subject_ticker = subject_ticker.strip().upper()
+        self.inputs = next(iter(self.all_inputs.values()), None) if self.all_inputs else None
+        # Tickers excluded from peer index summary stats (checkboxes)
+        self._excluded_tickers: set = set()
         self._build_ui()
+        self._populate_ticker_dropdown()
         self._recalculate()
 
+    # ------------------------------------------------------------------
+    # UI Construction
+    # ------------------------------------------------------------------
     def _build_ui(self):
+        from PyQt6.QtWidgets import QSplitter, QGroupBox
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+
         outer = QVBoxLayout()
-        outer.setSpacing(8)
-        outer.setContentsMargins(12,12,12,12)
+        outer.setSpacing(6)
+        outer.setContentsMargins(10, 10, 10, 10)
 
-        # Header info
-        info_form = QFormLayout()
-        self.lbl_ticker = QLabel(self.inputs.get("ticker","-") if self.inputs else "-")
-        self.lbl_ticker.setStyleSheet(get_bold_style())
-        info_form.addRow("Ticker:", self.lbl_ticker)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # ==============================================================
+        # LEFT PANEL
+        # ==============================================================
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setSpacing(8)
+        left_layout.setContentsMargins(8, 8, 8, 8)
+
+        # --- Ticker selector ---
+        ticker_row = QHBoxLayout()
+        ticker_row.addWidget(QLabel("Ticker:"))
+        self.combo_ticker = QComboBox()
+        self.combo_ticker.setStyleSheet(get_input_style())
+        self.combo_ticker.setMinimumWidth(120)
+        self.combo_ticker.currentTextChanged.connect(self._on_ticker_changed)
+        ticker_row.addWidget(self.combo_ticker)
+        ticker_row.addStretch()
+        left_layout.addLayout(ticker_row)
+
+        # --- Key metrics ---
+        metrics_form = QFormLayout()
+        metrics_form.setSpacing(2)
         self.lbl_market_cap = QLabel("-")
-        self.lbl_ke = QLabel("-")
-        self.lbl_pv_sum = QLabel("-")
-        self.lbl_a = QLabel("-")
-        self.lbl_fcfe_n = QLabel("-")
-        info_form.addRow("Market Cap:", self.lbl_market_cap)
-        info_form.addRow("Ke:", self.lbl_ke)
-        info_form.addRow("ΣPV(FCFE):", self.lbl_pv_sum)
-        info_form.addRow("A:", self.lbl_a)
-        info_form.addRow("FCFE_N:", self.lbl_fcfe_n)
-        outer.addLayout(info_form)
+        self.lbl_ke         = QLabel("-")
+        self.lbl_market_cap.setStyleSheet(get_bold_style())
+        self.lbl_ke.setStyleSheet(get_bold_style())
+        metrics_form.addRow("Market Cap:", self.lbl_market_cap)
+        metrics_form.addRow("Ke:",         self.lbl_ke)
+        left_layout.addLayout(metrics_form)
 
-        # FCFE bridge grid
-        self.bridge_frame = QFrame()
-        self.bridge_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.bridge_grid = QGridLayout()
-        self.bridge_grid.setSpacing(4)
-        headers = ["Yr","Revenue","NetIncome","Depr","CapEx","ΔNWC","FCFE","PV(FCFE)"]
-        for c,h in enumerate(headers):
+        # --- FCFE Bridge Table ---
+        bridge_frame = QFrame()
+        bridge_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.bridge_grid = QGridLayout(bridge_frame)
+        self.bridge_grid.setSpacing(3)
+        bridge_col_headers = ["", "TTM", "NFY", "NFY+1", "NFY+2"]
+        bridge_row_labels  = ["Revenue", "Net Income", "Depreciation",
+                               "CapEx", "ΔNWC", "FCFE", "PV(FCFE)"]
+        # Header row
+        for c, h in enumerate(bridge_col_headers):
             lbl = QLabel(h)
             lbl.setStyleSheet(get_bold_style())
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.bridge_grid.addWidget(lbl, 0, c)
-        # 3 rows for N=3
-        self.bridge_cells = []
-        for r in range(3):
-            row_cells = []
-            for c in range(len(headers)):
-                lbl = QLabel("-")
-                lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-                self.bridge_grid.addWidget(lbl, r+1, c)
-                row_cells.append(lbl)
-            self.bridge_cells.append(row_cells)
-        self.bridge_frame.setLayout(self.bridge_grid)
-        outer.addWidget(self.bridge_frame)
+        # Data rows: self.bridge_cells[row_label][col_header] -> QLabel
+        self.bridge_cells: Dict[str, Dict[str, QLabel]] = {}
+        for r, row_label in enumerate(bridge_row_labels, start=1):
+            lbl_row = QLabel(row_label)
+            is_bold_row = row_label in ("FCFE", "Revenue")
+            lbl_row.setStyleSheet(get_bold_style() if is_bold_row else "")
+            self.bridge_grid.addWidget(lbl_row, r, 0)
+            self.bridge_cells[row_label] = {}
+            for c, col_h in enumerate(bridge_col_headers[1:], start=1):
+                cell = QLabel("-")
+                cell.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.bridge_grid.addWidget(cell, r, c)
+                self.bridge_cells[row_label][col_h] = cell
+        left_layout.addWidget(bridge_frame)
 
-        # Gordon
-        gordon_form = QFormLayout()
+        # --- Gordon Growth ---
+        gordon_frame = QFrame()
+        gordon_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        gordon_layout = QFormLayout(gordon_frame)
+        gordon_layout.setContentsMargins(6, 4, 6, 4)
         self.lbl_gordon = QLabel("-")
         self.lbl_gordon.setStyleSheet(get_bold_style())
-        gordon_form.addRow("Gordon Implied LTGR:", self.lbl_gordon)
-        outer.addLayout(gordon_form)
+        gordon_layout.addRow("Gordon Implied LTGR:", self.lbl_gordon)
+        left_layout.addWidget(gordon_frame)
 
-        # H-Model controls
-        h_box = QFrame()
-        h_box.setFrameShape(QFrame.Shape.StyledPanel)
-        h_layout = QVBoxLayout()
-        h_layout.setContentsMargins(8,8,8,8)
+        # --- H-Model Solver ---
+        h_frame = QFrame()
+        h_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        h_layout = QVBoxLayout(h_frame)
+        h_layout.setContentsMargins(6, 6, 6, 6)
+        h_layout.setSpacing(4)
 
         top_h = QHBoxLayout()
         top_h.addWidget(QLabel("Solve for:"))
         self.solve_combo = QComboBox()
-        self.solve_combo.addItems(["H","Ga","Gn"])
+        self.solve_combo.addItems(["H", "Ga", "Gn"])
         self.solve_combo.setStyleSheet(get_input_style())
         self.solve_combo.currentTextChanged.connect(self._on_solve_changed)
+        self.solve_combo.currentTextChanged.connect(lambda _: self._update_hmodel_chart())
         top_h.addWidget(self.solve_combo)
         top_h.addStretch()
         self.chk_term_capex = QCheckBox("Terminal CapEx = Depr")
@@ -310,30 +363,127 @@ class ReverseDCFDialog(QDialog):
         top_h.addWidget(self.chk_term_capex)
         h_layout.addLayout(top_h)
 
-        form = QFormLayout()
+        h_form = QFormLayout()
         self.in_ga = QLineEdit("15.00%")
         self.in_gn = QLineEdit("3.00%")
-        self.in_h = QLineEdit("6.00")
+        self.in_h  = QLineEdit("6.00")
         for w in [self.in_ga, self.in_gn, self.in_h]:
             w.setStyleSheet(get_input_style())
             w.setFixedWidth(90)
-            w.editingFinished.connect(self._recalculate)
-        form.addRow("Ga (ST Growth):", self.in_ga)
-        form.addRow("Gn (LT Growth):", self.in_gn)
-        form.addRow("H (Full Years):", self.in_h)
-        h_layout.addLayout(form)
+        self.in_ga.editingFinished.connect(self._format_ga)
+        self.in_ga.editingFinished.connect(self._format_ga)
+        self.in_gn.editingFinished.connect(self._format_gn)
+        self.in_h.editingFinished.connect(self._on_h_changed)
+        h_form.addRow("Ga (ST Growth):", self.in_ga)
+        h_form.addRow("Gn (LT Growth):", self.in_gn)
+        h_form.addRow("H (Years):", self.in_h)
+        h_layout.addLayout(h_form)
 
         self.lbl_h_result = QLabel("-")
         self.lbl_h_result.setStyleSheet(get_bold_style())
         h_layout.addWidget(self.lbl_h_result)
+        left_layout.addWidget(h_frame)
 
-        h_box.setLayout(h_layout)
-        outer.addWidget(h_box)
-
-        # Status bar where source_data statuses live
+                # --- Status bar ---
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(get_note_style())
-        outer.addWidget(self.status_label)
+        left_layout.addWidget(self.status_label)
+
+        # --- H-Model Results Chart (bottom left) ---
+        self._hmodel_figure = Figure(figsize=(4, 4))
+        self._hmodel_canvas = FigureCanvasQTAgg(self._hmodel_figure)
+        self._hmodel_ax = self._hmodel_figure.add_subplot(111)
+        left_layout.addWidget(self._hmodel_canvas)
+
+        # ==============================================================
+        # RIGHT PANEL — Combo Chart
+        # ==============================================================
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setSpacing(6)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+
+        # Metric selector dropdown
+        metric_row = QHBoxLayout()
+        metric_row.addWidget(QLabel("Chart Metric:"))
+        self.combo_metric = QComboBox()
+        self.combo_metric.addItems(["Revenue", "Net Income", "FCFE"])
+        self.combo_metric.setStyleSheet(get_input_style())
+        self.combo_metric.currentTextChanged.connect(self._update_combo_chart)
+        metric_row.addWidget(self.combo_metric)
+        metric_row.addStretch()
+        right_layout.addLayout(metric_row)
+
+        # Matplotlib Combo Chart
+        self._combo_figure = Figure(figsize=(7, 4))
+        self._combo_canvas = FigureCanvasQTAgg(self._combo_figure)
+        self._combo_ax_bar  = self._combo_figure.add_subplot(111)
+        self._combo_ax_line = self._combo_ax_bar.twinx()
+        self._apply_chart_theme()
+        right_layout.addWidget(self._combo_canvas)
+
+        # ----------------------------------------------------------
+        # Second chart: GPC Indexed Forecast Range
+        # ----------------------------------------------------------
+        index_metric_row = QHBoxLayout()
+        index_metric_row.addWidget(QLabel("Index Chart Metric:"))
+        self.combo_index_metric = QComboBox()
+        self.combo_index_metric.addItems(["Revenue", "Net Income", "FCFE"])
+        self.combo_index_metric.setStyleSheet(get_input_style())
+        self.combo_index_metric.currentTextChanged.connect(self._update_index_chart)
+        index_metric_row.addWidget(self.combo_index_metric)
+        index_metric_row.addStretch()
+        right_layout.addLayout(index_metric_row)
+
+        # Bottom section: exclude checkboxes (left) + index chart (right)
+        index_bottom = QHBoxLayout()
+
+        # Exclude checkbox panel
+        self._exclude_scroll = QScrollArea()
+        self._exclude_scroll.setWidgetResizable(True)
+        self._exclude_scroll.setFixedWidth(110)
+        self._exclude_widget = QWidget()
+        self._exclude_layout = QVBoxLayout(self._exclude_widget)
+        self._exclude_layout.setSpacing(2)
+        self._exclude_layout.setContentsMargins(4, 4, 4, 4)
+        self._exclude_layout.addWidget(QLabel("Exclude:"))
+        self._exclude_checkboxes: Dict[str, QCheckBox] = {}
+        self._exclude_scroll.setWidget(self._exclude_widget)
+        index_bottom.addWidget(self._exclude_scroll)
+
+        # Index chart matplotlib figure
+        self._index_figure = Figure(figsize=(6, 4))
+        self._index_canvas = FigureCanvasQTAgg(self._index_figure)
+        self._index_ax = self._index_figure.add_subplot(111)
+        self._apply_chart_theme()
+        index_bottom.addWidget(self._index_canvas)
+
+        right_layout.addLayout(index_bottom)
+
+        # Line visibility checkboxes below index chart
+        line_toggle_row = QHBoxLayout()
+        line_toggle_row.addWidget(QLabel("Show:"))
+        self._line_toggles: Dict[str, QCheckBox] = {}
+        _default_checked = {"Subject", "Q3", "Median", "Q1"}
+        for line_name in ["Subject", "Max", "Q3", "Average", "Median", "Q1", "Min"]:
+            chk = QCheckBox(line_name)
+            chk.setChecked(line_name in _default_checked)
+            chk.stateChanged.connect(
+                lambda _state, _m=line_name: self._update_index_chart(
+                    self.combo_index_metric.currentText()
+                )
+            )
+            self._line_toggles[line_name] = chk
+            line_toggle_row.addWidget(chk)
+        line_toggle_row.addStretch()
+        right_layout.addLayout(line_toggle_row)
+
+        # Splitter assembly
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setSizes([420, 620])
+
+        outer.addWidget(splitter)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btns.rejected.connect(self.reject)
@@ -342,112 +492,535 @@ class ReverseDCFDialog(QDialog):
         self.setLayout(outer)
         self._on_solve_changed(self.solve_combo.currentText())
 
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    def _apply_chart_theme(self):
+        t = theme_manager.current
+        self._combo_figure.patch.set_facecolor(t.window_bg)
+        self._combo_ax_bar.set_facecolor(t.window_bg)
+        if hasattr(self, "_index_figure"):
+            self._index_figure.patch.set_facecolor(t.window_bg)
+            self._index_ax.set_facecolor(t.window_bg)
+        if hasattr(self, "_hmodel_figure"):
+            self._hmodel_figure.patch.set_facecolor(t.window_bg)
+            self._hmodel_ax.set_facecolor(t.window_bg)
+
+    # ------------------------------------------------------------------
+    # Ticker dropdown
+    # ------------------------------------------------------------------
+    def _populate_ticker_dropdown(self):
+        self.combo_ticker.blockSignals(True)
+        self.combo_ticker.clear()
+        tickers = sorted(self.all_inputs.keys())
+        self.combo_ticker.addItems(tickers)
+        if tickers:
+            self.combo_ticker.setCurrentIndex(0)
+            self.inputs = self.all_inputs.get(tickers[0])
+        self.combo_ticker.blockSignals(False)
+        self._rebuild_exclude_checkboxes(tickers)
+
+    def _rebuild_exclude_checkboxes(self, tickers: list):
+        """Rebuild the exclude checkbox list to match current GPC set."""
+        # Remove old checkboxes
+        for chk in self._exclude_checkboxes.values():
+            self._exclude_layout.removeWidget(chk)
+            chk.deleteLater()
+        self._exclude_checkboxes.clear()
+        self._excluded_tickers.clear()
+
+        for ticker in tickers:
+            chk = QCheckBox(ticker)
+            chk.setChecked(False)
+            chk.stateChanged.connect(self._on_exclude_changed)
+            self._exclude_layout.addWidget(chk)
+            self._exclude_checkboxes[ticker] = chk
+
+        self._exclude_layout.addStretch()
+
+    def _on_exclude_changed(self):
+        """Recompute excluded set and redraw index and H-Model charts."""
+        self._excluded_tickers = {
+            ticker for ticker, chk in self._exclude_checkboxes.items()
+            if chk.isChecked()
+        }
+        self._update_index_chart(self.combo_index_metric.currentText())
+        self._update_hmodel_chart()
+
+    def _on_ticker_changed(self, ticker: str):
+        self.inputs = self.all_inputs.get(ticker.strip().upper())
+        self._recalculate()
+
+    # ------------------------------------------------------------------
+    # H-Model solve toggle
+    # ------------------------------------------------------------------
+    def _format_pct_field(self, line_edit: QLineEdit):
+        """Parse, reformat as XX.XX%, then recalculate."""
+        val = _parse_pct_field(line_edit.text())
+        if val is not None:
+            line_edit.setText(f"{val * 100:.2f}%")
+        self._recalculate()
+        self._update_hmodel_chart()
+
+    def _format_ga(self):
+        self._format_pct_field(self.in_ga)
+
+    def _format_gn(self):
+        self._format_pct_field(self.in_gn)
+
+    def _on_h_changed(self):
+        self._recalculate()
+        self._update_hmodel_chart()
+
     def _on_solve_changed(self, text: str):
-        # Only solved-for variable is disabled, per spec - no circular
         self.in_ga.setEnabled(text != "Ga")
         self.in_gn.setEnabled(text != "Gn")
         self.in_h.setEnabled(text != "H")
         self._recalculate()
 
+    # ------------------------------------------------------------------
+    # Main recalculate
+    # ------------------------------------------------------------------
     def _recalculate(self):
+        # Guard
         if not self.inputs:
-            self.lbl_market_cap.setText("NA")
-            self.lbl_ke.setText("NA")
-            self.lbl_pv_sum.setText("NA")
-            self.lbl_a.setText("NA")
-            self.lbl_fcfe_n.setText("NA")
-            self.lbl_gordon.setText("NA")
-            self.lbl_h_result.setText("NA")
-            self.status_label.setText("No inputs - wire get_reverse_dcf_inputs_callback in MainWindow")
+            for lbl in [self.lbl_market_cap, self.lbl_ke, self.lbl_gordon, self.lbl_h_result]:
+                lbl.setText("NA")
+            for row in self.bridge_cells.values():
+                for cell in row.values():
+                    cell.setText("NA")
+            self.status_label.setText("No inputs — wire get_reverse_dcf_inputs_callback in MainWindow")
             return
 
-        rf = self.inputs.get("risk_free_rate")
-        beta = self.inputs.get("relevered_beta")
-        erp = self.inputs.get("equity_risk_premium")
-        ke = compute_cost_of_equity(rf, beta, erp)
-
-        revenue = self.inputs.get("revenue", {})
+        # --- Core calculations ---
+        ke = compute_cost_of_equity(
+            self.inputs.get("risk_free_rate"),
+            self.inputs.get("relevered_beta"),
+            self.inputs.get("equity_risk_premium"),
+        )
+        market_cap = self.inputs.get("market_cap")
+        revenue    = self.inputs.get("revenue", {})
         net_income = self.inputs.get("net_income", {})
-        rev_prior = revenue.get("TTM") or revenue.get("LFY")
-        rev_explicit = [revenue.get("NFY"), revenue.get("NFY+1"), revenue.get("NFY+2")]
-        ni_explicit = [net_income.get("NFY"), net_income.get("NFY+1"), net_income.get("NFY+2")]
+        depr_pct   = self.inputs.get("depr_pct")
+        capex_pct  = self.inputs.get("capex_pct")
+        nwc_pct    = self.inputs.get("nwc_pct")
+
+        rev_ttm  = revenue.get("TTM") or revenue.get("LFY")
+        rev_nfy  = revenue.get("NFY")
+        rev_nfy1 = revenue.get("NFY+1")
+        rev_nfy2 = revenue.get("NFY+2")
+        ni_ttm   = net_income.get("TTM")
+        ni_nfy   = net_income.get("NFY")
+        ni_nfy1  = net_income.get("NFY+1")
+        ni_nfy2  = net_income.get("NFY+2")
 
         fcfe_schedule = build_fcfe_schedule(
-            revenue_prior=rev_prior,
-            revenue_explicit=rev_explicit,
-            net_income_explicit=ni_explicit,
-            depr_pct=self.inputs.get("depr_pct"),
-            capex_pct=self.inputs.get("capex_pct"),
-            nwc_pct=self.inputs.get("nwc_pct"),
+            revenue_prior=rev_ttm,
+            revenue_explicit=[rev_nfy, rev_nfy1, rev_nfy2],
+            net_income_explicit=[ni_nfy, ni_nfy1, ni_nfy2],
+            depr_pct=depr_pct,
+            capex_pct=capex_pct,
+            nwc_pct=nwc_pct,
             force_terminal_capex_equals_da=self.chk_term_capex.isChecked(),
         )
 
-        market_cap = self.inputs.get("market_cap")
-        a = compute_reconciliation_a(market_cap, fcfe_schedule, ke)
-        pv_sum = None
-        fcfe_n = None
-        if fcfe_schedule and ke is not None:
-            pv_sum = sum(yr["fcfe"]/((1+ke)**yr["year_index"]) for yr in fcfe_schedule)
-            fcfe_n = fcfe_schedule[-1]["fcfe"]
+        a      = compute_reconciliation_a(market_cap, fcfe_schedule, ke)
+        fcfe_n = fcfe_schedule[-1]["fcfe"] if fcfe_schedule else None
 
-        # Update header
+        # --- Key metrics labels ---
         self.lbl_market_cap.setText(_fmt_currency2(market_cap))
         self.lbl_ke.setText(_fmt_pct2(ke))
-        self.lbl_pv_sum.setText(_fmt_currency2(pv_sum))
-        self.lbl_a.setText(_fmt_currency2(a))
-        self.lbl_fcfe_n.setText(_fmt_currency2(fcfe_n))
-        self.lbl_ticker.setText(self.inputs.get("ticker","-"))
 
-        # Bridge table
+        # --- Bridge table ---
+        col_keys = ["TTM", "NFY", "NFY+1", "NFY+2"]
+        # Revenue
+        rev_vals = [rev_ttm, rev_nfy, rev_nfy1, rev_nfy2]
+        for col, v in zip(col_keys, rev_vals):
+            self.bridge_cells["Revenue"][col].setText(_fmt_currency2(v))
+        # Net Income
+        ni_vals = [ni_ttm, ni_nfy, ni_nfy1, ni_nfy2]
+        for col, v in zip(col_keys, ni_vals):
+            self.bridge_cells["Net Income"][col].setText(_fmt_currency2(v))
+        # Depreciation, CapEx (% of revenue -> absolute)
+        for col, rev_v in zip(col_keys, rev_vals):
+            dep_v  = (rev_v * depr_pct)  if (rev_v is not None and depr_pct  is not None) else None
+            cap_v  = (rev_v * capex_pct) if (rev_v is not None and capex_pct is not None) else None
+            self.bridge_cells["Depreciation"][col].setText(_fmt_currency2(dep_v))
+            self.bridge_cells["CapEx"][col].setText(_fmt_currency2(cap_v))
+        # ΔNWC — TTM = 0 (base), rest from schedule
+        self.bridge_cells["ΔNWC"]["TTM"].setText("0")
         if fcfe_schedule:
-            for r, yr in enumerate(fcfe_schedule):
-                pv = yr["fcfe"]/((1+ke)**yr["year_index"]) if ke is not None else None
-                vals = [yr["year_index"], yr["revenue"], yr["net_income"], yr["depreciation"], yr["capex"], yr["delta_nwc"], yr["fcfe"], pv]
-                for c,v in enumerate(vals):
-                    self.bridge_cells[r][c].setText(_fmt_currency2(v) if c!=0 else str(v))
-        else:
-            for r in range(3):
-                for c in range(8):
-                    self.bridge_cells[r][c].setText("NA")
+            for yr, col in zip(fcfe_schedule, ["NFY", "NFY+1", "NFY+2"]):
+                self.bridge_cells["ΔNWC"][col].setText(_fmt_currency2(yr["delta_nwc"]))
+        # FCFE — TTM computed, rest from schedule
+        from Canneberge.Calculations.reverse_dcf import compute_ttm_fcfe
+        fcfe_ttm = compute_ttm_fcfe(ni_ttm, rev_ttm, depr_pct, capex_pct)
+        self.bridge_cells["FCFE"]["TTM"].setText(_fmt_currency2(fcfe_ttm))
+        if fcfe_schedule:
+            for yr, col in zip(fcfe_schedule, ["NFY", "NFY+1", "NFY+2"]):
+                self.bridge_cells["FCFE"][col].setText(_fmt_currency2(yr["fcfe"]))
+        # PV(FCFE)
+        self.bridge_cells["PV(FCFE)"]["TTM"].setText("-")
+        if fcfe_schedule and ke is not None:
+            for yr, col in zip(fcfe_schedule, ["NFY", "NFY+1", "NFY+2"]):
+                pv = yr["fcfe"] / ((1 + ke) ** yr["year_index"])
+                self.bridge_cells["PV(FCFE)"][col].setText(_fmt_currency2(pv))
 
-        # Gordon
+        # --- Gordon Growth ---
         gordon = solve_gordon_growth_ltgr(a, ke, fcfe_n)
         if gordon["value"] is None:
             self.lbl_gordon.setText(f"NA ({','.join(gordon['flags'])})")
         else:
-            self.lbl_gordon.setText(_fmt_pct2(gordon["value"]) + ("" if gordon["is_valid"] else f" [{','.join(gordon['flags'])}]"))
+            self.lbl_gordon.setText(
+                _fmt_pct2(gordon["value"]) +
+                ("" if gordon["is_valid"] else f" [{','.join(gordon['flags'])}]")
+            )
 
-        # H-Model
+        # --- H-Model ---
         solve_for = self.solve_combo.currentText()
         ga = _parse_pct_field(self.in_ga.text()) if solve_for != "Ga" else None
         gn = _parse_pct_field(self.in_gn.text()) if solve_for != "Gn" else None
         try:
             h_val = float(self.in_h.text().strip()) if solve_for != "H" else None
-        except:
+        except Exception:
             h_val = None
 
-        h_res = solve_h_model(a, ke, fcfe_n, ga=ga, gn=gn, h=h_val, solve_for=solve_for, full_fade_convention=self.full_fade_convention)
-
+        h_res = solve_h_model(
+            a, ke, fcfe_n, ga=ga, gn=gn, h=h_val,
+            solve_for=solve_for, full_fade_convention=self.full_fade_convention,
+        )
         if h_res["value"] is None:
-            # Flag -> NA, print flag to bottom bar where source_data statuses are
-            if solve_for == "H":
-                self.lbl_h_result.setText("NA")
-            else:
-                self.lbl_h_result.setText("NA")
-            self.status_label.setText(f"{self.inputs.get('ticker','')}: {','.join(h_res['flags'])} | Gordon: {','.join(gordon['flags'])}")
+            self.lbl_h_result.setText("NA")
+            self.status_label.setText(
+                f"{self.inputs.get('ticker','')}: {','.join(h_res['flags'])} | "
+                f"Gordon: {','.join(gordon['flags'])}"
+            )
         else:
             if solve_for == "H":
                 h_full = h_res["value"]
-                h_half = h_full/2 if self.full_fade_convention else h_full
+                h_half = h_full / 2 if self.full_fade_convention else h_full
                 self.lbl_h_result.setText(f"H full={h_full:.2f} (h half={h_half:.2f})")
             else:
                 self.lbl_h_result.setText(_fmt_pct2(h_res["value"]))
-            # Still surface flags if any (e.g. solved_gn_gte_ke)
             all_flags = gordon["flags"] + h_res["flags"]
             self.status_label.setText(", ".join(all_flags) if all_flags else "")
 
-    def set_inputs(self, inputs: Dict):
-        self.inputs = inputs
+        # --- Store chart data for current ticker & redraw ---
+        self._chart_data = compute_gpc_chart_data(self.inputs)
+        self._update_combo_chart(self.combo_metric.currentText())
+        self._update_index_chart(self.combo_index_metric.currentText())
+        self._update_hmodel_chart()
+
+    # ------------------------------------------------------------------
+    # H-Model Results Chart
+    # ------------------------------------------------------------------
+    def _update_hmodel_chart(self):
+        if not self.all_inputs:
+            return
+
+        t = theme_manager.current
+        subject_color = getattr(t, self._SUBJECT_LINE_COLOR_ATTR, t.chart_conclude)
+        solve_for = self.solve_combo.currentText()  # "H", "Ga", "Gn"
+
+        # Parse fixed inputs
+        ga = _parse_pct_field(self.in_ga.text()) if solve_for != "Ga" else None
+        gn = _parse_pct_field(self.in_gn.text()) if solve_for != "Gn" else None
+        try:
+            h_val = float(self.in_h.text().strip()) if solve_for != "H" else None
+        except Exception:
+            h_val = None
+
+        # Collect results across all tickers
+        ticker_labels = []
+        bar_values    = []
+        bar_colors    = []
+
+        for ticker, inp in self.all_inputs.items():
+            if inp.get("_error"):
+                continue
+            if ticker in self._excluded_tickers:
+                continue
+            try:
+                chart_data = compute_gpc_chart_data(inp)
+                ke         = chart_data.get("ke")
+                fcfe_sched = chart_data.get("fcfe_schedule")
+                fcfe_n     = fcfe_sched[-1]["fcfe"] if fcfe_sched else None
+                market_cap = inp.get("market_cap")
+
+                a = compute_reconciliation_a(market_cap, fcfe_sched, ke)
+                h_res = solve_h_model(
+                    a, ke, fcfe_n,
+                    ga=ga, gn=gn, h=h_val,
+                    solve_for=solve_for,
+                    full_fade_convention=self.full_fade_convention,
+                )
+            except Exception:
+                continue
+
+            if h_res["value"] is None:
+                continue  # skip invalid — user can investigate via ticker dropdown
+
+            ticker_labels.append(ticker)
+            bar_values.append(h_res["value"])
+            bar_colors.append(
+                subject_color if ticker.upper() == self.subject_ticker.upper()
+                else t.chart_fill
+            )
+
+        self._hmodel_ax.clear()
+        self._hmodel_figure.patch.set_facecolor(t.window_bg)
+        self._hmodel_ax.set_facecolor(t.window_bg)
+
+        if not ticker_labels:
+            self._hmodel_ax.text(
+                0.5, 0.5, "No valid results",
+                ha="center", va="center",
+                color=t.chart_axis_label, fontsize=9,
+                transform=self._hmodel_ax.transAxes,
+            )
+            self._hmodel_figure.tight_layout()
+            self._hmodel_canvas.draw()
+            return
+
+        # Horizontal bar chart — tickers on Y axis, values on X axis
+        y_pos = list(range(len(ticker_labels)))
+        self._hmodel_ax.barh(
+            y_pos, bar_values,
+            color=bar_colors,
+            edgecolor=t.chart_edge,
+            height=0.6,
+            zorder=2,
+        )
+        self._hmodel_ax.set_yticks(y_pos)
+        self._hmodel_ax.set_yticklabels(ticker_labels, color=t.chart_axis_label, fontsize=8)
+        self._hmodel_ax.tick_params(axis="x", colors=t.chart_axis_label)
+        self._hmodel_ax.grid(True, axis="x", alpha=0.25, color=t.chart_grid, zorder=0)
+        for spine in self._hmodel_ax.spines.values():
+            spine.set_color(t.chart_grid)
+
+        # Data labels at end of each bar
+        is_pct = solve_for in ("Ga", "Gn")
+        for y, val in zip(y_pos, bar_values):
+            label_text = f"{val * 100:.2f}%" if is_pct else f"{val:.2f}"
+            x_offset   = max(abs(v) for v in bar_values) * 0.02
+            self._hmodel_ax.text(
+                val + (x_offset if val >= 0 else -x_offset),
+                y,
+                label_text,
+                va="center",
+                ha="left" if val >= 0 else "right",
+                color=t.default_text,
+                fontsize=7,
+                zorder=3,
+            )
+
+        # X axis format
+        if is_pct:
+            from matplotlib.ticker import FuncFormatter
+            self._hmodel_ax.xaxis.set_major_formatter(
+                FuncFormatter(lambda val, _: f"{val * 100:.1f}%")
+            )
+
+        self._hmodel_ax.set_title(
+            f"H-Model: Solved {solve_for} per GPC",
+            color=t.default_text, fontsize=9,
+        )
+        self._hmodel_ax.axvline(0, color=t.chart_grid, linewidth=0.8, zorder=1)
+
+        self._hmodel_figure.tight_layout()
+        self._hmodel_canvas.draw()
+
+    # ------------------------------------------------------------------
+    # Index Chart
+    # ------------------------------------------------------------------
+    def _update_index_chart(self, metric: str):
+        if not self.all_inputs:
+            return
+
+        t = theme_manager.current
+        subject_color = getattr(t, self._SUBJECT_LINE_COLOR_ATTR, t.chart_conclude)
+
+        result = compute_indexed_summary_stats(
+            all_inputs=self.all_inputs,
+            metric=metric,
+            excluded_tickers=self._excluded_tickers,
+            subject_ticker=self.subject_ticker,
+        )
+
+        x_labels = result["x_labels"]
+        x        = list(range(len(x_labels)))
+        stats    = result["stats"]
+        subject  = result["subject"]
+
+        self._index_ax.clear()
+        self._index_figure.patch.set_facecolor(t.window_bg)
+        self._index_ax.set_facecolor(t.window_bg)
+
+        # x indices: 0=TTM, 1=NFY, 2=NFY+1, 3=NFY+2, 4=Perp
+        # solid segment: indices 0-3, dashed segment: indices 3-4
+        SOLID_IDX  = slice(0, 4)   # TTM -> NFY+2
+        DASH_IDX   = slice(3, 5)   # NFY+2 -> Perp
+
+        def _plot_two_segment(ax, x, y_vals, color, lw, label, marker=None, ms=4, zorder=2):
+            """
+            Plots a line as two segments:
+              solid:  TTM -> NFY+2  (indices 0-3)
+              dashed: NFY+2 -> Perp (indices 3-4)
+            Only the solid segment gets the legend label to avoid duplicates.
+            """
+            # Solid segment
+            sx = [x[i] for i in range(4) if i < len(y_vals) and y_vals[i] is not None]
+            sy = [y_vals[i] for i in range(4) if i < len(y_vals) and y_vals[i] is not None]
+            if sx:
+                kwargs = dict(color=color, linewidth=lw, linestyle="-",
+                              label=label, zorder=zorder)
+                if marker:
+                    kwargs.update(marker=marker, markersize=ms)
+                ax.plot(sx, sy, **kwargs)
+
+            # Dashed segment (NFY+2 -> Perp, indices 3 and 4)
+            dx = []
+            dy = []
+            for i in [3, 4]:
+                if i < len(y_vals) and y_vals[i] is not None:
+                    dx.append(x[i])
+                    dy.append(y_vals[i])
+            if len(dx) == 2:
+                kwargs = dict(color=color, linewidth=lw, linestyle="--",
+                              zorder=zorder)
+                if marker:
+                    kwargs.update(marker=marker, markersize=ms)
+                ax.plot(dx, dy, **kwargs)
+
+        # Stat line styling — all solid->dashed via _plot_two_segment
+        stat_styles = {
+            "max":    {"color": t.chart_grid,        "lw": 1.2, "label": "Max"},
+            "q3":     {"color": t.chart_axis_label,  "lw": 1.5, "label": "Q3"},
+            "mean":   {"color": t.chart_fill,        "lw": 1.5, "label": "Average"},
+            "median": {"color": t.default_text,      "lw": 2.0, "label": "Median"},
+            "q1":     {"color": t.chart_axis_label,  "lw": 1.5, "label": "Q1"},
+            "min":    {"color": t.chart_grid,        "lw": 1.2, "label": "Min"},
+        }
+
+        # Map stat_key -> toggle label
+        stat_toggle_map = {
+            "max":    "Max",
+            "q3":     "Q3",
+            "mean":   "Average",
+            "median": "Median",
+            "q1":     "Q1",
+            "min":    "Min",
+        }
+
+        for stat_name, style in stat_styles.items():
+            toggle_label = stat_toggle_map[stat_name]
+            if not self._line_toggles.get(toggle_label, QCheckBox()).isChecked():
+                continue
+            y_vals = stats.get(stat_name, [])
+            _plot_two_segment(
+                self._index_ax, x, y_vals,
+                color=style["color"], lw=style["lw"],
+                label=style["label"], zorder=2,
+            )
+
+        # Subject line
+        if subject is not None and self._line_toggles.get("Subject", QCheckBox()).isChecked():
+            _plot_two_segment(
+                self._index_ax, x, subject,
+                color=subject_color, lw=2.5,
+                label=self.subject_ticker or "Subject",
+                marker="o", ms=5, zorder=3,
+            )
+
+        self._index_ax.set_xticks(x)
+        self._index_ax.set_xticklabels(x_labels, color=t.chart_axis_label, fontsize=9)
+        self._index_ax.set_ylabel("Indexed (TTM = 100)", color=t.default_text, fontsize=9)
+        self._index_ax.tick_params(colors=t.chart_axis_label)
+        self._index_ax.grid(True, axis="y", alpha=0.25, color=t.chart_grid, zorder=0)
+        self._index_ax.axhline(100, color=t.chart_grid, linewidth=0.8, linestyle=":", zorder=1)
+        for spine in self._index_ax.spines.values():
+            spine.set_color(t.chart_grid)
+        self._index_ax.legend(
+            fontsize=7, loc="upper left",
+            facecolor=t.window_bg, edgecolor=t.chart_grid,
+            labelcolor=t.default_text,
+        )
+        self._index_ax.set_title(
+            f"GPC Indexed {metric} Forecast Range (TTM = 100)",
+            color=t.default_text, fontsize=10,
+        )
+
+        self._index_figure.tight_layout()
+        self._index_canvas.draw()
+
+    # ------------------------------------------------------------------
+    # Combo Chart
+    # ------------------------------------------------------------------
+    def _update_combo_chart(self, metric: str):
+        if not hasattr(self, "_chart_data") or self._chart_data is None:
+            return
+
+        t = theme_manager.current
+        bars   = self._chart_data["bars"].get(metric, [None, None, None, None])
+        growth = self._chart_data["growth"].get(metric, [None, None, None, None])
+        x_labels = ["NFY", "NFY+1", "NFY+2", "Perp"]
+        x = list(range(len(x_labels)))
+
+        self._combo_ax_bar.clear()
+        self._combo_ax_line.clear()
+        self._apply_chart_theme()
+
+        # Bars (primary axis)
+        bar_vals = [v if v is not None else 0 for v in bars]
+        self._combo_ax_bar.bar(
+            x, bar_vals, color=t.chart_fill,
+            edgecolor=t.chart_edge, width=0.5, zorder=2,
+        )
+        from matplotlib.ticker import FuncFormatter
+        self._combo_ax_bar.set_xticks(x)
+        self._combo_ax_bar.set_xticklabels(x_labels, color=t.chart_axis_label, fontsize=9)
+        self._combo_ax_bar.set_ylabel(metric, color=t.default_text, fontsize=9)
+        self._combo_ax_bar.tick_params(axis="x", colors=t.chart_axis_label)
+        self._combo_ax_bar.tick_params(axis="y", colors=t.chart_axis_label)
+        self._combo_ax_bar.grid(True, axis="y", alpha=0.25, color=t.chart_grid, zorder=0)
+        for spine in self._combo_ax_bar.spines.values():
+            spine.set_color(t.chart_grid)
+        self._combo_ax_bar.yaxis.set_major_formatter(
+            FuncFormatter(lambda val, _: f"{val:,.0f}")
+        )
+        self._combo_ax_line.tick_params(axis="y", colors=t.chart_axis_label)
+        for spine in self._combo_ax_line.spines.values():
+            spine.set_color(t.chart_grid)
+
+        # Line (secondary axis — growth %)
+        growth_vals = [v * 100 if v is not None else None for v in growth]
+        plot_x = [xi for xi, v in zip(x, growth_vals) if v is not None]
+        plot_y = [v  for v   in growth_vals             if v is not None]
+        if plot_x:
+            self._combo_ax_line.plot(
+                plot_x, plot_y,
+                color=t.chart_edge,
+                linewidth=2, marker="o", markersize=5, zorder=3,
+            )
+        self._combo_ax_line.set_ylabel(f"{metric} Growth %", color=t.default_text, fontsize=9)
+        self._combo_ax_line.yaxis.set_label_position("right")
+        self._combo_ax_line.tick_params(axis="y", colors=t.chart_axis_label)
+        
+        ticker = self.inputs.get("ticker", "") if self.inputs else ""
+        self._combo_ax_bar.set_title(
+            f"{ticker} — {metric} & Growth", color=t.default_text, fontsize=10,
+        )
+
+        self._combo_figure.tight_layout()
+        self._combo_canvas.draw()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def set_all_inputs(self, all_inputs: Dict[str, Dict]):
+        """Called externally to refresh with a new GPC set."""
+        self.all_inputs = all_inputs or {}
+        self._populate_ticker_dropdown()
         self._recalculate()
 
 class DCFPage(QWidget):
@@ -530,13 +1103,13 @@ class DCFPage(QWidget):
         for model_inputs in self._tv_inputs.values():
             for inp in model_inputs.values():
                 inp.setStyleSheet(get_input_style())
-        self._lbl_capex_header.setStyleSheet(get_bold_style())
         self.capex_dep_pct.setStyleSheet(get_input_style())
         self.bridge_other_adj_input.setStyleSheet(get_input_style())
         self.bridge_fv_base_row_label.setStyleSheet(get_bold_style() + get_border_above_style())
         self.bridge_fv_base_label.setStyleSheet(get_bold_style() + get_border_above_style() + get_border_below_style())
         self._lbl_sensitivity_header.setStyleSheet(get_bold_style())
         self._lbl_wacc_ltgr_corner.setStyleSheet(get_bold_style())
+        self.link_valuation_surface.setStyleSheet(get_link_style())
         for inp in self.sens_wacc_inputs:
             inp.setStyleSheet(get_input_style())
         for inp in self.sens_ltgr_inputs:
@@ -589,12 +1162,6 @@ class DCFPage(QWidget):
         self.link_toggles.clicked.connect(self._open_toggles)
         toggle_row.addWidget(self.link_toggles)
 
-        self.link_reverse_dcf = QPushButton("Reverse-DCF (Market-Implied)")
-        self.link_reverse_dcf.setStyleSheet(get_link_style())
-        self.link_reverse_dcf.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.link_reverse_dcf.clicked.connect(self._open_reverse_dcf)
-        toggle_row.addWidget(self.link_reverse_dcf)
-
         toggle_row.addStretch()
         self.page_layout.addLayout(toggle_row)
 
@@ -613,19 +1180,57 @@ class DCFPage(QWidget):
             self._recalculate()
 
     def _open_reverse_dcf(self):
-        inputs = None
+        all_inputs = {}
+        # Try to get all GPC tickers + subject from callback
         if self._get_reverse_dcf_inputs_callback is not None:
             try:
                 proj_inputs = self.get_project_inputs()
-                ticker = getattr(proj_inputs, 'subject_ticker', None) or getattr(proj_inputs, 'ticker', None) or getattr(proj_inputs, 'subject_company_name', None) or "ADBE"
-                inputs = self._get_reverse_dcf_inputs_callback(ticker)
+                # Get subject ticker
+                subject_ticker = (
+                    getattr(proj_inputs, 'subject_ticker', None) or
+                    getattr(proj_inputs, 'ticker', None) or
+                    getattr(proj_inputs, 'subject_company_name', None) or
+                    "SUBJ"
+                )
+                # Get GPC tickers if callback available
+                gpc_tickers = []
+                if self._get_gpc_tickers_callback is not None:
+                    try:
+                        gpc_tickers = self._get_gpc_tickers_callback() or []
+                    except Exception as e:
+                        print(f"GPC tickers callback failed: {e}")
+
+                # Loop all tickers: subject + GPCs
+                all_tickers = [subject_ticker] + [
+                    t for t in gpc_tickers if t != subject_ticker
+                ]
+                for ticker in all_tickers:
+                    try:
+                        inp = self._get_reverse_dcf_inputs_callback(ticker)
+                        if inp is not None:
+                            all_inputs[ticker.upper()] = inp
+                    except Exception as e:
+                        print(f"Reverse-DCF input fetch failed for {ticker}: {e}")
             except Exception as e:
-                print(f"Reverse-DCF callback failed: {e}")
-                inputs = None
-        if inputs is None:
-            inputs = self._build_reverse_dcf_inputs_from_page()
-        dlg = ReverseDCFDialog(self, initial_inputs=inputs, full_fade_convention=True)
-        dlg.exec()
+                print(f"Reverse-DCF open failed: {e}")
+
+        # Fallback: build from page data for subject only
+        if not all_inputs:
+            fallback = self._build_reverse_dcf_inputs_from_page()
+            if fallback:
+                ticker_key = fallback.get("ticker", "SUBJ").upper()
+                all_inputs[ticker_key] = fallback
+
+        subject_ticker = (
+            getattr(proj_inputs, 'subject_ticker', None) or
+            getattr(proj_inputs, 'ticker', None) or
+            "SUBJ"
+        )
+        dlg = ReverseDCFDialog(self, all_inputs=all_inputs,
+                               full_fade_convention=True,
+                               subject_ticker=subject_ticker)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.show()
 
     def _build_reverse_dcf_inputs_from_page(self) -> Optional[Dict]:
         """Fallback when MainWindow callback not wired yet. Builds from DCF grid."""
@@ -738,6 +1343,8 @@ class DCFPage(QWidget):
         self._ebit_grid_row = None
         self._ebit_margin_grid_row = None
         self._net_int_grid_row = None
+        if not hasattr(self, '_valuation_surface_dialog'):
+            self._valuation_surface_dialog = None
         num_hist, num_proj = self._generate_columns()
         self.table_container = QWidget()
         self.table_grid = QGridLayout()
@@ -940,8 +1547,16 @@ class DCFPage(QWidget):
         res_frame.setFrameShape(QFrame.Shape.StyledPanel)
         res_layout = QVBoxLayout()
         res_layout.setContentsMargins(8, 8, 8, 8)
+        tv_header_row = QHBoxLayout()
         self._lbl_tv_header = QLabel("Terminal Value", styleSheet=get_bold_style())
-        res_layout.addWidget(self._lbl_tv_header)
+        tv_header_row.addWidget(self._lbl_tv_header)
+        tv_header_row.addStretch()
+        self.link_reverse_dcf = QPushButton("Reverse-DCF →")
+        self.link_reverse_dcf.setStyleSheet(get_link_style())
+        self.link_reverse_dcf.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_reverse_dcf.clicked.connect(self._open_reverse_dcf)
+        tv_header_row.addWidget(self.link_reverse_dcf)
+        res_layout.addLayout(tv_header_row)
         h_model = QHBoxLayout()
         h_model.addWidget(QLabel("Model:"))
         self.tv_model_combo = QComboBox()
@@ -959,6 +1574,14 @@ class DCFPage(QWidget):
         self.ltg_input.editingFinished.connect(self._recalculate)
         h_ltg.addWidget(self.ltg_input)
         res_layout.addLayout(h_ltg)
+        h_dep = QHBoxLayout()
+        h_dep.addWidget(QLabel("Dep. as % of CapEx:"))
+        self.capex_dep_pct = QLineEdit("100.0%")
+        self.capex_dep_pct.setStyleSheet(get_input_style())
+        self.capex_dep_pct.setFixedWidth(60)
+        self.capex_dep_pct.editingFinished.connect(self._recalculate)
+        h_dep.addWidget(self.capex_dep_pct)
+        res_layout.addLayout(h_dep)
         self._tv_panels: Dict[str, QWidget] = {}
         self._tv_outputs: Dict[str, Dict[str, QLabel]] = {}
         self._tv_inputs: Dict[str, Dict[str, QLineEdit]] = {}
@@ -968,48 +1591,14 @@ class DCFPage(QWidget):
         res_layout.addWidget(self._build_h_model_panel())
         res_frame.setLayout(res_layout)
         self._apply_tv_model_visibility()
-        capex_frame = QFrame()
-        capex_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        capex_layout = QVBoxLayout()
-        capex_layout.setContentsMargins(8, 8, 8, 8)
-        self._lbl_capex_header = QLabel("CapEx Options", styleSheet=get_bold_style())
-        capex_layout.addWidget(self._lbl_capex_header)
-        c2 = QHBoxLayout()
-        c2.addWidget(QLabel("Avg of Forecast:"))
-        c2.addStretch()
-        self.capex_avg_forecast = QLabel("-")
-        capex_layout.addLayout(c2)
-        c3 = QHBoxLayout()
-        c3.addWidget(QLabel("Variable Avg of Forecast:"))
-        c3.addStretch()
-        self.capex_var_avg = QLabel("-")
-        capex_layout.addLayout(c3)
-        c4 = QHBoxLayout()
-        c4.addWidget(QLabel("Implied LT Cash Flow Growth:"))
-        c4.addStretch()
-        self.capex_lt_growth = QLabel("-")
-        capex_layout.addLayout(c4)
-        c5 = QHBoxLayout()
-        c5.addWidget(QLabel("Dep. as % of CapEx:"))
-        self.capex_dep_pct = QLineEdit("100.0%")
-        self.capex_dep_pct.setStyleSheet(get_input_style())
-        self.capex_dep_pct.setFixedWidth(60)
-        c5.addWidget(self.capex_dep_pct)
-        capex_layout.addLayout(c5)
-        capex_frame.setLayout(capex_layout)
         bridge_widget = self._build_fv_bridge()
         self._footer_hbox.addWidget(bridge_widget, 1)
         res_frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        capex_frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         res_row = QHBoxLayout()
         res_row.addStretch(1)
         res_row.addWidget(res_frame)
-        capex_row = QHBoxLayout()
-        capex_row.addStretch(1)
-        capex_row.addWidget(capex_frame)
         right_col = QVBoxLayout()
         right_col.addLayout(res_row)
-        right_col.addLayout(capex_row)
         right_col.addStretch(1)
         self._footer_hbox.addLayout(right_col, 2)
 
@@ -1075,6 +1664,11 @@ class DCFPage(QWidget):
         self._lbl_sensitivity_header = QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=get_bold_style())
         layout.addWidget(self._lbl_sensitivity_header)
         layout.addWidget(self._build_sensitivity_table())
+        self.link_valuation_surface = QPushButton("Valuation Surface →")
+        self.link_valuation_surface.setStyleSheet(get_link_style())
+        self.link_valuation_surface.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_valuation_surface.clicked.connect(self._open_valuation_surface)
+        layout.addWidget(self.link_valuation_surface)
         layout.addStretch(1)
         widget.setLayout(layout)
         return widget
@@ -1489,6 +2083,7 @@ class DCFPage(QWidget):
         ppa = None
         nfy_str = inputs.next_fiscal_year
         val_date_str = inputs.valuation_date
+
         if nfy_str and val_date_str:
             for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
                 try:
@@ -1498,42 +2093,56 @@ class DCFPage(QWidget):
                     break
                 except ValueError:
                     continue
+        else:
+            pass
+
         if ppa is not None and ppa <= 0:
             ppa = None
+
         fcf_idx = self._row_idx.get("Free Cash Flow")
         prior_pvp: Optional[float] = None
+
         for data_idx, label in enumerate(self._headers):
             if self._is_historical[data_idx]:
                 continue
             if label == "Residual":
+                self._set("Partial Period Adjustment", data_idx, "")
                 self._set("Present Value Period", data_idx, "")
                 self._set("Present Value Factor", data_idx, "")
                 self._set("Present Value of Free Cash Flows", data_idx, "")
                 continue
+
+            if label == "NFY":
+                if ppa is not None:
+                    self._set("Partial Period Adjustment", data_idx, f"{ppa:.4f}")
+                else:
+                    self._set("Partial Period Adjustment", data_idx, "-")
+            else:
+                self._set("Partial Period Adjustment", data_idx, "")
+
             if label == "NFY":
                 pvp = (ppa / 2.0) if ppa is not None else None
             elif label == "NFY+1":
-                if prior_pvp is None:
-                    pvp = None
-                else:
-                    pvp = prior_pvp * 2.0 + 0.5
+                pvp = (prior_pvp * 2.0 + 0.5) if prior_pvp is not None else None
             else:
-                if prior_pvp is None:
-                    pvp = None
-                else:
-                    pvp = prior_pvp + 1.0
+                pvp = (prior_pvp + 1.0) if prior_pvp is not None else None
+
             if pvp is not None:
                 self._set("Present Value Period", data_idx, f"{pvp:.2f}")
             else:
                 self._set("Present Value Period", data_idx, "-")
+
             prior_pvp = pvp
+
             pvf_full: Optional[float] = None
             if pvp is not None and wacc_val is not None and wacc_val > 0:
                 pvf_full = 1.0 / ((1.0 + wacc_val) ** pvp)
                 self._set("Present Value Factor", data_idx, f"{pvf_full:.2f}")
             else:
                 self._set("Present Value Factor", data_idx, "-")
+
             fcf = _read_label(self._calc_labels, fcf_idx, data_idx)
+
             if fcf is not None and pvf_full is not None:
                 if label == "NFY" and ppa is not None:
                     pv_fcf = fcf * ppa * pvf_full
@@ -1593,18 +2202,112 @@ class DCFPage(QWidget):
         container.setLayout(grid)
         return container
 
-    def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:
+    def _compute_fv_for_assumptions(
+        self,
+        wacc_override: float,
+        ltgr_override: float,
+    ) -> Optional[float]:
+        """
+        Pure WACC/LTGR override FV calculation.
+        Does not mutate any visible UI state permanently.
+        Used by both the sensitivity table and the valuation surface.
+
+        Returns unrounded fair value float or None.
+        """
         orig_ltgr_text = self.ltg_input.text()
         try:
-            self.ltg_input.setText(ltgr_text_override)
+            self.ltg_input.setText(f"{ltgr_override * 100:.4f}%")
             inputs = self.get_project_inputs()
             self._populate_residual_column(inputs)
             self._populate_pv_chain(wacc_override, inputs)
             self._populate_terminal_value(wacc_override, inputs)
-            self._populate_fv_bridge(inputs)
-            return _parse_label_as_float(self.bridge_fv_base_label.text())
+
+            # Roll up FV directly from labels — same as bridge
+            pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
+            sum_pv_fcf = 0.0
+            any_val = False
+            for data_idx, label in enumerate(self._headers):
+                if self._is_historical[data_idx] or label == "Residual":
+                    continue
+                v = _read_label(self._calc_labels, pv_fcf_idx, data_idx)
+                if v is not None:
+                    sum_pv_fcf += v
+                    any_val = True
+            sum_pv_fcf = sum_pv_fcf if any_val else None
+
+            model = self.tv_model_combo.currentText()
+            disc_resid_lbl = self._tv_outputs.get(model, {}).get("pv_residual_value")
+            disc_resid = _parse_label_as_float(disc_resid_lbl.text()) if disc_resid_lbl else None
+
+            other_adj_text = self.bridge_other_adj_input.text().strip()
+            other_adj = _parse_label_as_float(other_adj_text) if other_adj_text else 0.0
+
+            if sum_pv_fcf is None and disc_resid is None:
+                return None
+            return (sum_pv_fcf or 0.0) + (disc_resid or 0.0) + (other_adj or 0.0)
         finally:
             self.ltg_input.setText(orig_ltgr_text)
+            inputs = self.get_project_inputs()
+            self._populate_residual_column(inputs)
+            self._populate_pv_chain(self.get_wacc_value(), inputs)
+            self._populate_terminal_value(self.get_wacc_value(), inputs)
+            self._populate_fv_bridge(inputs)
+
+    def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:
+        """Legacy wrapper — sensitivity table still uses this signature."""
+        try:
+            ltgr_val = float(ltgr_text_override.strip().replace("%", "")) / 100.0
+        except ValueError:
+            return None
+        return self._compute_fv_for_assumptions(wacc_override, ltgr_val)
+
+    def _get_surface_data(self) -> Optional[Dict]:
+        """Builds surface data from current sensitivity table inputs."""
+        def _pct_or_none(text: str) -> Optional[float]:
+            v = _parse_label_as_float(text)
+            return (v / 100.0) if v is not None else None
+
+        wacc_vals  = [_pct_or_none(w.text()) for w in self.sens_wacc_inputs]
+        ltgr_vals  = [_pct_or_none(l.text()) for l in self.sens_ltgr_inputs]
+        wacc_clean = [w for w in wacc_vals if w is not None]
+        ltgr_clean = [l for l in ltgr_vals if l is not None]
+
+        if not wacc_clean or not ltgr_clean:
+            return None
+
+        return compute_gg_surface_data_from_explicit(
+            fv_func=self._compute_fv_for_assumptions,
+            wacc_values=wacc_clean,
+            ltgr_values=ltgr_clean,
+        )
+
+    def _open_valuation_surface(self):
+        if (self._valuation_surface_dialog is not None and
+                not self._valuation_surface_dialog.isHidden()):
+            self._valuation_surface_dialog.raise_()
+            self._valuation_surface_dialog.activateWindow()
+            return
+        surface_data = self._get_surface_data()
+        if surface_data is None:
+            return
+        dlg = GGSurfaceChart(self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.destroyed.connect(self._on_surface_dialog_closed)
+        dlg.update_data(surface_data)
+        dlg.show()
+        self._valuation_surface_dialog = dlg
+
+    def _on_surface_dialog_closed(self):
+        self._valuation_surface_dialog = None
+
+    def _push_surface_update(self):
+        """Push fresh surface data to open dialog if it exists."""
+        if (self._valuation_surface_dialog is None or
+                self._valuation_surface_dialog.isHidden()):
+            return
+        surface_data = self._get_surface_data()
+        if surface_data is not None:
+            self._valuation_surface_dialog.update_data(surface_data)
 
     def _populate_sensitivity_table(self, inputs):
         if not hasattr(self, "sens_value_labels"):
@@ -1651,6 +2354,7 @@ class DCFPage(QWidget):
         self._populate_pv_chain(wacc_val, inputs)
         self._populate_terminal_value(wacc_val, inputs)
         self._populate_fv_bridge(inputs)
+        self._push_surface_update()
 
     def _populate_fv_bridge(self, inputs):
         pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")

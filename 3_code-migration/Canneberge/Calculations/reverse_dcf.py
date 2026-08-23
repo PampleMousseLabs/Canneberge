@@ -211,6 +211,56 @@ def solve_h_model(a, ke, fcfe_n, ga=None, gn=None, h=None, solve_for=None, full_
     out["is_valid"] = len(flags) == 0
     return out
 
+def compute_ttm_fcfe(ttm_net_income, ttm_revenue, depr_pct, capex_pct):
+    """
+    Computes TTM FCFE using TTM as the base period.
+    delta_nwc = 0 at base period (no prior period to diff against).
+    """
+    if any(v is None for v in [ttm_net_income, ttm_revenue, depr_pct, capex_pct]):
+        return None
+    depr = ttm_revenue * depr_pct
+    capex = ttm_revenue * capex_pct
+    return ttm_net_income + depr - capex  # delta_nwc = 0
+
+
+def extract_all_gpc_inputs(
+    tickers: List[str],
+    sa_results: Dict[str, Dict[str, list]],
+    ms_rows: list,
+    fred_rows: list,
+    wacc_beta_vals: Dict[str, Optional[float]],
+    erp_val: Optional[float],
+    nwc_exclude_cash: bool = True,
+) -> Dict[str, Any]:
+    """
+    Loops extract_ticker_inputs() for every ticker in the current GPC set
+    (plus subject company). Returns Dict[ticker_upper -> inputs_dict].
+
+    sa_results: Dict[ticker_upper -> {"IS": [...], "BS": [...], "CFS": [...], "Ratios": [...]}]
+    wacc_beta_vals: Dict[ticker_upper -> relevered_beta] — one beta per ticker
+    """
+    all_inputs = {}
+    for ticker in tickers:
+        ticker_upper = ticker.strip().upper()
+        ticker_sa = sa_results.get(ticker_upper, {})
+        beta = wacc_beta_vals.get(ticker_upper)
+        try:
+            inputs = extract_ticker_inputs(
+                ticker=ticker_upper,
+                sa_results=ticker_sa,
+                ms_rows=ms_rows,
+                fred_rows=fred_rows,
+                wacc_beta_val=beta,
+                erp_val=erp_val,
+                nwc_exclude_cash=nwc_exclude_cash,
+            )
+            all_inputs[ticker_upper] = inputs
+        except Exception as e:
+            # Don't let one bad ticker kill the whole loop
+            all_inputs[ticker_upper] = {"ticker": ticker_upper, "_error": str(e)}
+    return all_inputs
+
+
 def run_reverse_dcf(inputs, n_years=3, force_terminal_capex_equals_da=True, h_ga=None, h_gn=None, h_h=None, solve_for=None, terminal_model="gordon", full_fade_convention=True):
     ke = compute_cost_of_equity(inputs.get("risk_free_rate"), inputs.get("relevered_beta"), inputs.get("equity_risk_premium"))
     revenue = inputs.get("revenue", {})
