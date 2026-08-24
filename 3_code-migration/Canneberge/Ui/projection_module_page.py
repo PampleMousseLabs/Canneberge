@@ -69,9 +69,12 @@ def get_bold_style() -> str:
 
 
 def get_source_style() -> str:
-    # Greyed read-only historical/sourced values - reuses note_text,
-    # same role private_financials_input_page.py's TTM column plays.
-    return f"color: {theme_manager.current.note_text};"
+    # Greyed read-only historical/sourced values - locked_text is
+    # deliberately neutral-grey on every theme (not note_text, which
+    # is green on One Dark Pro and reads as "fine" rather than
+    # "locked, can't type here" - this was the actual root cause of
+    # historical/MS-estimate cells rendering green on the dark theme).
+    return f"color: {theme_manager.current.locked_text};"
 
 COL_WIDTH     = 100
 LABEL_STRETCH = 2
@@ -463,7 +466,8 @@ class ProjectionModulePage(QDialog):
         grid.addWidget(ebitda_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
-            lbl = self._make_calc_label(sourced=is_hist)
+            is_ms_sourced = self._is_public and period in MS_COVERED_PERIODS
+            lbl = self._make_calc_label(sourced=is_hist or is_ms_sourced)
             if is_hist:
                 lbl.setText(_fmt_dollars(self._hist_ebitda.get(period)))
             self._labels["ebitda"][period] = lbl
@@ -474,7 +478,8 @@ class ProjectionModulePage(QDialog):
         grid.addWidget(em_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
-            lbl = self._make_calc_label(sourced=is_hist)
+            is_ms_sourced = self._is_public and period in MS_COVERED_PERIODS
+            lbl = self._make_calc_label(sourced=is_hist or is_ms_sourced)
             if is_hist:
                 lbl.setText(_fmt_pct(self._hist_ebitda_margin.get(period)))
             self._labels["ebitda_margin"][period] = lbl

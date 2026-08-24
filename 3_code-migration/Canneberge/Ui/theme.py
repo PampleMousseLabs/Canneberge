@@ -45,7 +45,8 @@ class Theme:
     disabled_bg: str
     disabled_text: str
     note_text: str            # italic/muted helper text (e.g. "Pro" nulled notes)
-    dark_header_bg: str       # dashboard DARK_HEADER_BG role
+    locked_text: str          # sourced/read-only fields (historical, MS-
+    dark_header_bg: str       # dashboard DARK_HEADER_BG rolecovered estimates) - deliberately neutral-grey on every theme, never reuse note_text here (it's green on One Dark Pro, which reads as "fine" not "locked")
     dark_header_fg: str       # dashboard DARK_HEADER_FG role
     grey_disabled_bg: str     # the separate #f0f0f0 / #9a9a9a "greyed out" role
     grey_disabled_text: str
@@ -217,6 +218,7 @@ SLATE_AND_GOLD = Theme(
     disabled_bg="#f0f0f0",
     disabled_text="#9a9a9a",
     note_text="#555555",
+    locked_text="#555555",
     dark_header_bg="#2f2fa0",
     dark_header_fg="#ffffff",
     grey_disabled_bg="#f0f0f0",
@@ -244,12 +246,13 @@ ONE_DARK_PRO = Theme(
     input_text="#61afef",
     header_bg="#3e4451",
     bold_text="#abb2bf",
-    link_color="#ffa600",
+    link_color="#61afef",
     border_color="#181a1f",
     emphasis_border="#c678dd",
     disabled_bg="#33383f",
     disabled_text="#7f8794",
     note_text="#98c379",
+    locked_text="#7f8794",
     dark_header_bg="#3a3d91",
     dark_header_fg="#ffffff",
     grey_disabled_bg="#33383f",
@@ -283,6 +286,7 @@ GITHUB_LIGHT = Theme(
     disabled_bg="#f6f8fa",
     disabled_text="#8c959f",
     note_text="#57606a",
+    locked_text="#8c959f",
     dark_header_bg="#24292f",
     dark_header_fg="#f6f8fa",
     grey_disabled_bg="#f6f8fa",
