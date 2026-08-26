@@ -1,0 +1,1875 @@
+{
+    "IS": [
+        {
+            "Line Item": "Revenue",
+            "Example Ticker": "mmm",
+            "Seen Count": 452
+        },
+        {
+            "Line Item": "Revenue Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Cost of Revenue",
+            "Example Ticker": "mmm",
+            "Seen Count": 389
+        },
+        {
+            "Line Item": "Gross Profit",
+            "Example Ticker": "mmm",
+            "Seen Count": 393
+        },
+        {
+            "Line Item": "Selling, General & Admin",
+            "Example Ticker": "mmm",
+            "Seen Count": 395
+        },
+        {
+            "Line Item": "Research & Development",
+            "Example Ticker": "mmm",
+            "Seen Count": 177
+        },
+        {
+            "Line Item": "Operating Expenses",
+            "Example Ticker": "mmm",
+            "Seen Count": 392
+        },
+        {
+            "Line Item": "Operating Income",
+            "Example Ticker": "mmm",
+            "Seen Count": 482
+        },
+        {
+            "Line Item": "Interest Expense",
+            "Example Ticker": "mmm",
+            "Seen Count": 458
+        },
+        {
+            "Line Item": "Interest & Investment Income",
+            "Example Ticker": "mmm",
+            "Seen Count": 328
+        },
+        {
+            "Line Item": "Earnings From Equity Investments",
+            "Example Ticker": "mmm",
+            "Seen Count": 161
+        },
+        {
+            "Line Item": "EBT Excluding Unusual Items",
+            "Example Ticker": "mmm",
+            "Seen Count": 491
+        },
+        {
+            "Line Item": "Merger & Restructuring Charges",
+            "Example Ticker": "mmm",
+            "Seen Count": 336
+        },
+        {
+            "Line Item": "Impairment of Goodwill",
+            "Example Ticker": "mmm",
+            "Seen Count": 99
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Investments",
+            "Example Ticker": "mmm",
+            "Seen Count": 301
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 277
+        },
+        {
+            "Line Item": "Legal Settlements",
+            "Example Ticker": "mmm",
+            "Seen Count": 138
+        },
+        {
+            "Line Item": "Pretax Income",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Income Tax Expense",
+            "Example Ticker": "mmm",
+            "Seen Count": 496
+        },
+        {
+            "Line Item": "Earnings From Continuing Operations",
+            "Example Ticker": "mmm",
+            "Seen Count": 303
+        },
+        {
+            "Line Item": "Earnings From Discontinued Operations",
+            "Example Ticker": "mmm",
+            "Seen Count": 83
+        },
+        {
+            "Line Item": "Net Income to Company",
+            "Example Ticker": "mmm",
+            "Seen Count": 123
+        },
+        {
+            "Line Item": "Minority Interest in Earnings",
+            "Example Ticker": "mmm",
+            "Seen Count": 279
+        },
+        {
+            "Line Item": "Net Income",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Net Income to Common",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Net Income Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Shares Outstanding (Basic)",
+            "Example Ticker": "mmm",
+            "Seen Count": 455
+        },
+        {
+            "Line Item": "Shares Outstanding (Diluted)",
+            "Example Ticker": "mmm",
+            "Seen Count": 455
+        },
+        {
+            "Line Item": "Shares Change",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "EPS (Basic)",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "EPS (Diluted)",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "EPS Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Free Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 448
+        },
+        {
+            "Line Item": "Free Cash Flow Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 447
+        },
+        {
+            "Line Item": "Dividend Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 406
+        },
+        {
+            "Line Item": "Dividend Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 406
+        },
+        {
+            "Line Item": "Gross Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 393
+        },
+        {
+            "Line Item": "Operating Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 452
+        },
+        {
+            "Line Item": "Profit Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Free Cash Flow Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 448
+        },
+        {
+            "Line Item": "EBITDA",
+            "Example Ticker": "mmm",
+            "Seen Count": 472
+        },
+        {
+            "Line Item": "EBITDA Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 472
+        },
+        {
+            "Line Item": "D&A For EBITDA",
+            "Example Ticker": "mmm",
+            "Seen Count": 445
+        },
+        {
+            "Line Item": "EBIT",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "EBIT Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Effective Tax Rate",
+            "Example Ticker": "mmm",
+            "Seen Count": 494
+        },
+        {
+            "Line Item": "Advertising Expenses",
+            "Example Ticker": "mmm",
+            "Seen Count": 161
+        },
+        {
+            "Line Item": "Currency Exchange Gain (Loss)",
+            "Example Ticker": "aos",
+            "Seen Count": 237
+        },
+        {
+            "Line Item": "Other Non Operating Income (Expenses)",
+            "Example Ticker": "aos",
+            "Seen Count": 335
+        },
+        {
+            "Line Item": "Asset Writedown",
+            "Example Ticker": "aos",
+            "Seen Count": 255
+        },
+        {
+            "Line Item": "Other Unusual Items",
+            "Example Ticker": "aos",
+            "Seen Count": 324
+        },
+        {
+            "Line Item": "Amortization of Goodwill & Intangibles",
+            "Example Ticker": "abt",
+            "Seen Count": 111
+        },
+        {
+            "Line Item": "Preferred Dividends & Other Adjustments",
+            "Example Ticker": "abt",
+            "Seen Count": 152
+        },
+        {
+            "Line Item": "Other Operating Expenses",
+            "Example Ticker": "abbv",
+            "Seen Count": 192
+        },
+        {
+            "Line Item": "Revenue as Reported",
+            "Example Ticker": "adbe",
+            "Seen Count": 245
+        },
+        {
+            "Line Item": "Total Operating Expenses",
+            "Example Ticker": "aes",
+            "Seen Count": 89
+        },
+        {
+            "Line Item": "Interest Income",
+            "Example Ticker": "aes",
+            "Seen Count": 22
+        },
+        {
+            "Line Item": "Net Interest Expense",
+            "Example Ticker": "aes",
+            "Seen Count": 31
+        },
+        {
+            "Line Item": "Income (Loss) on Equity Investments",
+            "Example Ticker": "aes",
+            "Seen Count": 25
+        },
+        {
+            "Line Item": "Allowance for Equity Funds for Construction",
+            "Example Ticker": "aes",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Other Non-Operating Income (Expenses)",
+            "Example Ticker": "aes",
+            "Seen Count": 35
+        },
+        {
+            "Line Item": "Restructuring Charges",
+            "Example Ticker": "aes",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Insurance Settlements",
+            "Example Ticker": "aes",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Earnings From Continuing Ops.",
+            "Example Ticker": "aes",
+            "Seen Count": 50
+        },
+        {
+            "Line Item": "Earnings From Discontinued Ops.",
+            "Example Ticker": "aes",
+            "Seen Count": 13
+        },
+        {
+            "Line Item": "Premiums & Annuity Revenue",
+            "Example Ticker": "afl",
+            "Seen Count": 21
+        },
+        {
+            "Line Item": "Total Interest & Dividend Income",
+            "Example Ticker": "afl",
+            "Seen Count": 21
+        },
+        {
+            "Line Item": "Other Revenue",
+            "Example Ticker": "afl",
+            "Seen Count": 122
+        },
+        {
+            "Line Item": "Total Revenue",
+            "Example Ticker": "afl",
+            "Seen Count": 48
+        },
+        {
+            "Line Item": "Policy Benefits",
+            "Example Ticker": "afl",
+            "Seen Count": 21
+        },
+        {
+            "Line Item": "Policy Acquisition & Underwriting Costs",
+            "Example Ticker": "afl",
+            "Seen Count": 14
+        },
+        {
+            "Line Item": "Selling, General & Administrative",
+            "Example Ticker": "afl",
+            "Seen Count": 62
+        },
+        {
+            "Line Item": "Rental Revenue",
+            "Example Ticker": "are",
+            "Seen Count": 24
+        },
+        {
+            "Line Item": "Revenue Growth (YoY",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Property Expenses",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Depreciation & Amortization",
+            "Example Ticker": "are",
+            "Seen Count": 59
+        },
+        {
+            "Line Item": "Basic Shares Outstanding",
+            "Example Ticker": "are",
+            "Seen Count": 45
+        },
+        {
+            "Line Item": "Diluted Shares Outstanding",
+            "Example Ticker": "are",
+            "Seen Count": 45
+        },
+        {
+            "Line Item": "D&A For Ebitda",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Funds From Operations (FFO)",
+            "Example Ticker": "are",
+            "Seen Count": 25
+        },
+        {
+            "Line Item": "FFO Per Share",
+            "Example Ticker": "are",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Adjusted Funds From Operations (AFFO)",
+            "Example Ticker": "are",
+            "Seen Count": 25
+        },
+        {
+            "Line Item": "AFFO Per Share",
+            "Example Ticker": "are",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "FFO Payout Ratio",
+            "Example Ticker": "are",
+            "Seen Count": 20
+        },
+        {
+            "Line Item": "Fuel & Purchased Power",
+            "Example Ticker": "lnt",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Operations & Maintenance",
+            "Example Ticker": "lnt",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Operating Revenue",
+            "Example Ticker": "aep",
+            "Seen Count": 77
+        },
+        {
+            "Line Item": "Interest and Dividend Income",
+            "Example Ticker": "axp",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Total Interest Expense",
+            "Example Ticker": "axp",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Net Interest Income",
+            "Example Ticker": "axp",
+            "Seen Count": 28
+        },
+        {
+            "Line Item": "Commissions and Fees",
+            "Example Ticker": "axp",
+            "Seen Count": 1
+        },
+        {
+            "Line Item": "Revenue Before Loan Losses",
+            "Example Ticker": "axp",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Provision for Loan Losses",
+            "Example Ticker": "axp",
+            "Seen Count": 25
+        },
+        {
+            "Line Item": "Salaries & Employee Benefits",
+            "Example Ticker": "axp",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Cost of Services Provided",
+            "Example Ticker": "axp",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Other Non-Operating Income",
+            "Example Ticker": "amt",
+            "Seen Count": 20
+        },
+        {
+            "Line Item": "Asset Management Fee",
+            "Example Ticker": "apo",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Gain on Sale of Investments (Rev)",
+            "Example Ticker": "apo",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Interest Income on Loans",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Total Interest Income",
+            "Example Ticker": "bac",
+            "Seen Count": 13
+        },
+        {
+            "Line Item": "Interest Paid on Deposits",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Net Interest Income Growth",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Other Non-Interest Income",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Total Non-Interest Income",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Non-Interest Income Growth",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Revenues Before Loan Losses",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Salaries and Employee Benefits",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Occupancy Expenses",
+            "Example Ticker": "bac",
+            "Seen Count": 14
+        },
+        {
+            "Line Item": "Other Non-Interest Expense",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Total Non-Interest Expense",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Trading & Principal Transactions",
+            "Example Ticker": "bx",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Currency Exchange Gains",
+            "Example Ticker": "bx",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Trust Income",
+            "Example Ticker": "bny",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Property Management Fees",
+            "Example Ticker": "bxp",
+            "Seen Count": 11
+        },
+        {
+            "Line Item": "Interest Income on Investments",
+            "Example Ticker": "cof",
+            "Seen Count": 12
+        },
+        {
+            "Line Item": "Interest Paid on Borrowings",
+            "Example Ticker": "cof",
+            "Seen Count": 12
+        },
+        {
+            "Line Item": "Income From Trading Activities",
+            "Example Ticker": "c",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Mortgage Banking Activities",
+            "Example Ticker": "cfg",
+            "Seen Count": 11
+        },
+        {
+            "Line Item": "Allowance for Borrowed Funds for Construction",
+            "Example Ticker": "cms",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Total Merger & Restructuring Charges",
+            "Example Ticker": "ceg",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Total Legal Settlements",
+            "Example Ticker": "ess",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Equity Investments",
+            "Example Ticker": "fitb",
+            "Seen Count": 2
+        },
+        {
+            "Line Item": "Brokerage Commission",
+            "Example Ticker": "gs",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Underwriting & Investment Banking Fee",
+            "Example Ticker": "gs",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Total Insurance Settlements",
+            "Example Ticker": "doc",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Federal Deposit Insurance",
+            "Example Ticker": "hban",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Non-Insurance Activities Revenue",
+            "Example Ticker": "l",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Non-Insurance Activities Expense",
+            "Example Ticker": "l",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Provision for Bad Debts",
+            "Example Ticker": "nrg",
+            "Seen Count": 1
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Assets (Rev)",
+            "Example Ticker": "spg",
+            "Seen Count": 1
+        }
+    ],
+    "BS": [
+        {
+            "Line Item": "Cash & Equivalents",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Short-Term Investments",
+            "Example Ticker": "mmm",
+            "Seen Count": 224
+        },
+        {
+            "Line Item": "Cash & Short-Term Investments",
+            "Example Ticker": "mmm",
+            "Seen Count": 393
+        },
+        {
+            "Line Item": "Cash Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 393
+        },
+        {
+            "Line Item": "Accounts Receivable",
+            "Example Ticker": "mmm",
+            "Seen Count": 302
+        },
+        {
+            "Line Item": "Other Receivables",
+            "Example Ticker": "mmm",
+            "Seen Count": 284
+        },
+        {
+            "Line Item": "Receivables",
+            "Example Ticker": "mmm",
+            "Seen Count": 392
+        },
+        {
+            "Line Item": "Inventory",
+            "Example Ticker": "mmm",
+            "Seen Count": 343
+        },
+        {
+            "Line Item": "Prepaid Expenses",
+            "Example Ticker": "mmm",
+            "Seen Count": 273
+        },
+        {
+            "Line Item": "Other Current Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 448
+        },
+        {
+            "Line Item": "Total Current Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 424
+        },
+        {
+            "Line Item": "Property, Plant & Equipment",
+            "Example Ticker": "mmm",
+            "Seen Count": 498
+        },
+        {
+            "Line Item": "Long-Term Investments",
+            "Example Ticker": "mmm",
+            "Seen Count": 342
+        },
+        {
+            "Line Item": "Goodwill",
+            "Example Ticker": "mmm",
+            "Seen Count": 457
+        },
+        {
+            "Line Item": "Other Intangible Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 448
+        },
+        {
+            "Line Item": "Long-Term Deferred Tax Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 328
+        },
+        {
+            "Line Item": "Other Long-Term Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 497
+        },
+        {
+            "Line Item": "Total Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Accounts Payable",
+            "Example Ticker": "mmm",
+            "Seen Count": 466
+        },
+        {
+            "Line Item": "Accrued Expenses",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Short-Term Debt",
+            "Example Ticker": "mmm",
+            "Seen Count": 237
+        },
+        {
+            "Line Item": "Current Portion of Long-Term Debt",
+            "Example Ticker": "mmm",
+            "Seen Count": 452
+        },
+        {
+            "Line Item": "Current Portion of Leases",
+            "Example Ticker": "mmm",
+            "Seen Count": 495
+        },
+        {
+            "Line Item": "Current Income Taxes Payable",
+            "Example Ticker": "mmm",
+            "Seen Count": 319
+        },
+        {
+            "Line Item": "Current Unearned Revenue",
+            "Example Ticker": "mmm",
+            "Seen Count": 296
+        },
+        {
+            "Line Item": "Other Current Liabilities",
+            "Example Ticker": "mmm",
+            "Seen Count": 463
+        },
+        {
+            "Line Item": "Total Current Liabilities",
+            "Example Ticker": "mmm",
+            "Seen Count": 424
+        },
+        {
+            "Line Item": "Long-Term Debt",
+            "Example Ticker": "mmm",
+            "Seen Count": 477
+        },
+        {
+            "Line Item": "Long-Term Leases",
+            "Example Ticker": "mmm",
+            "Seen Count": 497
+        },
+        {
+            "Line Item": "Pension & Post-Retirement Benefits",
+            "Example Ticker": "mmm",
+            "Seen Count": 240
+        },
+        {
+            "Line Item": "Long-Term Deferred Tax Liabilities",
+            "Example Ticker": "mmm",
+            "Seen Count": 392
+        },
+        {
+            "Line Item": "Other Long-Term Liabilities",
+            "Example Ticker": "mmm",
+            "Seen Count": 494
+        },
+        {
+            "Line Item": "Total Liabilities",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Common Stock",
+            "Example Ticker": "mmm",
+            "Seen Count": 475
+        },
+        {
+            "Line Item": "Additional Paid-In Capital",
+            "Example Ticker": "mmm",
+            "Seen Count": 434
+        },
+        {
+            "Line Item": "Retained Earnings",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Treasury Stock",
+            "Example Ticker": "mmm",
+            "Seen Count": 300
+        },
+        {
+            "Line Item": "Comprehensive Income & Other",
+            "Example Ticker": "mmm",
+            "Seen Count": 487
+        },
+        {
+            "Line Item": "Total Common Equity",
+            "Example Ticker": "mmm",
+            "Seen Count": 358
+        },
+        {
+            "Line Item": "Minority Interest",
+            "Example Ticker": "mmm",
+            "Seen Count": 303
+        },
+        {
+            "Line Item": "Shareholders' Equity",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Total Liabilities & Equity",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Total Debt",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Net Cash (Debt)",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Net Cash Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 474
+        },
+        {
+            "Line Item": "Net Cash Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Filing Date Shares Outstanding",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Total Common Shares Outstanding",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Working Capital",
+            "Example Ticker": "mmm",
+            "Seen Count": 434
+        },
+        {
+            "Line Item": "Book Value Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Tangible Book Value",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Tangible Book Value Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Land",
+            "Example Ticker": "mmm",
+            "Seen Count": 369
+        },
+        {
+            "Line Item": "Buildings",
+            "Example Ticker": "mmm",
+            "Seen Count": 318
+        },
+        {
+            "Line Item": "Machinery",
+            "Example Ticker": "mmm",
+            "Seen Count": 410
+        },
+        {
+            "Line Item": "Construction In Progress",
+            "Example Ticker": "mmm",
+            "Seen Count": 311
+        },
+        {
+            "Line Item": "Trading Asset Securities",
+            "Example Ticker": "abt",
+            "Seen Count": 115
+        },
+        {
+            "Line Item": "Long-Term Accounts Receivable",
+            "Example Ticker": "acn",
+            "Seen Count": 74
+        },
+        {
+            "Line Item": "Long-Term Deferred Charges",
+            "Example Ticker": "acn",
+            "Seen Count": 130
+        },
+        {
+            "Line Item": "Long-Term Unearned Revenue",
+            "Example Ticker": "acn",
+            "Seen Count": 220
+        },
+        {
+            "Line Item": "Leasehold Improvements",
+            "Example Ticker": "acn",
+            "Seen Count": 132
+        },
+        {
+            "Line Item": "Restricted Cash",
+            "Example Ticker": "amd",
+            "Seen Count": 231
+        },
+        {
+            "Line Item": "Loans Receivable Current",
+            "Example Ticker": "aes",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Regulatory Assets",
+            "Example Ticker": "aes",
+            "Seen Count": 29
+        },
+        {
+            "Line Item": "Long-Term Loans Receivable",
+            "Example Ticker": "aes",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Total Preferred Equity",
+            "Example Ticker": "aes",
+            "Seen Count": 20
+        },
+        {
+            "Line Item": "Investments in Debt Securities",
+            "Example Ticker": "afl",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Investments in Equity & Preferred Securities",
+            "Example Ticker": "afl",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Policy Loans",
+            "Example Ticker": "afl",
+            "Seen Count": 9
+        },
+        {
+            "Line Item": "Other Investments",
+            "Example Ticker": "afl",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Total Investments",
+            "Example Ticker": "afl",
+            "Seen Count": 39
+        },
+        {
+            "Line Item": "Reinsurance Recoverable",
+            "Example Ticker": "afl",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Deferred Policy Acquisition Cost",
+            "Example Ticker": "afl",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Insurance & Annuity Liabilities",
+            "Example Ticker": "afl",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Unpaid Claims",
+            "Example Ticker": "afl",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Unearned Premiums",
+            "Example Ticker": "afl",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Total Real Estate Assets",
+            "Example Ticker": "are",
+            "Seen Count": 8
+        },
+        {
+            "Line Item": "Investment In Debt and Equity Securities",
+            "Example Ticker": "are",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Deferred Long-Term Charges",
+            "Example Ticker": "are",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Net Cash (Debt) Growth",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Order Backlog",
+            "Example Ticker": "googl",
+            "Seen Count": 57
+        },
+        {
+            "Line Item": "Loans & Lease Receivables",
+            "Example Ticker": "axp",
+            "Seen Count": 1
+        },
+        {
+            "Line Item": "Interest Bearing Deposits",
+            "Example Ticker": "axp",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Non-Interest Bearing Deposits",
+            "Example Ticker": "axp",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Total Deposits",
+            "Example Ticker": "axp",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Separate Account Assets",
+            "Example Ticker": "aig",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Separate Account Liability",
+            "Example Ticker": "aig",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Preferred Stock, Redeemable",
+            "Example Ticker": "aig",
+            "Seen Count": 33
+        },
+        {
+            "Line Item": "Deferred Long-Term Tax Assets",
+            "Example Ticker": "amt",
+            "Seen Count": 11
+        },
+        {
+            "Line Item": "Distributions in Excess of Earnings",
+            "Example Ticker": "amt",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Investments in Debt & Equity Securities",
+            "Example Ticker": "apo",
+            "Seen Count": 9
+        },
+        {
+            "Line Item": "Reinsurance Payable",
+            "Example Ticker": "acgl",
+            "Seen Count": 8
+        },
+        {
+            "Line Item": "Investment Securities",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Mortgage-Backed Securities",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Gross Loans",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Allowance for Loan Losses",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Net Loans",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Loans Held for Sale",
+            "Example Ticker": "bac",
+            "Seen Count": 14
+        },
+        {
+            "Line Item": "Accrued Interest Receivable",
+            "Example Ticker": "bac",
+            "Seen Count": 16
+        },
+        {
+            "Line Item": "Other Real Estate Owned & Foreclosed",
+            "Example Ticker": "bac",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Short-Term Borrowings",
+            "Example Ticker": "bac",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Federal Home Loan Bank Debt, Long-Term",
+            "Example Ticker": "bac",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Trust Preferred Securities",
+            "Example Ticker": "bac",
+            "Seen Count": 11
+        },
+        {
+            "Line Item": "Other Adjustments to Gross Loans",
+            "Example Ticker": "bny",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Institutional Deposits",
+            "Example Ticker": "bny",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Finance Div. Loans and Leases",
+            "Example Ticker": "ba",
+            "Seen Count": 15
+        },
+        {
+            "Line Item": "Finance Div. Loans and Leases Long-Term",
+            "Example Ticker": "ba",
+            "Seen Count": 9
+        },
+        {
+            "Line Item": "Finance Div. Debt Current",
+            "Example Ticker": "ba",
+            "Seen Count": 13
+        },
+        {
+            "Line Item": "Finance Div. Debt Long-Term",
+            "Example Ticker": "ba",
+            "Seen Count": 11
+        },
+        {
+            "Line Item": "Accrued Interest Payable",
+            "Example Ticker": "cof",
+            "Seen Count": 2
+        },
+        {
+            "Line Item": "Preferred Stock, Other",
+            "Example Ticker": "cof",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Finance Div. Other Current Assets",
+            "Example Ticker": "cat",
+            "Seen Count": 12
+        },
+        {
+            "Line Item": "Finance Div. Other Current Liabilities",
+            "Example Ticker": "cat",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Finance Div. Other Long-Term Liabilities",
+            "Example Ticker": "cat",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Preferred Stock, Convertible",
+            "Example Ticker": "c",
+            "Seen Count": 7
+        },
+        {
+            "Line Item": "Net Nuclear Fuel",
+            "Example Ticker": "ceg",
+            "Seen Count": 8
+        },
+        {
+            "Line Item": "Preferred Stock, Non-Redeemable",
+            "Example Ticker": "wfc",
+            "Seen Count": 1
+        }
+    ],
+    "CFS": [
+        {
+            "Line Item": "Net Income",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Depreciation & Amortization",
+            "Example Ticker": "mmm",
+            "Seen Count": 491
+        },
+        {
+            "Line Item": "Loss (Gain) From Sale of Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 253
+        },
+        {
+            "Line Item": "Asset Writedown & Restructuring Costs",
+            "Example Ticker": "mmm",
+            "Seen Count": 259
+        },
+        {
+            "Line Item": "Stock-Based Compensation",
+            "Example Ticker": "mmm",
+            "Seen Count": 411
+        },
+        {
+            "Line Item": "Other Operating Activities",
+            "Example Ticker": "mmm",
+            "Seen Count": 496
+        },
+        {
+            "Line Item": "Change in Accounts Receivable",
+            "Example Ticker": "mmm",
+            "Seen Count": 447
+        },
+        {
+            "Line Item": "Change in Inventory",
+            "Example Ticker": "mmm",
+            "Seen Count": 316
+        },
+        {
+            "Line Item": "Change in Accounts Payable",
+            "Example Ticker": "mmm",
+            "Seen Count": 439
+        },
+        {
+            "Line Item": "Change in Income Taxes",
+            "Example Ticker": "mmm",
+            "Seen Count": 218
+        },
+        {
+            "Line Item": "Change in Other Net Operating Assets",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Operating Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Operating Cash Flow Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 492
+        },
+        {
+            "Line Item": "Capital Expenditures",
+            "Example Ticker": "mmm",
+            "Seen Count": 456
+        },
+        {
+            "Line Item": "Sale of Property, Plant & Equipment",
+            "Example Ticker": "mmm",
+            "Seen Count": 235
+        },
+        {
+            "Line Item": "Divestitures",
+            "Example Ticker": "mmm",
+            "Seen Count": 205
+        },
+        {
+            "Line Item": "Investment in Securities",
+            "Example Ticker": "mmm",
+            "Seen Count": 376
+        },
+        {
+            "Line Item": "Other Investing Activities",
+            "Example Ticker": "mmm",
+            "Seen Count": 433
+        },
+        {
+            "Line Item": "Investing Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Short-Term Debt Issued",
+            "Example Ticker": "mmm",
+            "Seen Count": 256
+        },
+        {
+            "Line Item": "Long-Term Debt Issued",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Total Debt Issued",
+            "Example Ticker": "mmm",
+            "Seen Count": 314
+        },
+        {
+            "Line Item": "Short-Term Debt Repaid",
+            "Example Ticker": "mmm",
+            "Seen Count": 246
+        },
+        {
+            "Line Item": "Long-Term Debt Repaid",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Total Debt Repaid",
+            "Example Ticker": "mmm",
+            "Seen Count": 318
+        },
+        {
+            "Line Item": "Net Debt Issued (Repaid)",
+            "Example Ticker": "mmm",
+            "Seen Count": 488
+        },
+        {
+            "Line Item": "Issuance of Common Stock",
+            "Example Ticker": "mmm",
+            "Seen Count": 372
+        },
+        {
+            "Line Item": "Repurchase of Common Stock",
+            "Example Ticker": "mmm",
+            "Seen Count": 446
+        },
+        {
+            "Line Item": "Common Dividends Paid",
+            "Example Ticker": "mmm",
+            "Seen Count": 392
+        },
+        {
+            "Line Item": "Other Financing Activities",
+            "Example Ticker": "mmm",
+            "Seen Count": 481
+        },
+        {
+            "Line Item": "Financing Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Foreign Exchange Rate Adjustments",
+            "Example Ticker": "mmm",
+            "Seen Count": 372
+        },
+        {
+            "Line Item": "Miscellaneous Cash Flow Adjustments",
+            "Example Ticker": "mmm",
+            "Seen Count": 53
+        },
+        {
+            "Line Item": "Net Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Free Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Free Cash Flow Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Free Cash Flow Margin",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Free Cash Flow Per Share",
+            "Example Ticker": "mmm",
+            "Seen Count": 458
+        },
+        {
+            "Line Item": "Levered Free Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Unlevered Free Cash Flow",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Cash Interest Paid",
+            "Example Ticker": "mmm",
+            "Seen Count": 468
+        },
+        {
+            "Line Item": "Cash Income Tax Paid",
+            "Example Ticker": "mmm",
+            "Seen Count": 491
+        },
+        {
+            "Line Item": "Change in Working Capital",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Cash Acquisitions",
+            "Example Ticker": "aos",
+            "Seen Count": 380
+        },
+        {
+            "Line Item": "Other Amortization",
+            "Example Ticker": "acn",
+            "Seen Count": 206
+        },
+        {
+            "Line Item": "Change in Unearned Revenue",
+            "Example Ticker": "acn",
+            "Seen Count": 151
+        },
+        {
+            "Line Item": "Loss (Gain) From Sale of Investments",
+            "Example Ticker": "adbe",
+            "Seen Count": 193
+        },
+        {
+            "Line Item": "Loss (Gain) on Equity Investments",
+            "Example Ticker": "amd",
+            "Seen Count": 123
+        },
+        {
+            "Line Item": "Loss (Gain) on Sale of Assets",
+            "Example Ticker": "aes",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Loss (Gain) on Sale of Investments",
+            "Example Ticker": "aes",
+            "Seen Count": 13
+        },
+        {
+            "Line Item": "Asset Writedown",
+            "Example Ticker": "aes",
+            "Seen Count": 34
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Investments",
+            "Example Ticker": "afl",
+            "Seen Count": 46
+        },
+        {
+            "Line Item": "Change in Insurance Reserves / Liabilities",
+            "Example Ticker": "afl",
+            "Seen Count": 21
+        },
+        {
+            "Line Item": "Repurchases of Common Stock",
+            "Example Ticker": "afl",
+            "Seen Count": 21
+        },
+        {
+            "Line Item": "Sale (Purchase) of Intangibles",
+            "Example Ticker": "akam",
+            "Seen Count": 87
+        },
+        {
+            "Line Item": "Preferred Dividends Paid",
+            "Example Ticker": "alb",
+            "Seen Count": 56
+        },
+        {
+            "Line Item": "Dividends Paid",
+            "Example Ticker": "alb",
+            "Seen Count": 54
+        },
+        {
+            "Line Item": "Gain (Loss) on Sale of Assets",
+            "Example Ticker": "are",
+            "Seen Count": 41
+        },
+        {
+            "Line Item": "Income (Loss) on Equity Investments",
+            "Example Ticker": "are",
+            "Seen Count": 20
+        },
+        {
+            "Line Item": "Acquisition of Real Estate Assets",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Sale of Real Estate Assets",
+            "Example Ticker": "are",
+            "Seen Count": 25
+        },
+        {
+            "Line Item": "Net Sale / Acq. of Real Estate Assets",
+            "Example Ticker": "are",
+            "Seen Count": 27
+        },
+        {
+            "Line Item": "Investment in Marketable & Equity Securities",
+            "Example Ticker": "are",
+            "Seen Count": 24
+        },
+        {
+            "Line Item": "Total Dividends Paid",
+            "Example Ticker": "are",
+            "Seen Count": 45
+        },
+        {
+            "Line Item": "Reinsurance Recoverable",
+            "Example Ticker": "all",
+            "Seen Count": 8
+        },
+        {
+            "Line Item": "Issuance of Preferred Stock",
+            "Example Ticker": "all",
+            "Seen Count": 3
+        },
+        {
+            "Line Item": "Repurchases of Preferred Stock",
+            "Example Ticker": "all",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Nuclear Fuel Expenditures",
+            "Example Ticker": "aee",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Contributions to Nuclear Demissioning Trust",
+            "Example Ticker": "aee",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Provision for Credit Losses",
+            "Example Ticker": "axp",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Net Decrease (Increase) in Loans Originated / Sold - Operating",
+            "Example Ticker": "axp",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Net Decrease (Increase) in Loans Originated / Sold - Investing",
+            "Example Ticker": "axp",
+            "Seen Count": 19
+        },
+        {
+            "Line Item": "Preferred Share Repurchases",
+            "Example Ticker": "axp",
+            "Seen Count": 22
+        },
+        {
+            "Line Item": "Restructuring Activities",
+            "Example Ticker": "amt",
+            "Seen Count": 5
+        },
+        {
+            "Line Item": "Net Cash from Discontinued Operations",
+            "Example Ticker": "amt",
+            "Seen Count": 13
+        },
+        {
+            "Line Item": "Cash Acquisition",
+            "Example Ticker": "amt",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Depreciation & Amortization, Total",
+            "Example Ticker": "apo",
+            "Seen Count": 9
+        },
+        {
+            "Line Item": "Gain (Loss) On Sale of Investments",
+            "Example Ticker": "apo",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Change in Deferred Taxes",
+            "Example Ticker": "acgl",
+            "Seen Count": 2
+        },
+        {
+            "Line Item": "Provision & Write-off of Bad Debts",
+            "Example Ticker": "t",
+            "Seen Count": 81
+        },
+        {
+            "Line Item": "Preferred Stock Issued",
+            "Example Ticker": "bac",
+            "Seen Count": 17
+        },
+        {
+            "Line Item": "Net Increase (Decrease) in Deposit Accounts",
+            "Example Ticker": "bac",
+            "Seen Count": 18
+        },
+        {
+            "Line Item": "Total Asset Writedown",
+            "Example Ticker": "bny",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Change in Trading Asset Securities",
+            "Example Ticker": "bny",
+            "Seen Count": 10
+        },
+        {
+            "Line Item": "Sale of Property, Plant and Equipment",
+            "Example Ticker": "bny",
+            "Seen Count": 4
+        },
+        {
+            "Line Item": "Accrued Interest Receivable",
+            "Example Ticker": "cof",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Sale (Purchase) of Real Estate",
+            "Example Ticker": "cbre",
+            "Seen Count": 9
+        },
+        {
+            "Line Item": "Common & Preferred Dividends Paid",
+            "Example Ticker": "dlr",
+            "Seen Count": 6
+        },
+        {
+            "Line Item": "Purchase / Sale of Intangibles",
+            "Example Ticker": "fitb",
+            "Seen Count": 4
+        }
+    ],
+    "Ratios": [
+        {
+            "Line Item": "Market Cap",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Market Cap Growth",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Enterprise Value",
+            "Example Ticker": "mmm",
+            "Seen Count": 472
+        },
+        {
+            "Line Item": "Last Close Price",
+            "Example Ticker": "mmm",
+            "Seen Count": 447
+        },
+        {
+            "Line Item": "Forward PE",
+            "Example Ticker": "mmm",
+            "Seen Count": 388
+        },
+        {
+            "Line Item": "PS Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "PB Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "P/FCF Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 438
+        },
+        {
+            "Line Item": "P/OCF Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "PEG Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 386
+        },
+        {
+            "Line Item": "EV/Sales Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 472
+        },
+        {
+            "Line Item": "EV/EBITDA Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 471
+        },
+        {
+            "Line Item": "EV/EBIT Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 471
+        },
+        {
+            "Line Item": "EV/FCF Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 417
+        },
+        {
+            "Line Item": "Debt / Equity Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Debt / EBITDA Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 473
+        },
+        {
+            "Line Item": "Debt / FCF Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 439
+        },
+        {
+            "Line Item": "Net Debt / Equity Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Net Debt / EBITDA Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 472
+        },
+        {
+            "Line Item": "Net Debt / FCF Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 459
+        },
+        {
+            "Line Item": "Asset Turnover",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Inventory Turnover",
+            "Example Ticker": "mmm",
+            "Seen Count": 312
+        },
+        {
+            "Line Item": "Quick Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Current Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 483
+        },
+        {
+            "Line Item": "Return on Equity (ROE)",
+            "Example Ticker": "mmm",
+            "Seen Count": 485
+        },
+        {
+            "Line Item": "Return on Assets (ROA)",
+            "Example Ticker": "mmm",
+            "Seen Count": 501
+        },
+        {
+            "Line Item": "Return on Invested Capital (ROIC)",
+            "Example Ticker": "mmm",
+            "Seen Count": 444
+        },
+        {
+            "Line Item": "Return on Capital Employed (ROCE)",
+            "Example Ticker": "mmm",
+            "Seen Count": 424
+        },
+        {
+            "Line Item": "Earnings Yield",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "FCF Yield",
+            "Example Ticker": "mmm",
+            "Seen Count": 458
+        },
+        {
+            "Line Item": "Dividend Yield",
+            "Example Ticker": "mmm",
+            "Seen Count": 405
+        },
+        {
+            "Line Item": "Payout Ratio",
+            "Example Ticker": "mmm",
+            "Seen Count": 410
+        },
+        {
+            "Line Item": "Buyback Yield / Dilution",
+            "Example Ticker": "mmm",
+            "Seen Count": 500
+        },
+        {
+            "Line Item": "Total Shareholder Return",
+            "Example Ticker": "mmm",
+            "Seen Count": 409
+        },
+        {
+            "Line Item": "P/TBV Ratio",
+            "Example Ticker": "aos",
+            "Seen Count": 248
+        },
+        {
+            "Line Item": "Price/FFO Ratio",
+            "Example Ticker": "are",
+            "Seen Count": 23
+        },
+        {
+            "Line Item": "Price/AFFO Ratio",
+            "Example Ticker": "are",
+            "Seen Count": 23
+        }
+    ]
+}

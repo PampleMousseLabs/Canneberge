@@ -1,0 +1,118 @@
+Line Item,Example Ticker,Seen Count
+Cash & Equivalents,mmm,501
+Short-Term Investments,mmm,224
+Cash & Short-Term Investments,mmm,393
+Cash Growth,mmm,393
+Accounts Receivable,mmm,302
+Other Receivables,mmm,284
+Receivables,mmm,392
+Inventory,mmm,343
+Prepaid Expenses,mmm,273
+Other Current Assets,mmm,448
+Total Current Assets,mmm,424
+"Property, Plant & Equipment",mmm,498
+Long-Term Investments,mmm,342
+Goodwill,mmm,457
+Other Intangible Assets,mmm,448
+Long-Term Deferred Tax Assets,mmm,328
+Other Long-Term Assets,mmm,497
+Total Assets,mmm,501
+Accounts Payable,mmm,466
+Accrued Expenses,mmm,459
+Short-Term Debt,mmm,237
+Current Portion of Long-Term Debt,mmm,452
+Current Portion of Leases,mmm,495
+Current Income Taxes Payable,mmm,319
+Current Unearned Revenue,mmm,296
+Other Current Liabilities,mmm,463
+Total Current Liabilities,mmm,424
+Long-Term Debt,mmm,477
+Long-Term Leases,mmm,497
+Pension & Post-Retirement Benefits,mmm,240
+Long-Term Deferred Tax Liabilities,mmm,392
+Other Long-Term Liabilities,mmm,494
+Total Liabilities,mmm,500
+Common Stock,mmm,475
+Additional Paid-In Capital,mmm,434
+Retained Earnings,mmm,483
+Treasury Stock,mmm,300
+Comprehensive Income & Other,mmm,487
+Total Common Equity,mmm,358
+Minority Interest,mmm,303
+Shareholders' Equity,mmm,501
+Total Liabilities & Equity,mmm,501
+Total Debt,mmm,501
+Net Cash (Debt),mmm,501
+Net Cash Growth,mmm,474
+Net Cash Per Share,mmm,500
+Filing Date Shares Outstanding,mmm,500
+Total Common Shares Outstanding,mmm,500
+Working Capital,mmm,434
+Book Value Per Share,mmm,500
+Tangible Book Value,mmm,501
+Tangible Book Value Per Share,mmm,500
+Land,mmm,369
+Buildings,mmm,318
+Machinery,mmm,410
+Construction In Progress,mmm,311
+Trading Asset Securities,abt,115
+Long-Term Accounts Receivable,acn,74
+Long-Term Deferred Charges,acn,130
+Long-Term Unearned Revenue,acn,220
+Leasehold Improvements,acn,132
+Restricted Cash,amd,231
+Loans Receivable Current,aes,15
+Regulatory Assets,aes,29
+Long-Term Loans Receivable,aes,4
+Total Preferred Equity,aes,20
+Investments in Debt Securities,afl,17
+Investments in Equity & Preferred Securities,afl,19
+Policy Loans,afl,9
+Other Investments,afl,19
+Total Investments,afl,39
+Reinsurance Recoverable,afl,18
+Deferred Policy Acquisition Cost,afl,17
+Insurance & Annuity Liabilities,afl,18
+Unpaid Claims,afl,19
+Unearned Premiums,afl,19
+Total Real Estate Assets,are,8
+Investment In Debt and Equity Securities,are,17
+Deferred Long-Term Charges,are,17
+Net Cash (Debt) Growth,are,27
+Order Backlog,googl,57
+Loans & Lease Receivables,axp,1
+Interest Bearing Deposits,axp,19
+Non-Interest Bearing Deposits,axp,19
+Total Deposits,axp,19
+Separate Account Assets,aig,7
+Separate Account Liability,aig,6
+"Preferred Stock, Redeemable",aig,33
+Deferred Long-Term Tax Assets,amt,11
+Distributions in Excess of Earnings,amt,17
+Investments in Debt & Equity Securities,apo,9
+Reinsurance Payable,acgl,8
+Investment Securities,bac,18
+Mortgage-Backed Securities,bac,18
+Gross Loans,bac,18
+Allowance for Loan Losses,bac,18
+Net Loans,bac,18
+Loans Held for Sale,bac,14
+Accrued Interest Receivable,bac,16
+Other Real Estate Owned & Foreclosed,bac,15
+Short-Term Borrowings,bac,17
+"Federal Home Loan Bank Debt, Long-Term",bac,15
+Trust Preferred Securities,bac,11
+Other Adjustments to Gross Loans,bny,10
+Institutional Deposits,bny,15
+Finance Div. Loans and Leases,ba,15
+Finance Div. Loans and Leases Long-Term,ba,9
+Finance Div. Debt Current,ba,13
+Finance Div. Debt Long-Term,ba,11
+Accrued Interest Payable,cof,2
+"Preferred Stock, Other",cof,3
+Finance Div. Other Current Assets,cat,12
+Finance Div. Other Current Liabilities,cat,7
+Finance Div. Other Long-Term Liabilities,cat,7
+"Preferred Stock, Convertible",c,7
+Net Nuclear Fuel,ceg,8
+"Preferred Stock, Non-Redeemable",wfc,1

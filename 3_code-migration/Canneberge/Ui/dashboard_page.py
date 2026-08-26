@@ -109,6 +109,11 @@ def get_bold_style() -> str:
 
 
 def get_link_text_style() -> str:
+    # NOTE: no longer called anywhere in this file - _link_label()
+    # embeds color directly in its HTML anchor tag now instead of
+    # relying on this (the actual bug: QLabel rich-text anchors don't
+    # reliably respect an outer setStyleSheet color). Left in place
+    # rather than deleted, same as CALC_STYLE elsewhere in this app.
     return f"color: {theme_manager.current.link_color};"
 
 
@@ -138,14 +143,25 @@ def _hdr(text: str) -> QLabel:
 def _link_label(text: str) -> QLabel:
     """
     Creates a clickable hyperlink-style label.
+
+    NOTE: QLabel containing HTML (an <a href> tag here) renders that
+    anchor through Qt's rich-text engine, which uses its own default
+    link color for the anchor text specifically - the outer widget's
+    setStyleSheet("color: ...") does NOT reliably override that for
+    rich-text content, only for plain text. This was the actual bug
+    behind the hyperlinks showing a default system blue regardless of
+    theme - color has to be embedded directly in the HTML anchor tag
+    itself (style="color:...") instead.
     """
-    label = QLabel(f'<a href="#">{text}</a>')
-    label.setStyleSheet(get_link_text_style())
+    def _html(color: str) -> str:
+        return f'<a href="#" style="color:{color}; text-decoration:underline;">{text}</a>'
+
+    label = QLabel(_html(theme_manager.current.link_color))
     label.setTextInteractionFlags(
         Qt.TextInteractionFlag.LinksAccessibleByMouse
     )
     theme_manager.theme_changed.connect(
-        lambda _t: label.setStyleSheet(get_link_text_style())
+        lambda _t: label.setText(_html(theme_manager.current.link_color))
     )
     return label
 

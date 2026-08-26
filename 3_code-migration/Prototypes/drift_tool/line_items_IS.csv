@@ -1,0 +1,131 @@
+Line Item,Example Ticker,Seen Count
+Revenue,mmm,452
+Revenue Growth,mmm,473
+Cost of Revenue,mmm,389
+Gross Profit,mmm,393
+"Selling, General & Admin",mmm,395
+Research & Development,mmm,177
+Operating Expenses,mmm,392
+Operating Income,mmm,482
+Interest Expense,mmm,458
+Interest & Investment Income,mmm,328
+Earnings From Equity Investments,mmm,161
+EBT Excluding Unusual Items,mmm,491
+Merger & Restructuring Charges,mmm,336
+Impairment of Goodwill,mmm,99
+Gain (Loss) on Sale of Investments,mmm,301
+Gain (Loss) on Sale of Assets,mmm,277
+Legal Settlements,mmm,138
+Pretax Income,mmm,501
+Income Tax Expense,mmm,496
+Earnings From Continuing Operations,mmm,303
+Earnings From Discontinued Operations,mmm,83
+Net Income to Company,mmm,123
+Minority Interest in Earnings,mmm,279
+Net Income,mmm,501
+Net Income to Common,mmm,501
+Net Income Growth,mmm,501
+Shares Outstanding (Basic),mmm,455
+Shares Outstanding (Diluted),mmm,455
+Shares Change,mmm,500
+EPS (Basic),mmm,500
+EPS (Diluted),mmm,500
+EPS Growth,mmm,500
+Free Cash Flow,mmm,448
+Free Cash Flow Per Share,mmm,447
+Dividend Per Share,mmm,406
+Dividend Growth,mmm,406
+Gross Margin,mmm,393
+Operating Margin,mmm,452
+Profit Margin,mmm,483
+Free Cash Flow Margin,mmm,448
+EBITDA,mmm,472
+EBITDA Margin,mmm,472
+D&A For EBITDA,mmm,445
+EBIT,mmm,473
+EBIT Margin,mmm,473
+Effective Tax Rate,mmm,494
+Advertising Expenses,mmm,161
+Currency Exchange Gain (Loss),aos,237
+Other Non Operating Income (Expenses),aos,335
+Asset Writedown,aos,255
+Other Unusual Items,aos,324
+Amortization of Goodwill & Intangibles,abt,111
+Preferred Dividends & Other Adjustments,abt,152
+Other Operating Expenses,abbv,192
+Revenue as Reported,adbe,245
+Total Operating Expenses,aes,89
+Interest Income,aes,22
+Net Interest Expense,aes,31
+Income (Loss) on Equity Investments,aes,25
+Allowance for Equity Funds for Construction,aes,23
+Other Non-Operating Income (Expenses),aes,35
+Restructuring Charges,aes,10
+Insurance Settlements,aes,4
+Earnings From Continuing Ops.,aes,50
+Earnings From Discontinued Ops.,aes,13
+Premiums & Annuity Revenue,afl,21
+Total Interest & Dividend Income,afl,21
+Other Revenue,afl,122
+Total Revenue,afl,48
+Policy Benefits,afl,21
+Policy Acquisition & Underwriting Costs,afl,14
+"Selling, General & Administrative",afl,62
+Rental Revenue,are,24
+Revenue Growth (YoY,are,27
+Property Expenses,are,27
+Depreciation & Amortization,are,59
+Basic Shares Outstanding,are,45
+Diluted Shares Outstanding,are,45
+D&A For Ebitda,are,27
+Funds From Operations (FFO),are,25
+FFO Per Share,are,23
+Adjusted Funds From Operations (AFFO),are,25
+AFFO Per Share,are,23
+FFO Payout Ratio,are,20
+Fuel & Purchased Power,lnt,23
+Operations & Maintenance,lnt,27
+Operating Revenue,aep,77
+Interest and Dividend Income,axp,10
+Total Interest Expense,axp,23
+Net Interest Income,axp,28
+Commissions and Fees,axp,1
+Revenue Before Loan Losses,axp,5
+Provision for Loan Losses,axp,25
+Salaries & Employee Benefits,axp,10
+Cost of Services Provided,axp,10
+Other Non-Operating Income,amt,20
+Asset Management Fee,apo,7
+Gain on Sale of Investments (Rev),apo,7
+Interest Income on Loans,bac,18
+Total Interest Income,bac,13
+Interest Paid on Deposits,bac,18
+Net Interest Income Growth,bac,18
+Other Non-Interest Income,bac,18
+Total Non-Interest Income,bac,18
+Non-Interest Income Growth,bac,18
+Revenues Before Loan Losses,bac,18
+Salaries and Employee Benefits,bac,18
+Occupancy Expenses,bac,14
+Other Non-Interest Expense,bac,18
+Total Non-Interest Expense,bac,18
+Trading & Principal Transactions,bx,5
+Currency Exchange Gains,bx,3
+Trust Income,bny,15
+Property Management Fees,bxp,11
+Interest Income on Investments,cof,12
+Interest Paid on Borrowings,cof,12
+Income From Trading Activities,c,4
+Mortgage Banking Activities,cfg,11
+Allowance for Borrowed Funds for Construction,cms,7
+Total Merger & Restructuring Charges,ceg,5
+Total Legal Settlements,ess,4
+Gain (Loss) on Sale of Equity Investments,fitb,2
+Brokerage Commission,gs,6
+Underwriting & Investment Banking Fee,gs,3
+Total Insurance Settlements,doc,5
+Federal Deposit Insurance,hban,3
+Non-Insurance Activities Revenue,l,3
+Non-Insurance Activities Expense,l,3
+Provision for Bad Debts,nrg,1
+Gain (Loss) on Sale of Assets (Rev),spg,1

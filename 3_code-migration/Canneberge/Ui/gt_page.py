@@ -74,6 +74,11 @@ def get_section_header_style() -> str:
 
 
 def get_link_text_style() -> str:
+    # NOTE: no longer called - chart_link now embeds color directly
+    # in its HTML anchor via _chart_link_html() instead (the actual
+    # fix for QLabel rich-text anchors ignoring an outer stylesheet,
+    # same as gpc_page.py's identical fix). Left in place rather than
+    # deleted, same as CALC_STYLE below.
     return f"color: {theme_manager.current.link_color};"
 
 
@@ -189,7 +194,7 @@ class GTPage(QWidget):
         self.lbl_subject.setStyleSheet(get_bold_style())
         self.lbl_method.setStyleSheet(get_bold_style())
         self.lbl_date.setStyleSheet(get_bold_style())
-        self.chart_link.setStyleSheet(get_link_text_style())
+        self.chart_link.setText(self._chart_link_html())
 
         self.num_multiples_spin.setStyleSheet(get_input_style())
         self.dloc_input.setStyleSheet(get_grey_disabled_style())
@@ -278,11 +283,17 @@ class GTPage(QWidget):
         self._current_row += 1
 
         r = self._current_row
-        self.chart_link = QLabel('<a href="#">GT Multiples Range Chart →</a>')
-        self.chart_link.setStyleSheet(get_link_text_style())
+        self.chart_link = QLabel(self._chart_link_html())
         self.chart_link.linkActivated.connect(self._on_chart_link_clicked)
         self.grid.addWidget(self.chart_link, r, COL_M1, 1, 2)
         self._current_row += 1
+
+    def _chart_link_html(self) -> str:
+        color = theme_manager.current.link_color
+        return (
+            f'<a href="#" style="color:{color}; text-decoration:underline;">'
+            f'GT Multiples Range Chart →</a>'
+        )
 
     def _on_chart_link_clicked(self, _href=None):
         first_open = self._chart_dialog is None

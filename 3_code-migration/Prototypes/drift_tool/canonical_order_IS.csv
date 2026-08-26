@@ -1,0 +1,104 @@
+Line Item,Zone Start,Zone End,Avg Position,Confidence,Observations
+EPS Growth,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.068,1.0,451
+Free Cash Flow,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.125,1.0,433
+Free Cash Flow Per Share,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.188,1.0,433
+Dividend Per Share,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.254,1.0,359
+Dividend Growth,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.322,1.0,359
+Gross Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.337,1.0,392
+Operating Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.402,1.0,402
+Profit Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.46,1.0,433
+Free Cash Flow Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.523,1.0,433
+EBITDA,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.579,1.0,423
+EBITDA Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.641,1.0,423
+D&A For EBITDA,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.703,1.0,423
+EBIT,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.765,1.0,423
+EBIT Margin,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.826,1.0,423
+Effective Tax Rate,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.884,1.0,449
+Revenue as Reported,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.918,1.0,199
+Advertising Expenses,EPS (Diluted),__BOTTOM_OF_STATEMENT__,0.94,1.0,161
+"Selling, General & Admin",Gross Profit,Operating Income,0.25,0.969,288
+Research & Development,Gross Profit,Operating Income,0.441,1.0,164
+Amortization of Goodwill & Intangibles,Gross Profit,Operating Income,0.544,0.913,92
+Other Operating Expenses,Gross Profit,Operating Income,0.575,0.694,111
+Operating Expenses,Gross Profit,Operating Income,0.75,1.0,280
+Preferred Dividends & Other Adjustments,Net Income,EPS (Diluted),0.125,1.0,125
+Net Income to Common,Net Income,EPS (Diluted),0.173,1.0,451
+Net Income Growth,Net Income,EPS (Diluted),0.31,1.0,451
+Shares Outstanding (Basic),Net Income,EPS (Diluted),0.446,1.0,433
+Basic Shares Outstanding,Net Income,EPS (Diluted),0.5,1.0,18
+Shares Outstanding (Diluted),Net Income,EPS (Diluted),0.585,1.0,433
+Diluted Shares Outstanding,Net Income,EPS (Diluted),0.625,1.0,18
+Shares Change,Net Income,EPS (Diluted),0.724,1.0,451
+EPS (Basic),Net Income,EPS (Diluted),0.862,1.0,451
+Interest Expense,Operating Income,Pretax Income,0.116,1.0,397
+Interest Income,Operating Income,Pretax Income,0.197,1.0,21
+Interest & Investment Income,Operating Income,Pretax Income,0.225,1.0,298
+Currency Exchange Gains,Operating Income,Pretax Income,0.244,1.0,3
+Net Interest Expense,Operating Income,Pretax Income,0.267,1.0,30
+Earnings From Equity Investments,Operating Income,Pretax Income,0.274,1.0,151
+Currency Exchange Gain (Loss),Operating Income,Pretax Income,0.327,1.0,211
+Income (Loss) on Equity Investments,Operating Income,Pretax Income,0.337,1.0,18
+Other Non Operating Income (Expenses),Operating Income,Pretax Income,0.402,1.0,316
+Allowance for Equity Funds for Construction,Operating Income,Pretax Income,0.422,1.0,23
+Allowance for Borrowed Funds for Construction,Operating Income,Pretax Income,0.491,1.0,7
+Other Non-Operating Income (Expenses),Operating Income,Pretax Income,0.492,1.0,34
+EBT Excluding Unusual Items,Operating Income,Pretax Income,0.509,0.96,429
+Merger & Restructuring Charges,Operating Income,Pretax Income,0.588,1.0,303
+Restructuring Charges,Operating Income,Pretax Income,0.601,1.0,10
+Impairment of Goodwill,Operating Income,Pretax Income,0.609,1.0,90
+Total Merger & Restructuring Charges,Operating Income,Pretax Income,0.637,1.0,4
+Gain (Loss) on Sale of Investments,Operating Income,Pretax Income,0.692,0.937,254
+Gain (Loss) on Sale of Assets,Operating Income,Pretax Income,0.739,0.979,237
+Asset Writedown,Operating Income,Pretax Income,0.801,0.991,218
+Insurance Settlements,Operating Income,Pretax Income,0.829,1.0,3
+Legal Settlements,Operating Income,Pretax Income,0.83,0.968,126
+Other Unusual Items,Operating Income,Pretax Income,0.894,0.968,279
+Income Tax Expense,Pretax Income,Net Income,0.321,1.0,452
+Earnings From Continuing Ops.,Pretax Income,Net Income,0.47,1.0,33
+Earnings From Continuing Operations,Pretax Income,Net Income,0.474,1.0,275
+Earnings From Discontinued Ops.,Pretax Income,Net Income,0.556,1.0,9
+Earnings From Discontinued Operations,Pretax Income,Net Income,0.566,1.0,80
+Net Income to Company,Pretax Income,Net Income,0.65,1.0,109
+Minority Interest in Earnings,Pretax Income,Net Income,0.78,1.0,240
+Revenue Growth,Revenue,Gross Profit,0.335,0.876,437
+Cost of Revenue,Revenue,Gross Profit,0.667,1.0,379
+Fuel & Purchased Power,Revenue,Operating Income,0.281,1.0,23
+Salaries & Employee Benefits,Revenue,Operating Income,0.367,1.0,6
+Operations & Maintenance,Revenue,Operating Income,0.396,1.0,27
+Cost of Services Provided,Revenue,Operating Income,0.55,1.0,6
+Depreciation & Amortization,Revenue,Operating Income,0.561,1.0,30
+Provision for Bad Debts,Revenue,Operating Income,0.571,1.0,1
+Total Operating Expenses,Revenue,Operating Income,0.849,1.0,37
+Salaries and Employee Benefits,Revenue,Pretax Income,0.217,1.0,17
+Occupancy Expenses,Revenue,Pretax Income,0.318,1.0,14
+Federal Deposit Insurance,Revenue,Pretax Income,0.378,1.0,3
+"Selling, General & Administrative",Revenue,Pretax Income,0.474,1.0,17
+Other Non-Interest Expense,Revenue,Pretax Income,0.582,1.0,17
+Total Non-Interest Expense,Revenue,Pretax Income,0.691,1.0,17
+Interest Income on Loans,__TOP_OF_STATEMENT__,Revenue,0.065,1.0,18
+Interest Income on Investments,__TOP_OF_STATEMENT__,Revenue,0.118,1.0,12
+Interest and Dividend Income,__TOP_OF_STATEMENT__,Revenue,0.122,1.0,10
+Total Interest Income,__TOP_OF_STATEMENT__,Revenue,0.175,1.0,13
+Interest Paid on Deposits,__TOP_OF_STATEMENT__,Revenue,0.213,1.0,18
+Interest Paid on Borrowings,__TOP_OF_STATEMENT__,Revenue,0.294,1.0,12
+Total Interest Expense,__TOP_OF_STATEMENT__,Revenue,0.304,1.0,23
+Operating Revenue,__TOP_OF_STATEMENT__,Revenue,0.355,1.0,77
+Net Interest Income,__TOP_OF_STATEMENT__,Revenue,0.363,1.0,28
+Net Interest Income Growth,__TOP_OF_STATEMENT__,Revenue,0.426,1.0,18
+Brokerage Commission,__TOP_OF_STATEMENT__,Revenue,0.467,1.0,6
+Trading & Principal Transactions,__TOP_OF_STATEMENT__,Revenue,0.47,1.0,5
+Trust Income,__TOP_OF_STATEMENT__,Revenue,0.473,1.0,15
+Commissions and Fees,__TOP_OF_STATEMENT__,Revenue,0.5,1.0,1
+Income From Trading Activities,__TOP_OF_STATEMENT__,Revenue,0.523,1.0,4
+Mortgage Banking Activities,__TOP_OF_STATEMENT__,Revenue,0.557,1.0,11
+Asset Management Fee,__TOP_OF_STATEMENT__,Revenue,0.581,1.0,7
+Underwriting & Investment Banking Fee,__TOP_OF_STATEMENT__,Revenue,0.622,1.0,3
+Other Non-Interest Income,__TOP_OF_STATEMENT__,Revenue,0.675,1.0,18
+Other Revenue,__TOP_OF_STATEMENT__,Revenue,0.678,1.0,76
+Gain (Loss) on Sale of Equity Investments,__TOP_OF_STATEMENT__,Revenue,0.692,1.0,2
+Gain on Sale of Investments (Rev),__TOP_OF_STATEMENT__,Revenue,0.719,1.0,7
+Total Non-Interest Income,__TOP_OF_STATEMENT__,Revenue,0.74,1.0,18
+Non-Interest Income Growth,__TOP_OF_STATEMENT__,Revenue,0.805,1.0,18
+Revenue Before Loan Losses,__TOP_OF_STATEMENT__,Revenue,0.821,1.0,5
+Revenues Before Loan Losses,__TOP_OF_STATEMENT__,Revenue,0.87,1.0,18
+Provision for Loan Losses,__TOP_OF_STATEMENT__,Revenue,0.929,1.0,22

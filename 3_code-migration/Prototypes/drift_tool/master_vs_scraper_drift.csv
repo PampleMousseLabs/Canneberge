@@ -1,0 +1,5 @@
+Statement,Drift Type,Master Label,Current Label,Similarity Score,Details
+Ratios,NEW_ON_WEBSITE,,Market Capitalization,1.0,Current 503-ticker scrape contains a label not present in the compiled master.
+Ratios,NEW_ON_WEBSITE,,PE Ratio,1.0,Current 503-ticker scrape contains a label not present in the compiled master.
+Ratios,MISSING_FROM_WEBSITE,Market Cap,,1.0,Compiled master contains a label not found anywhere in the current 503-ticker scrape.
+Ratios,POSSIBLE_RENAME,Market Cap,Market Capitalization,0.645,Possible label rename; manual review required.
