@@ -1268,18 +1268,12 @@ class DCFPage(QWidget):
             capex_pct = (abs(capex_ttm)/rev_ttm) if capex_ttm and rev_ttm else None
 
             # NWC % from BS
-            bs_keys = {
-                "total_current_assets": "total current assets",
-                "total_current_liab": "total current liabilities",
-                "current_ltd": "current portion of long-term debt",
-                "st_debt": "short-term debt",
-                "current_leases": "current portion of leases",
-                "cash": "cash & equivalents",
-            }
+            nwc_keys = ["total_current_assets", "total_current_liab",
+            "current_ltd", "st_debt", "current_leases", "cash"]
             bs = {}
-            for k,v in bs_keys.items():
+            for k in nwc_keys:
                 try:
-                    bs[k] = self._get_subject_financials(v, "LFY")
+                    bs[k] = self._get_subject_financials(k, "LFY")
                 except:
                     bs[k] = None
             try:

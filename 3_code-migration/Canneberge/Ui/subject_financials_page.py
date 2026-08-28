@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from Canneberge.Transforms.sa_key import get_sa_labels, get_sa_source, get_sign_flip
+from Canneberge.utils.sa_utils import build_lookup, to_float
 from Canneberge.Calculations.subject_is_bs_calc import (
     compute_is_calculated,
     compute_bs_calculated,
@@ -90,74 +92,6 @@ def _parse_val(value) -> Optional[float]:
         return v
     except (ValueError, TypeError):
         return None
-
-
-# Map our IS/BS keys to StockAnalysis line item names
-SA_KEY_MAP = {
-    "revenue": "revenue",
-    "cogs": "cost of revenue",
-    "gross_profit": "gross profit",
-    "sga": "selling, general & admin",
-    "rd": "research & development",
-    "other_operating": "other operating expenses",
-    "operating_expenses": "total operating expenses",
-    "ebitda": "ebitda",
-    "d&a_for_ebitda": "d&a for ebitda",
-    "ebit": "ebit",
-    "interest_expense": "interest expense",
-    "interest_income": "interest income",
-    "other_income": "other non-operating income (expense)",
-    "pretax_income": "pretax income",
-    "taxes": "provision for income taxes",
-    "net_income": "net income",
-    "capex": "capital expenditures",
-    "acquisitions": "cash acquisitions",
-    "cash": "cash & equivalents",
-    "st_investments": "short-term investments",
-    "accounts_receivable": "accounts receivable",
-    "receivables": "receivables",
-    "other_receivables": "other receivables",
-    "inventory": "inventory",
-    "prepaid_expenses": "prepaid expenses",
-    "other_current_assets": "other current assets",
-    "total_current_assets": "total current assets",
-    "ppe": "net property, plant & equipment",
-    "goodwill": "goodwill",
-    "intangible_assets": "other intangible assets",
-    "lt_investments": "long-term investments",
-    "other_lt_assets": "other long-term assets",
-    "total_assets": "total assets",
-    "st_debt": "short-term debt",
-    "current_ltd": "current portion of long-term debt",
-    "current_leases": "current portion of leases",
-    "accounts_payable": "accounts payable",
-    "accrued_expenses": "accrued expenses",
-    "unearned_revenue": "unearned revenue",
-    "other_current_liab": "other current liabilities",
-    "total_current_liab": "total current liabilities",
-    "lt_debt": "long-term debt",
-    "lt_leases": "long-term leases",
-    "lt_operating_leases": "long term portion of operating leases",
-    "other_lt_liab": "other long-term liabilities",
-    "total_liabilities": "total liabilities",
-    "preferred_stock": "preferred stock",
-    "common_stock": "common stock",
-    "apic": "additional paid-in capital",
-    "treasury_stock": "treasury stock",
-    "aoci": "accumulated other comprehensive income",
-    "minority_interest": "minority interest",
-    "retained_earnings": "retained earnings",
-    "placeholder2": "",  # no public equivalent; private-input only
-    "placeholder": "",   # demo row only; no public equivalent, always shows "-"
-    "total_equity": "shareholders' equity",
-    "total_liab_equity": "total liabilities & equity",
-}
-
-# These two IS_LINES keys are sourced from StockAnalysis's CFS statement,
-# not IS, so they need a separate lookup pass against results.get("CFS", []),
-# and are sign-flipped from source (StockAnalysis shows outflows negative;
-# Subject Financials displays them as positive expense-style lines).
-CFS_SOURCED_KEYS = {"capex", "acquisitions"}
 
 
 class SubjectFinancialsPage(QWidget):
@@ -287,14 +221,8 @@ class SubjectFinancialsPage(QWidget):
             }
         return lookup
 
-    def _gather_raw_public(self, lines, periods, lookup, ticker: str = "") -> Dict[str, Dict[str, Optional[float]]]:
-        """Raw (non-calc) values per period, from StockAnalysis rows.
-        BS_DIRECT_PULL_KEYS are pulled here too even though is_calc=True,
-        since those four are direct SA pulls, not local sums.
-        CFS_SOURCED_KEYS (capex, acquisitions) are pulled from a separate
-        CFS lookup and sign-flipped, since StockAnalysis reports them as
-        negative outflows in that statement."""
-        raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
+    def _gather_raw_public(self, lines, periods, lookup, ticker: str = ""):
+        raw_by_period = {p: {} for p in periods}
         cfs_lookup = (
             self._build_cfs_lookup(ticker)
             if ticker and self._current_statement == "IS"
@@ -303,16 +231,21 @@ class SubjectFinancialsPage(QWidget):
         for key, label, is_calc, bold in lines:
             if is_calc and not (self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS):
                 continue
-            sa_key = SA_KEY_MAP.get(key, "").lower()
-            if key in CFS_SOURCED_KEYS:
-                row_data = cfs_lookup.get(sa_key, {})
-                for period in periods:
-                    v = _parse_val(row_data.get(period, ""))
-                    raw_by_period[period][key] = -v if v is not None else None
-                continue
-            row_data = lookup.get(sa_key, {})
+            sa_source = get_sa_source(key)
+            sa_labels = get_sa_labels(key)
+            sign_flip = get_sign_flip(key)
+            source_lookup = cfs_lookup if sa_source == "CFS" else lookup
+            row_data = {}
+            for sa_label in sa_labels:
+                candidate = source_lookup.get(sa_label, {})
+                if candidate:
+                    row_data = candidate
+                    break
             for period in periods:
-                raw_by_period[period][key] = _parse_val(row_data.get(period, ""))
+                v = _parse_val(row_data.get(period, ""))
+                if v is not None and sign_flip:
+                    v = -v
+                raw_by_period[period][key] = v
         return raw_by_period
 
     def _gather_raw_private(self, lines, periods, pf) -> Dict[str, Dict[str, Optional[float]]]:
@@ -349,8 +282,31 @@ class SubjectFinancialsPage(QWidget):
             grid.setColumnMinimumWidth(i + 1, 90)
 
     def _build_rows(self, grid, lines, periods, raw_by_period, calc_by_period):
-        for row_idx, (key, label, is_calc, bold) in enumerate(lines):
-            row = row_idx + 1
+        # Periods that decide "empty": historical + TTM, not projections
+        # (the BS is never projected, so NFY/NFY+1 are always blank and
+        # must not force every component row to hide).
+        inputs = self.get_project_inputs()
+        check_periods = [
+            p for p in periods
+            if p in inputs.historical_period_columns or p == "TTM"
+        ] or list(periods)
+
+        display_row = 1
+        for key, label, is_calc, bold in lines:
+            # Auto-hide non-bold component rows that are empty across all
+            # historical/TTM periods. Bold rows (subtotals/totals) always show.
+            if not bold:
+                has_val = False
+                for period in check_periods:
+                    if self._resolve_value(key, is_calc, period, raw_by_period, calc_by_period) is not None:
+                        has_val = True
+                        break
+                if not has_val:
+                    continue
+
+            row = display_row
+            display_row += 1
+
             name_lbl = QLabel(label)
             if bold:
                 name_lbl.setStyleSheet(get_bold_style())
@@ -503,7 +459,6 @@ class SubjectFinancialsPage(QWidget):
         return hist + forward
 
     def get_subject_debt(self) -> float:
-        """Helper for GT page."""
         inputs = self.get_project_inputs()
         res = 0.0
         keys = ["st_debt", "current_ltd", "lt_debt"]
@@ -514,14 +469,15 @@ class SubjectFinancialsPage(QWidget):
         else:
             sa = self.get_stockanalysis_results().get("BS", [])
             tick = inputs.subject_ticker.lower()
+            bs_lookup = build_lookup(sa, tick)
             for k in keys:
-                sa_key = SA_KEY_MAP.get(k)
-                for r in sa:
-                    if str(r.get("Ticker")).lower() == tick and str(r.get("Line Item")).lower() == sa_key:
-                        try:
-                            res += float(str(r.get("TTM")).replace(",", ""))
-                        except Exception:
-                            pass
+                for sa_label in get_sa_labels(k):
+                    row_data = bs_lookup.get(sa_label, {})
+                    if row_data:
+                        v = to_float(row_data.get("TTM"))
+                        if v is not None:
+                            res += v
+                        break
         return res
 
     def get_historical_line_values(self, key: str, statement: str = "IS") -> Dict[str, Optional[float]]:
@@ -552,16 +508,21 @@ class SubjectFinancialsPage(QWidget):
             for k2, l2, c2, b2 in lines:
                 if c2 and not (statement == "BS" and k2 in BS_DIRECT_PULL_KEYS):
                     continue
-                sa_key = SA_KEY_MAP.get(k2, "").lower()
-                if k2 in CFS_SOURCED_KEYS:
-                    row_data = cfs_lookup.get(sa_key, {})
-                    for period in periods:
-                        v = _parse_val(row_data.get(period, ""))
-                        raw_by_period[period][k2] = -v if v is not None else None
-                    continue
-                row_data = lookup.get(sa_key, {})
+                sa_source = get_sa_source(k2)
+                sa_labels = get_sa_labels(k2)
+                sign_flip = get_sign_flip(k2)
+                source_lookup = cfs_lookup if sa_source == "CFS" else lookup
+                row_data = {}
+                for sa_label in sa_labels:
+                    candidate = source_lookup.get(sa_label, {})
+                    if candidate:
+                        row_data = candidate
+                        break
                 for period in periods:
-                    raw_by_period[period][k2] = _parse_val(row_data.get(period, ""))
+                    v = _parse_val(row_data.get(period, ""))
+                    if v is not None and sign_flip:
+                        v = -v
+                    raw_by_period[period][k2] = v
         else:
             pf = self.get_private_financials()
             for k2, l2, c2, b2 in lines:
@@ -639,3 +600,69 @@ class SubjectFinancialsPage(QWidget):
             return None
 
         return None
+
+    def _append_additional_metrics(self, container, grid, raw_by_period, calc_by_period, periods):
+        metric_keys = [
+            "land", "buildings", "machinery",
+            "construction_in_progress", "leasehold_improvements",
+            "total_debt", "net_cash_debt", "net_cash_growth",
+            "net_cash_debt_growth", "net_cash_per_share",
+            "filing_date_shares_outstanding",
+            "total_common_shares_outstanding",
+            "working_capital", "book_value_per_share",
+            "tangible_book_value", "tangible_book_value_per_share",
+            "order_backlog", "cash_growth",
+        ]
+        # Only render if at least one metric has a value in at least one period
+        has_any = False
+        for key in metric_keys:
+            for p in periods:
+                val = self._resolve_value(
+                    key, False, p, raw_by_period, calc_by_period
+                )
+                if val is not None:
+                    has_any = True
+                    break
+            if has_any:
+                break
+
+        if not has_any:
+            return
+
+        # Insert after existing grid by rebuilding container layout
+        # Since container is already set with grid, easiest is to add
+        # a separator + new subsection grid below the existing one.
+        # But container uses single grid layout already.
+        # Instead, add rows directly to existing grid at bottom.
+        # Find next available row.
+        start_row = len(lines) + 2  # after header + rows + spacer
+
+        # Section header
+        hdr = QLabel("Additional Metrics", styleSheet=get_header_style())
+        hdr.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(hdr, start_row, 0, 1, len(periods) + 1)
+
+        r = start_row + 1
+        for key in metric_keys:
+            label = next((l for k, l, *_ in BS_LINES if k == key), key.replace("_", " ").title())
+            # Build row only if at least one period has data (respects hide-empty)
+            row_has = False
+            for p in periods:
+                val = self._resolve_value(key, False, p, raw_by_period, calc_by_period)
+                if val is not None:
+                    row_has = True
+                    break
+            if not row_has:
+                continue
+
+            lbl_row = QLabel(label)
+            lbl_row.setStyleSheet(get_bold_style() if key in ("land","buildings","machine","ppe") else "")
+            # For simplicity, show all as regular weight
+            grid.addWidget(lbl_row, r, 0)
+
+            for idx, p in enumerate(periods):
+                val = self._resolve_value(key, False, p, raw_by_period, calc_by_period)
+                val_lbl = QLabel(_fmt(val) if val is not None else "-")
+                val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                grid.addWidget(val_lbl, r, idx + 1)
+            r += 1

@@ -71,7 +71,9 @@ from Canneberge.Ui.dcf_page import (
     _fmt_currency, _fmt_pct, _safe_div, _sub_strict as _sub, _mul_strict as _mul,
     _parse_label_as_float, _read_label,
 )
-from Canneberge.Ui.subject_financials_page import SA_KEY_MAP, _parse_val
+from Canneberge.Transforms.sa_key import get_sa_label
+from Canneberge.utils.sa_utils import build_lookup, to_float
+from Canneberge.Ui.subject_financials_page import _parse_val
 
 
 def get_bold_style() -> str:
@@ -115,18 +117,22 @@ def get_excluded_row_style() -> str:
 def get_included_row_style() -> str:
     return f"color: {theme_manager.current.default_text};"
 
-# Current Asset / Current Liability candidate keys — these are
-# literally BS_LINES' own current-asset and current-liability
-# sections (7 rows each, not a coincidence with "up to 7" in the spec
-# — that's the full schema StockAnalysis's BS scrape has for each).
 CA_CANDIDATES = [
-    "cash", "st_investments", "accounts_receivable", "receivables",
-    "other_receivables", "inventory", "other_current_assets", "prepaid_expenses",
+    "cash", "st_investments", "trading_asset_securities",
+    "cash_short_term_investments", "accounts_receivable", "other_receivables",
+    "receivables", "finance_div_loans_and_leases", "inventory",
+    "finance_div_other_current_assets", "prepaid_expenses",
+    "loans_receivable_current", "restricted_cash", "other_current_assets",
 ]
 CL_CANDIDATES = [
-    "st_debt", "current_ltd", "current_leases", "accounts_payable",
-    "accrued_expenses", "unearned_revenue", "other_current_liab",
+    "accounts_payable", "accrued_expenses", "st_debt", "current_ltd",
+    "current_leases", "finance_div_debt_current",
+    "finance_div_other_current_liabilities", "current_income_taxes_payable",
+    "unearned_revenue", "other_current_liab",
 ]
+
+CA_MAX_ROWS = len(CA_CANDIDATES)
+CL_MAX_ROWS = len(CL_CANDIDATES)
 
 CASH_KEYS = {"cash"}
 DEBT_KEYS = {"st_debt", "current_ltd", "current_leases"}
@@ -135,6 +141,8 @@ _BS_LABEL_BY_KEY = {k: label for k, label, *_r in BS_LINES}
 
 CA_DEFAULT_SELECTIONS = ["cash", "accounts_receivable", "inventory", "other_current_assets", "", "", ""]
 CL_DEFAULT_SELECTIONS = ["accounts_payable", "other_current_liab", "", "", "", "", ""]
+CA_DEFAULT_ROWS = 7
+CL_DEFAULT_ROWS = 7
 
 # GPC NWC formula inputs, expressed as IS/BS keys so the actual
 # StockAnalysis label strings come from SA_KEY_MAP (single source of
@@ -147,6 +155,8 @@ GPC_NWC_KEYS = {
     "std":   "st_debt",                # Short-Term Debt             (BS)
     "cpl":   "current_leases",         # Current Portion of Leases   (BS)
     "cash":  "cash",                   # Cash & Equivalents          (BS)
+    "st_inv": "st_investments",        # Short-Term Investments      (BS)
+    "cash_sti": "cash_short_term_investments",  # Cash & ST Inv.     (BS)
     "rev":   "revenue",                # Revenue                     (IS)
 }
 
@@ -156,7 +166,15 @@ GPC_NWC_KEYS = {
 
 
 def _fmt_ca_cl_option(key: str) -> str:
-    return _BS_LABEL_BY_KEY.get(key, key)
+    app_label = _BS_LABEL_BY_KEY.get(key)
+    if app_label:
+        return app_label
+
+    sa_label = get_sa_label(key)
+    if sa_label:
+        return sa_label.title()
+
+    return key.replace("_", " ").title()
 
 
 class NWCPage(QWidget):
@@ -183,6 +201,7 @@ class NWCPage(QWidget):
         self._cl_combos: List[QComboBox] = []
         self._ca_value_labels: List[Dict[int, QLabel]] = []
         self._cl_value_labels: List[Dict[int, QLabel]] = []
+        self._ca_cl_buttons: List = []
 
         self.table_container = None
         self._built_hist_years = None
@@ -198,6 +217,8 @@ class NWCPage(QWidget):
         # Preserve CA/CL combo selections across table rebuilds.
         self._saved_ca_selections: List[str] = []
         self._saved_cl_selections: List[str] = []
+        self._ca_row_count = CA_DEFAULT_ROWS
+        self._cl_row_count = CL_DEFAULT_ROWS
 
         # Prevent combo signals from causing _recalculate() while the
         # table is being destroyed/rebuilt.
@@ -215,6 +236,14 @@ class NWCPage(QWidget):
         # Raw Change in NWC values by period. DCF reads these through
         # get_changes_in_nwc(), rather than parsing displayed labels.
         self._changes_in_nwc_by_period: Dict[str, Optional[float]] = {}
+
+        # Historical NWC ($), Revenue ($), and NWC % of revenue series
+        # for the combo chart.
+        self._chart_nwc_by_period: Dict[str, Optional[float]] = {}
+        self._chart_revenue_by_period: Dict[str, Optional[float]] = {}
+        self._chart_nwc_pct_by_period: Dict[str, Optional[float]] = {}
+        # {ticker: {"nwc": {period: val}, "rev": {...}, "pct": {...}}}
+        self._chart_gpc_series: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
 
         # Set by MainWindow after both NWCPage and DCFPage exist.
         # Lets NWC refresh DCF whenever an NWC input changes.
@@ -236,6 +265,8 @@ class NWCPage(QWidget):
             self.lbl_client_header.setStyleSheet(get_bold_style())
         if hasattr(self, "lbl_gpc_section_title"):
             self.lbl_gpc_section_title.setStyleSheet(get_header_style())
+        if hasattr(self, "lbl_nwc_chart_title"):
+            self.lbl_nwc_chart_title.setStyleSheet(get_header_style())
         for lbl in getattr(self, "_gpc_col_headers", []):
             lbl.setStyleSheet(get_bold_style())
         for lbl in getattr(self, "_gpc_stat_row_labels", []):
@@ -254,6 +285,12 @@ class NWCPage(QWidget):
         self.cash_treatment_combo.setStyleSheet(get_input_style())
         self.nwc_basis_combo.setStyleSheet(get_input_style())
         self.selected_nwc_pct_input.setStyleSheet(get_input_style())
+        self.hist_years_spin.setStyleSheet(get_input_style())
+        self.proj_years_spin.setStyleSheet(get_input_style())
+        if hasattr(self, "chart_entity_combo"):
+            self.chart_entity_combo.setStyleSheet(get_input_style())
+        for b in getattr(self, "_ca_cl_buttons", []):
+            b.setStyleSheet(get_input_style())
         for combo in self._ca_combos:
             combo.setStyleSheet(get_input_style())
         for combo in self._cl_combos:
@@ -307,8 +344,22 @@ class NWCPage(QWidget):
         # Remember exactly where the GPC section belongs so it can be
         # replaced in-place if the Home-page GPC ticker list changes.
         self._gpc_section_insert_index = self.page_layout.count()
+
+        # GPC section (left, fixed width so its period columns stay
+        # aligned with the subject table above) + combo chart (right,
+        # absorbs remaining width).
+        self._gpc_chart_row = QWidget()
+        self._gpc_chart_hbox = QHBoxLayout(self._gpc_chart_row)
+        self._gpc_chart_hbox.setContentsMargins(0, 0, 0, 0)
+        self._gpc_chart_hbox.setSpacing(12)
+
         self.gpc_section = self._build_gpc_section()
-        self.page_layout.addWidget(self.gpc_section)
+        self._gpc_chart_hbox.addWidget(self.gpc_section, 0)
+
+        self.nwc_chart_section = self._build_nwc_chart_section()
+        self._gpc_chart_hbox.addWidget(self.nwc_chart_section, 1)
+
+        self.page_layout.addWidget(self._gpc_chart_row)
 
         self.page_layout.addStretch(1)
         self.page_container.setLayout(self.page_layout)
@@ -337,6 +388,7 @@ class NWCPage(QWidget):
         self.hist_years_spin = QSpinBox()
         self.hist_years_spin.setRange(1, 5)
         self.hist_years_spin.setValue(self._nwc_historical_years)
+        self.hist_years_spin.setStyleSheet(get_input_style())
         self.hist_years_spin.valueChanged.connect(self._on_hist_years_changed)
         controls.addWidget(self.hist_years_spin)
 
@@ -345,6 +397,7 @@ class NWCPage(QWidget):
         self.proj_years_spin = QSpinBox()
         self.proj_years_spin.setRange(1, 15)
         self.proj_years_spin.setValue(inputs.projection_years)
+        self.proj_years_spin.setStyleSheet(get_input_style())
         self.proj_years_spin.valueChanged.connect(self._on_proj_years_changed)
         controls.addWidget(self.proj_years_spin)
 
@@ -421,72 +474,60 @@ class NWCPage(QWidget):
             return None
         return self._get_subject_financials(key, period)
 
-    def _build_gpc_lookup(self, statement: str, ticker: str) -> Dict[str, Dict[str, str]]:
-        """{sa_label: {period: raw_string}} for one ticker's statement.
-        Same construction Subject Financials uses in _build_public_view:
-        filter results[statement] by the 'Ticker' column, then key each
-        row by its lowercased 'Line Item'."""
+    def _build_gpc_lookup(self, statement: str, ticker: str):
         results = self._get_stockanalysis_results() or {}
         rows = results.get(statement, [])
-        tick = ticker.lower()
-        lookup: Dict[str, Dict[str, str]] = {}
-        for row in rows:
-            if str(row.get("Ticker", "")).lower() != tick:
-                continue
-            line = str(row.get("Line Item", "")).strip().lower()
-            lookup[line] = {
-                k: v for k, v in row.items()
-                if k not in ("Ticker", "Key", "Line Item")
-            }
-        return lookup
+        return build_lookup(rows, ticker)
 
-    def _gpc_nwc_pct(self, ticker: str, period: str, exclude_cash: bool) -> Optional[float]:
-        """DFNWC% or DFCFNWC% for one GPC in one historical period.
+    def _gpc_nwc_parts(self, ticker: str, period: str, exclude_cash: bool):
+        """
+        Returns (nwc_dollars, revenue, nwc_pct) for one GPC/period.
+        (None, None, None) if the required inputs aren't available.
 
         DFNWC   = TCA - [TCL - CPLTD - STD - CPL]
-        DFCFNWC = (TCA - Cash) - [TCL - CPLTD - STD - CPL]
-        % of Revenue = the above / Revenue
-
-        Which one is returned depends on NWC Cash Treatment:
-          Excluding Cash -> DFCFNWC %   (cash removed from assets)
-          Including Cash -> DFNWC %
+        DFCFNWC = (TCA - cash bucket) - [TCL - CPLTD - STD - CPL]
         """
         bs = self._build_gpc_lookup("BS", ticker)
         is_ = self._build_gpc_lookup("IS", ticker)
 
         def bs_val(field_key: str) -> Optional[float]:
-            sa_label = SA_KEY_MAP.get(GPC_NWC_KEYS[field_key], "").lower()
+            sa_label = get_sa_label(GPC_NWC_KEYS[field_key])
             return _parse_val(bs.get(sa_label, {}).get(period, ""))
 
         def is_val(field_key: str) -> Optional[float]:
-            sa_label = SA_KEY_MAP.get(GPC_NWC_KEYS[field_key], "").lower()
+            sa_label = get_sa_label(GPC_NWC_KEYS[field_key])
             return _parse_val(is_.get(sa_label, {}).get(period, ""))
 
         tca = bs_val("tca")
         tcl = bs_val("tcl")
         rev = is_val("rev")
 
-        # Need both current-asset/-liability totals and a nonzero
-        # revenue denominator, else the ratio is undefined.
         if tca is None or tcl is None or not rev:
-            return None
+            return None, None, None
 
-        # Debt/lease pieces are optional (many tickers don't report
-        # every line) — treat missing as 0 so their absence just means
-        # "no adjustment," not "whole ratio undefined."
         debt_free_cl = (
             tcl
             - (bs_val("cpltd") or 0.0)
-            - (bs_val("std")   or 0.0)
-            - (bs_val("cpl")   or 0.0)
+            - (bs_val("std") or 0.0)
+            - (bs_val("cpl") or 0.0)
         )
 
         if exclude_cash:
-            nwc = (tca - (bs_val("cash") or 0.0)) - debt_free_cl   # DFCFNWC
+            # "Cash & Short-Term Investments" is a SUBTOTAL of the rows
+            # above it. Prefer it when present; else sum the components.
+            cash_sti = bs_val("cash_sti")
+            if cash_sti is not None:
+                cash_bucket = cash_sti
+            else:
+                cash_bucket = (bs_val("cash") or 0.0) + (bs_val("st_inv") or 0.0)
+            nwc = (tca - cash_bucket) - debt_free_cl   # DFCFNWC
         else:
-            nwc = tca - debt_free_cl                               # DFNWC
+            nwc = tca - debt_free_cl                   # DFNWC
 
-        return nwc / rev
+        return nwc, rev, nwc / rev
+
+    def _gpc_nwc_pct(self, ticker: str, period: str, exclude_cash: bool) -> Optional[float]:
+        return self._gpc_nwc_parts(ticker, period, exclude_cash)[2]
     # ------------------------------------------------------------------
     # TABLE BUILD
     # ------------------------------------------------------------------
@@ -602,17 +643,20 @@ class NWCPage(QWidget):
         self._cl_combos = []
         self._ca_value_labels = []
         self._cl_value_labels = []
+        self._ca_cl_buttons = []
 
         self._add_calc_row(grid, "Total Revenue", bold=True)
         self._current_table_row += 1
 
-        for i in range(7):
+        for i in range(self._ca_row_count):
             self._add_ca_cl_row(grid, is_asset=True, slot=i)
+        self._add_ca_cl_buttons(grid, is_asset=True)
         self.ca_sum_row_idx = self._add_calc_row(grid, "Total Current Assets", bold=True, border_above=True)
         self._current_table_row += 1
 
-        for i in range(7):
+        for i in range(self._cl_row_count):
             self._add_ca_cl_row(grid, is_asset=False, slot=i)
+        self._add_ca_cl_buttons(grid, is_asset=False)
         self.cl_sum_row_idx = self._add_calc_row(grid, "Total Current Liabilities", bold=True, border_above=True)
         self._current_table_row += 1
 
@@ -691,7 +735,8 @@ class NWCPage(QWidget):
             combo.addItem(_fmt_ca_cl_option(key), key)
 
         # Default selection from the original model setup.
-        selected_key = defaults[slot]
+        # Dynamically added rows begin as "-- None --".
+        selected_key = defaults[slot] if slot < len(defaults) else ""
 
         # If this table is being rebuilt, prefer the user's prior
         # selection for this row/slot.
@@ -729,6 +774,47 @@ class NWCPage(QWidget):
             self._cl_value_labels.append(cells)
 
         self._current_table_row += 1
+
+    def _add_ca_cl_buttons(self, grid: QGridLayout, is_asset: bool):
+        from PyQt6.QtWidgets import QPushButton
+        row = self._current_table_row
+        holder = QHBoxLayout()
+        holder.setContentsMargins(0, 0, 0, 0)
+        holder.setSpacing(4)
+
+        btn_add = QPushButton("+")
+        btn_sub = QPushButton("−")
+        for b in (btn_add, btn_sub):
+            b.setFixedWidth(26)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(get_input_style())
+            self._ca_cl_buttons.append(b)
+
+        btn_add.clicked.connect(lambda: self._change_row_count(is_asset, +1))
+        btn_sub.clicked.connect(lambda: self._change_row_count(is_asset, -1))
+
+        holder.addWidget(btn_add)
+        holder.addWidget(btn_sub)
+        holder.addStretch(1)
+
+        wrap = QWidget()
+        wrap.setLayout(holder)
+        grid.addWidget(wrap, row, 0, alignment=Qt.AlignmentFlag.AlignLeft)
+        self._current_table_row += 1
+
+    def _change_row_count(self, is_asset: bool, delta: int):
+        if is_asset:
+            new_count = self._ca_row_count + delta
+            if new_count < 1 or new_count > CA_MAX_ROWS:
+                return
+            self._ca_row_count = new_count
+        else:
+            new_count = self._cl_row_count + delta
+            if new_count < 1 or new_count > CL_MAX_ROWS:
+                return
+            self._cl_row_count = new_count
+        self._rebuild_table_if_needed(force=True)
+        self._recalculate()
 
     # ------------------------------------------------------------------
     # GPC NWC SECTION
@@ -915,22 +1001,16 @@ class NWCPage(QWidget):
             if row_meta["exclude"].isChecked()
         }
 
-        # Remove the old GPC section widget from the page.
+        # Remove the old GPC section widget from the side-by-side row.
         if self.gpc_section is not None:
-            self.page_layout.removeWidget(self.gpc_section)
+            self._gpc_chart_hbox.removeWidget(self.gpc_section)
             self.gpc_section.setParent(None)
             self.gpc_section.deleteLater()
 
-        # Build a new section from Home's latest GPC ticker list.
+        # Rebuild and re-insert on the LEFT of the chart (index 0,
+        # stretch 0 so it keeps its fixed, column-aligned width).
         self.gpc_section = self._build_gpc_section()
-
-        if self._gpc_section_insert_index is None:
-            self.page_layout.addWidget(self.gpc_section)
-        else:
-            self.page_layout.insertWidget(
-                self._gpc_section_insert_index,
-                self.gpc_section,
-            )
+        self._gpc_chart_hbox.insertWidget(0, self.gpc_section, 0)
 
         # Restore the Selected NWC % input.
         self.selected_nwc_pct_input.setText(selected_pct_text)
@@ -946,6 +1026,188 @@ class NWCPage(QWidget):
 
         # Populate the rebuilt ticker rows and statistics.
         self._recalculate()
+
+    # ------------------------------------------------------------------
+    # NWC COMBO CHART
+    # ------------------------------------------------------------------
+
+    def _build_nwc_chart_section(self) -> QWidget:
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+
+        self.lbl_nwc_chart_title = QLabel(
+            "Net Working Capital vs. % of Revenue",
+            styleSheet=get_header_style(),
+        )
+        header_row.addWidget(self.lbl_nwc_chart_title, 1)
+
+        self.chart_entity_combo = QComboBox()
+        self.chart_entity_combo.setStyleSheet(get_input_style())
+        self.chart_entity_combo.setMinimumWidth(110)
+        self.chart_entity_combo.addItem("Subject")
+        self.chart_entity_combo.currentTextChanged.connect(
+            lambda _: self._update_nwc_combo_chart()
+        )
+        header_row.addWidget(self.chart_entity_combo, 0)
+
+        layout.addLayout(header_row)
+
+        self._nwc_figure = Figure(figsize=(6, 4))
+        self._nwc_canvas = FigureCanvasQTAgg(self._nwc_figure)
+        self._nwc_canvas.setMinimumHeight(320)
+        self._nwc_canvas.setMinimumWidth(360)
+        self._nwc_canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._nwc_ax_bar = self._nwc_figure.add_subplot(111)
+        self._nwc_ax_line = self._nwc_ax_bar.twinx()
+        layout.addWidget(self._nwc_canvas)
+
+        frame.setLayout(layout)
+        return frame
+
+    def _refresh_chart_entity_combo(self):
+        """Keep the chart's entity dropdown in sync with Home's GPC list.
+        Excluded tickers stay in the list — exclusion is a peer-stats
+        concept, not a reason to hide a company's own chart."""
+        if not hasattr(self, "chart_entity_combo"):
+            return
+
+        tickers = [r["ticker"] for r in self._gpc_row_widgets]
+        wanted = ["Subject"] + tickers
+        existing = [
+            self.chart_entity_combo.itemText(i)
+            for i in range(self.chart_entity_combo.count())
+        ]
+        if existing == wanted:
+            return
+
+        prior = self.chart_entity_combo.currentText()
+        blocked = self.chart_entity_combo.blockSignals(True)
+        self.chart_entity_combo.clear()
+        self.chart_entity_combo.addItems(wanted)
+        idx = self.chart_entity_combo.findText(prior)
+        self.chart_entity_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.chart_entity_combo.blockSignals(blocked)
+
+    def _update_nwc_combo_chart(self):
+        if not hasattr(self, "_nwc_ax_bar"):
+            return
+        from matplotlib.ticker import FuncFormatter
+
+        t = theme_manager.current
+
+        # Historical columns only (LFY-N ... LFY, TTM).
+        periods = [
+            h for idx, h in enumerate(self._headers)
+            if self._is_historical[idx]
+        ]
+        entity = "Subject"
+        if hasattr(self, "chart_entity_combo"):
+            entity = self.chart_entity_combo.currentText() or "Subject"
+
+        if entity == "Subject":
+            nwc_src = self._chart_nwc_by_period
+            rev_src = self._chart_revenue_by_period
+            pct_src = self._chart_nwc_pct_by_period
+        else:
+            series = self._chart_gpc_series.get(entity, {})
+            nwc_src = series.get("nwc", {})
+            rev_src = series.get("rev", {})
+            pct_src = series.get("pct", {})
+
+        nwc_vals = [nwc_src.get(p) for p in periods]
+        rev_vals = [rev_src.get(p) for p in periods]
+        pct_vals = [pct_src.get(p) for p in periods]
+
+        x = list(range(len(periods)))
+
+        self._nwc_ax_bar.clear()
+        self._nwc_ax_line.clear()
+
+        self._nwc_figure.patch.set_facecolor(t.window_bg)
+        self._nwc_ax_bar.set_facecolor(t.window_bg)
+
+        # Bars: NWC ($)
+        bar_vals = [v if v is not None else 0 for v in nwc_vals]
+        self._nwc_ax_bar.bar(
+            x, bar_vals, color=t.chart_fill,
+            edgecolor=t.chart_edge, width=0.5, zorder=2,
+        )
+        self._nwc_ax_bar.set_xticks(x)
+        self._nwc_ax_bar.set_xticklabels(
+            periods, color=t.chart_axis_label, fontsize=9
+        )
+        self._nwc_ax_bar.set_ylabel(
+            "Net Working Capital  &  Revenue ($)",
+            color=t.default_text, fontsize=9
+        )
+        self._nwc_ax_bar.tick_params(axis="x", colors=t.chart_axis_label)
+        self._nwc_ax_bar.tick_params(axis="y", colors=t.chart_axis_label)
+        self._nwc_ax_bar.grid(
+            True, axis="y", alpha=0.25, color=t.chart_grid, zorder=0
+        )
+        self._nwc_ax_bar.axhline(0, color=t.chart_grid, linewidth=0.8, zorder=1)
+        for spine in self._nwc_ax_bar.spines.values():
+            spine.set_color(t.chart_grid)
+        self._nwc_ax_bar.yaxis.set_major_formatter(
+            FuncFormatter(lambda val, _: f"{val:,.0f}")
+        )
+
+        # Revenue line on the SAME dollar axis as the NWC bars — both
+        # are dollars, so this is an honest magnitude comparison (shows
+        # revenue climbing while NWC stays negative / non-scaling).
+        rev_x = [xi for xi, v in zip(x, rev_vals) if v is not None]
+        rev_y = [v for v in rev_vals if v is not None]
+        if rev_x:
+            self._nwc_ax_bar.plot(
+                rev_x, rev_y, color=t.chart_share_price,
+                linewidth=2, marker="s", markersize=5, zorder=3,
+                label="Revenue",
+            )
+            self._nwc_ax_bar.legend(
+                fontsize=7, loc="upper left",
+                facecolor=t.window_bg, edgecolor=t.chart_grid,
+                labelcolor=t.default_text,
+            )
+
+        # Line: NWC % of revenue (secondary axis)
+        pct_plot = [v * 100 if v is not None else None for v in pct_vals]
+        plot_x = [xi for xi, v in zip(x, pct_plot) if v is not None]
+        plot_y = [v for v in pct_plot if v is not None]
+        if plot_x:
+            self._nwc_ax_line.plot(
+                plot_x, plot_y, color=t.chart_conclude,
+                linewidth=2, marker="o", markersize=5, zorder=3,
+            )
+        self._nwc_ax_line.set_ylabel(
+            "NWC % of Revenue", color=t.default_text, fontsize=9
+        )
+        self._nwc_ax_line.yaxis.set_label_position("right")
+        self._nwc_ax_line.tick_params(axis="y", colors=t.chart_axis_label)
+        self._nwc_ax_line.yaxis.set_major_formatter(
+            FuncFormatter(lambda val, _: f"{val:.1f}%")
+        )
+        for spine in self._nwc_ax_line.spines.values():
+            spine.set_color(t.chart_grid)
+
+        self._nwc_ax_bar.set_title(
+            f"{entity} — Net Working Capital vs. % of Revenue",
+            color=t.default_text, fontsize=10,
+        )
+
+        self._nwc_figure.tight_layout()
+        self._nwc_canvas.draw()
 
     # ------------------------------------------------------------------
     # RECALCULATE
@@ -1011,8 +1273,10 @@ class NWCPage(QWidget):
                 val = self._sf_get(key, period) if key else None
                 lbl = self._ca_value_labels[slot][data_idx]
                 lbl.setText(_fmt_currency(val) if val is not None else "-")
-                if val is not None and not (key in CASH_KEYS and not include_cash):
-                    ca_sum_by_period[period] = (ca_sum_by_period[period] or 0.0) + val
+                if val is not None:
+                    ca_sum_by_period[period] = (
+                        ca_sum_by_period[period] or 0.0
+                    ) + val
 
         for slot, combo in enumerate(self._cl_combos):
             key = combo.currentData()
@@ -1020,11 +1284,13 @@ class NWCPage(QWidget):
                 val = self._sf_get(key, period) if key else None
                 lbl = self._cl_value_labels[slot][data_idx]
                 lbl.setText(_fmt_currency(val) if val is not None else "-")
-                if val is not None and key not in DEBT_KEYS:
-                    cl_sum_by_period[period] = (cl_sum_by_period[period] or 0.0) + val
+                if val is not None:
+                    cl_sum_by_period[period] = (
+                        cl_sum_by_period[period] or 0.0
+                    ) + val
 
-        ca_sum_label = "Total Current Assets" if include_cash else "Cash-Free Current Assets"
-        cl_sum_label = "Debt-Free Current Liabilities"
+        ca_sum_label = "Total Current Assets"
+        cl_sum_label = "Total Current Liabilities"
         self._retitle_row(self.ca_sum_row_idx, ca_sum_label)
         self._retitle_row(self.cl_sum_row_idx, cl_sum_label)
 
@@ -1093,12 +1359,21 @@ class NWCPage(QWidget):
                 ticker_lbl.setStyleSheet(row_style)
 
             self._gpc_nwc_values[ticker] = {}
+            self._chart_gpc_series[ticker] = {"nwc": {}, "rev": {}, "pct": {}}
             for c, period in enumerate(gpc_periods):
                 if c >= len(row_meta["values"]):
                     break
 
-                pct = self._gpc_nwc_pct(ticker, period, exclude_cash)
+                nwc_d, rev_d, pct = self._gpc_nwc_parts(
+                    ticker, period, exclude_cash
+                )
                 self._gpc_nwc_values[ticker][c] = None if excluded else pct
+
+                # Chart series keep their values even when the ticker is
+                # excluded — exclusion only affects the peer stat rows.
+                self._chart_gpc_series[ticker]["nwc"][period] = nwc_d
+                self._chart_gpc_series[ticker]["rev"][period] = rev_d
+                self._chart_gpc_series[ticker]["pct"][period] = pct
 
                 lbl = row_meta["values"][c]
                 lbl.setText(_fmt_pct(pct) if pct is not None else "-")
@@ -1143,6 +1418,20 @@ class NWCPage(QWidget):
         self.actual_nwc_label.setText(_fmt_currency(ttm_nwc))
         surplus_deficit = _sub(ttm_nwc, normalized_nwc) if (normalized_nwc is not None or ttm_nwc is not None) else None
         self.nwc_surplus_deficit_label.setText(_fmt_currency(surplus_deficit))
+
+        # Store historical NWC ($) and NWC % of revenue for the combo
+        # chart, then redraw it.
+        self._chart_nwc_by_period = {}
+        self._chart_nwc_pct_by_period = {}
+        self._chart_revenue_by_period = {}
+        for period in self._headers:
+            nwc = nwc_by_period.get(period)
+            rev = revenue_by_period.get(period)
+            self._chart_nwc_by_period[period] = nwc
+            self._chart_revenue_by_period[period] = rev
+            self._chart_nwc_pct_by_period[period] = _safe_div(nwc, rev)
+        self._refresh_chart_entity_combo()
+        self._update_nwc_combo_chart()
 
         # The NWC page is the source of truth for Change in NWC.
         # Refresh DCF after NWC has finished calculating.
@@ -1215,6 +1504,8 @@ class NWCPage(QWidget):
             "nwc_basis": self.nwc_basis_combo.currentText(),
             "selected_pct": self.selected_nwc_pct_input.text(),
             "historical_years": self._nwc_historical_years,
+            "ca_row_count": self._ca_row_count,
+            "cl_row_count": self._cl_row_count,
             "gpc_exclusions": [
                 r["exclude"].isChecked() for r in self._gpc_row_widgets
             ],
@@ -1223,6 +1514,21 @@ class NWCPage(QWidget):
     def apply_state(self, state: dict):
         if not state:
             return
+
+        hist = state.get("historical_years")
+        if hist is not None and hist != self._nwc_historical_years:
+            self.hist_years_spin.setValue(hist)
+            self._nwc_historical_years = hist
+
+        ca_rows = state.get("ca_row_count")
+        cl_rows = state.get("cl_row_count")
+        if ca_rows is not None and 1 <= ca_rows <= CA_MAX_ROWS:
+            self._ca_row_count = ca_rows
+        if cl_rows is not None and 1 <= cl_rows <= CL_MAX_ROWS:
+            self._cl_row_count = cl_rows
+
+        self._rebuild_table_if_needed(force=True)
+
         for combo, key in zip(self._ca_combos, state.get("ca_selections", [])):
             idx = combo.findData(key)
             combo.setCurrentIndex(idx if idx >= 0 else 0)
@@ -1238,10 +1544,6 @@ class NWCPage(QWidget):
         self.selected_nwc_pct_input.setText(
             state.get("selected_pct", "15.0%")
         )
-        hist = state.get("historical_years")
-        if hist is not None and hist != self._nwc_historical_years:
-            self.hist_years_spin.setValue(hist)
-            self._nwc_historical_years = hist
         for row, checked in zip(self._gpc_row_widgets, state.get("gpc_exclusions", [])):
             row["exclude"].setChecked(checked)
         self._recalculate()

@@ -13,120 +13,34 @@ from gpc_page.py or from tests directly.
 import math
 from typing import Dict, Optional
 
+from Canneberge.Transforms.sa_key import get_sa_label, get_sa_labels
+from Canneberge.utils.sa_utils import build_lookup, to_float
 from Canneberge.Calculations.gpc_metrics import GPC_METRICS
 
-# Confirmed against live Source Data → Ratios view (screenshot,
-# 8/14/2026: Line Item reads "Market Capitalization", not "Market
-# Cap" — the old value here was a guess that never matched the real
-# scrape, silently nulling BEV -> every GPC multiple -> NA for every
-# ticker, every column, since get_ticker_bev() hard-returns None on a
-# missed lookup here with no fallback). "Market Cap" is the starting
-# point for BEV now — we build BEV ourselves instead of trusting
-# StockAnalysis's own precomputed "Enterprise Value" line, because that
-# line bakes in Short-Term Investments in its net debt calc, which this
-# pass intentionally excludes.
-MARKET_CAP_LINE_KEY = "market capitalization"
-
-# BS line keys, reusing the exact SA_KEY_MAP vocabulary from
-# subject_financials_page.py — same strings, not re-invented here.
-_DEBT_COMPONENT_KEYS = [
-    "current_ltd", "st_debt", "current_leases", "lt_debt", "lt_leases",
-]
-_CASH_KEY = "cash"
-_PREFERRED_KEY = "preferred_stock"
-_MINORITY_KEY = "minority_interest"
-
-# SA_KEY_MAP's line-item strings for the BS keys above (kept local here
-# rather than importing SA_KEY_MAP directly, since that dict also
-# contains Custom Multiple/placeholder entries irrelevant to this
-# calculation and importing it would create a UI->calc dependency).
-_BS_LINE_ITEMS = {
-    "current_ltd":      "current portion of long-term debt",
-    "st_debt":           "short-term debt",
-    "current_leases":    "current portion of leases",
-    "lt_debt":            "long-term debt",
-    "lt_leases":          "long-term leases",
-    "cash":                "cash & equivalents",
-    "preferred_stock":     "preferred stock",
-    "minority_interest":  "minority interest",
-}
-
-
-def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
-    """
-    Same pattern as subject_financials_page.py's _build_public_view:
-    filters rows to one ticker, keys by lowercased Line Item, values
-    are {period: raw_string}.
-    """
-    ticker_lower = ticker.strip().lower()
-    lookup: Dict[str, Dict[str, str]] = {}
-    for row in rows:
-        if str(row.get("Ticker", "")).strip().lower() != ticker_lower:
-            continue
-        key = str(row.get("Line Item", "")).strip().lower()
-        lookup[key] = {
-            k: v for k, v in row.items()
-            if k not in ("Ticker", "Key", "Line Item")
-        }
-    return lookup
-
-
-def _to_float(raw) -> Optional[float]:
-    if raw is None:
-        return None
-    try:
-        val = float(str(raw).replace(",", ""))
-    except (ValueError, TypeError):
-        return None
-    # float() parses "nan"/"inf"/"-inf" strings successfully without
-    # raising — if scraped data ever contains one of these (e.g. a
-    # source-side ratio computed as x/0), it would silently poison
-    # every downstream sum and division with NaN instead of failing
-    # visibly as None/NA. Reject explicitly rather than trust the
-    # scrape never produces these strings.
-    if math.isnan(val) or math.isinf(val):
-        return None
-    return val
-
-
 def get_ticker_bev(ratio_rows: list, bs_rows: list, ticker: str) -> Optional[float]:
-    """
-    BEV computed from scratch, per the model's formula:
-        BEV = Market Cap (MV of Equity)
-              + Net Debt
-              + Preferred Stock
-              + Minority Interest
-        Net Debt = (Current Portion LTD + ST Debt + Current Portion
-                    Leases + LT Debt + LT Leases) - Cash
+    ratio_lookup = build_lookup(ratio_rows, ticker)
+    bs_lookup = build_lookup(bs_rows, ticker)
 
-    Deliberately NOT StockAnalysis's own "Enterprise Value" line —
-    that figure bakes in Short-Term Investments in its net debt calc,
-    which this pass intentionally excludes. Market Cap comes from
-    Ratios; every debt/cash/preferred/minority component comes from BS.
-
-    Uses TTM for every component. If a future need arises for BEV at
-    a non-TTM period, this needs a period parameter — don't assume
-    TTM is correct for every case (same caveat as the prior version).
-    """
-    ratio_lookup = _build_lookup(ratio_rows, ticker)
-    bs_lookup = _build_lookup(bs_rows, ticker)
-
-    market_cap = _to_float(ratio_lookup.get(MARKET_CAP_LINE_KEY, {}).get("TTM"))
+    market_cap = to_float(ratio_lookup.get(get_sa_label("market_cap"), {}).get("TTM"))
     if market_cap is None:
         return None
 
+    debt_keys = ["current_ltd", "st_debt", "current_leases", "lt_debt", "lt_leases"]
     total_debt = 0.0
-    for key in _DEBT_COMPONENT_KEYS:
-        line_item = _BS_LINE_ITEMS[key]
-        val = _to_float(bs_lookup.get(line_item, {}).get("TTM"))
-        if val is not None:
-            total_debt += val
+    for key in debt_keys:
+        for sa_label in get_sa_labels(key):
+            row = bs_lookup.get(sa_label, {})
+            if row:
+                val = to_float(row.get("TTM"))
+                if val is not None:
+                    total_debt += val
+                break
 
-    cash = _to_float(bs_lookup.get(_BS_LINE_ITEMS[_CASH_KEY], {}).get("TTM")) or 0.0
+    cash = to_float(bs_lookup.get(get_sa_label("cash"), {}).get("TTM")) or 0.0
     net_debt = total_debt - cash
 
-    preferred = _to_float(bs_lookup.get(_BS_LINE_ITEMS[_PREFERRED_KEY], {}).get("TTM")) or 0.0
-    minority = _to_float(bs_lookup.get(_BS_LINE_ITEMS[_MINORITY_KEY], {}).get("TTM")) or 0.0
+    preferred = to_float(bs_lookup.get(get_sa_label("preferred_stock"), {}).get("TTM")) or 0.0
+    minority = to_float(bs_lookup.get(get_sa_label("minority_interest"), {}).get("TTM")) or 0.0
 
     return market_cap + net_debt + preferred + minority
 
@@ -139,9 +53,9 @@ def get_subject_cash(bs_rows: list, ticker: str) -> Optional[float]:
     so the subject company's Cash (for the Bridge section) doesn't
     need its own new data path.
     """
-    lookup = _build_lookup(bs_rows, ticker)
-    raw = lookup.get(_BS_LINE_ITEMS[_CASH_KEY], {}).get("TTM")
-    return _to_float(raw)
+    lookup = build_lookup(bs_rows, ticker)
+    raw = lookup.get(get_sa_label("cash"), {}).get("TTM")
+    return to_float(raw)
 
 
 # Periods sourced from MarketScreener only. Anything not in this set
@@ -170,13 +84,14 @@ def get_ticker_metric(
     no value, this returns None. It will NOT try the other source.
     """
     if period in _MARKETSCREENER_PERIODS:
-        lookup = _build_lookup(ms_rows, ticker)
+        lookup = build_lookup(ms_rows, ticker)
     else:
-        lookup = _build_lookup(is_rows, ticker)
+        lookup = build_lookup(is_rows, ticker)
 
-    row_data = lookup.get(line_key, {})
+    sa_label = get_sa_label(line_key)
+    row_data = lookup.get(sa_label, {})
     raw = row_data.get(period)
-    return _to_float(raw)
+    return to_float(raw)
 
 
 def compute_ticker_multiples(

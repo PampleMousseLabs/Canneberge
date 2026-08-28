@@ -24,18 +24,9 @@ from typing import Optional, Dict
 
 
 import math
+from Canneberge.Transforms.sa_key import get_sa_label
+from Canneberge.utils.sa_utils import build_lookup, to_float
 
-
-def _to_float(raw) -> Optional[float]:
-    if raw is None:
-        return None
-    try:
-        val = float(str(raw).replace(",", ""))
-    except (ValueError, TypeError):
-        return None
-    if math.isnan(val) or math.isinf(val):
-        return None
-    return val
 
 def _to_pct_float(raw) -> Optional[float]:
     """Parses a percent-formatted string ('20.66%') into a decimal (0.2066)."""
@@ -96,18 +87,28 @@ def debt_free_nwc_excl_cash(bs: Dict[str, Optional[float]]) -> Optional[float]:
     Same as Debt-free NWC (Incld. Cash), but Cash is removed from the
     Total Current Assets term first.
     """
-    cash = bs.get("cash")
+    # Cash & Short-Term Investments is a subtotal. Use it when
+    # available; otherwise add its two component rows.
+    cash_sti = bs.get("cash_short_term_investments")
+    if cash_sti is not None:
+        cash_bucket = cash_sti
+    else:
+        cash_bucket = (
+            (bs.get("cash") or 0.0)
+            + (bs.get("st_investments") or 0.0)
+        )
+
     tca = bs.get("total_current_assets")
     tcl = bs.get("total_current_liab")
     current_ltd = bs.get("current_ltd") or 0.0
     st_debt = bs.get("st_debt") or 0.0
     current_leases = bs.get("current_leases") or 0.0
 
-    if cash is None or tca is None or tcl is None:
+    if tca is None or tcl is None:
         return None
 
     non_debt_tcl = tcl - current_ltd - st_debt - current_leases
-    return (tca - cash) - non_debt_tcl
+    return (tca - cash_bucket) - non_debt_tcl
 
 
 def total_debt(bs: Dict[str, Optional[float]]) -> Optional[float]:
@@ -290,53 +291,18 @@ def compute_bs_calculations(
 
 from typing import List
 
-_CAPSTRUCT_BS_LINE_ITEMS = {
-    "current_ltd":   "current portion of long-term debt",
-    "st_debt":       "short-term debt",
-    "current_leases": "current portion of leases",
-    "lt_debt":       "long-term debt",
-    "lt_leases":     "long-term leases",
-    "cash":          "cash & equivalents",
-    "total_equity":  "shareholders' equity",
-}
-# NOTE (8/15/2026): this was "market cap" - same stale guess found
-# and fixed in gpc_multiples.py's MARKET_CAP_LINE_KEY and
-# dashboard_page.py's shares-outstanding lookup. The real scraped
-# Line Item text is "Market Capitalization". This is the third
-# independent copy of the same wrong string found across the
-# codebase - all three (plus debug_capital_structure.py, which
-# imports this constant directly) were silently wrong the same way.
-_MARKET_CAP_LINE_ITEM = "market capitalization"
-
-def _build_lookup(rows: list, ticker: str) -> Dict[str, Dict[str, str]]:
-    """
-    Same pattern as gpc_multiples.py's _build_lookup — kept local
-    rather than imported, consistent with this codebase's existing
-    convention of not creating cross-module Calculations dependencies
-    for simple row-filtering helpers.
-    """
-    ticker_lower = ticker.strip().lower()
-    lookup: Dict[str, Dict[str, str]] = {}
-    for row in rows:
-        if str(row.get("Ticker", "")).strip().lower() != ticker_lower:
-            continue
-        key = str(row.get("Line Item", "")).strip().lower()
-        lookup[key] = {
-            k: v for k, v in row.items()
-            if k not in ("Ticker", "Key", "Line Item")
-        }
-    return lookup
-
-def _bs_dict_for_period(bs_rows: list, ticker: str, period: str) -> Dict[str, Optional[float]]:
-    lookup = _build_lookup(bs_rows, ticker)
+def _bs_dict_for_period(bs_rows, ticker, period):
+    lookup = build_lookup(bs_rows, ticker)
+    keys = ["current_ltd", "st_debt", "current_leases",
+            "lt_debt", "lt_leases", "cash", "total_equity"]
     result = {}
-    for key, label in _CAPSTRUCT_BS_LINE_ITEMS.items():
-        result[key] = _to_float(lookup.get(label, {}).get(period))
+    for key in keys:
+        result[key] = to_float(lookup.get(get_sa_label(key), {}).get(period))
     return result
 
-def _market_cap_for_period(ratio_rows: list, ticker: str, period: str) -> Optional[float]:
-    lookup = _build_lookup(ratio_rows, ticker)
-    return _to_float(lookup.get(_MARKET_CAP_LINE_ITEM, {}).get(period))
+def _market_cap_for_period(ratio_rows, ticker, period):
+    lookup = build_lookup(ratio_rows, ticker)
+    return to_float(lookup.get(get_sa_label("market_cap"), {}).get(period))
 
 def debt_to_tic_book_from_bs(bs: Dict[str, Optional[float]]) -> Optional[float]:
     """Debt (Book) as a % of TIC — book basis. TIC includes cash."""
@@ -408,8 +374,6 @@ def compute_historic_capital_structure(
     per_period = {p: compute_debt_to_mvic(bs_rows, ratio_rows, ticker, p) for p in periods}
     return historic_average(per_period, periods)
 
-_EFFECTIVE_TAX_RATE_LINE_ITEM = "effective tax rate"
-
 def compute_effective_tax_rate(
     is_rows: list, ticker: str, fallback_rate: Optional[float] = None
 ) -> Optional[float]:
@@ -422,8 +386,8 @@ def compute_effective_tax_rate(
       3. fallback_rate (the Home page's Tax Rate input), if neither
          historical option is available.
     """
-    lookup = _build_lookup(is_rows, ticker)
-    row_data = lookup.get(_EFFECTIVE_TAX_RATE_LINE_ITEM, {})
+    lookup = build_lookup(is_rows, ticker)
+    row_data = lookup.get(get_sa_label("effective_tax_rate"), {})
 
     three_yr = [_to_pct_float(row_data.get(p)) for p in ("LFY", "LFY-1", "LFY-2")]
     if all(v is not None for v in three_yr):

@@ -16,6 +16,7 @@ from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
 from Canneberge.Ui.wacc_page import WACCPage, BETA_COLUMN_MAP
 from Canneberge.Ui.dcf_page import DCFPage
 from Canneberge.Ui.nwc_page import NWCPage
+from Canneberge.Ui.debt_schedule_page import DebtSchedulePage
 from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
 from Canneberge.Ui.projection_module_page import ProjectionModulePage
 from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
@@ -23,7 +24,7 @@ from Canneberge.utils.session import (
     save_session, load_session, list_sessions, SESSION_DIR
 )
 from Canneberge.Calculations.reverse_dcf import extract_ticker_inputs
-from Canneberge.Calculations.gpc_multiples import _to_float
+from Canneberge.utils.sa_utils import to_float as _to_float
 from typing import Optional
 
 
@@ -126,6 +127,13 @@ class MainWindow(QMainWindow):
         # NWC now exists, so let NWC refresh DCF after NWC inputs change.
         self.nwc_page.set_nwc_changed_callback(self.dcf_page.refresh)
 
+        # Debt Schedule — ISOLATED for now. Reads only ProjectInputs
+        # (period dates / projection years). Nothing reads from it yet;
+        # DCF wiring happens later once the schedule is validated.
+        self.debt_schedule_page = DebtSchedulePage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+        )
+
         # Initial page calculation order matters:
         # NWC calculates first, then DCF reads NWC's Change in NWC.
         self._refresh_nwc_then_dcf()
@@ -145,13 +153,14 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.dashboard_page, "Dashboard")
-        self.tabs.addTab(self.source_data_page, "Source Data")
-        self.tabs.addTab(self.gt_page, "GT")
-        self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.wacc_page, "WACC")
         self.tabs.addTab(self.dcf_page, "DCF")
         self.tabs.addTab(self.nwc_page, "NWC")
+        self.tabs.addTab(self.debt_schedule_page, "Debt")
+        self.tabs.addTab(self.gt_page, "GT")
+        self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
+        self.tabs.addTab(self.source_data_page, "Source Data")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self.tabs)
@@ -817,6 +826,12 @@ class MainWindow(QMainWindow):
     def _apply_nwc_page_state(self, state: dict):
         self.nwc_page.apply_state(state)
 
+    def _collect_debt_schedule_state(self) -> dict:
+        return self.debt_schedule_page.collect_state()
+
+    def _apply_debt_schedule_state(self, state: dict):
+        self.debt_schedule_page.apply_state(state)
+
     def _collect_dashboard_page_state(self) -> dict:
         dp = self.dashboard_page
         return {
@@ -867,6 +882,7 @@ class MainWindow(QMainWindow):
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
         nwc_state = self._collect_nwc_page_state()
+        debt_state = self._collect_debt_schedule_state()
         dashboard_state = self._collect_dashboard_page_state()
 
         try:
@@ -879,6 +895,7 @@ class MainWindow(QMainWindow):
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
                 nwc_page_state=nwc_state,
+                debt_page_state=debt_state,
                 dashboard_page_state=dashboard_state,
                 filepath=self._current_session_path,
             )
@@ -910,6 +927,7 @@ class MainWindow(QMainWindow):
         proj_state = self._collect_projection_page_state()
         wacc_state = self._collect_wacc_page_state()
         dcf_state = self._collect_dcf_page_state()
+        debt_state = self._collect_debt_schedule_state()
         nwc_state = self._collect_nwc_page_state()
         dashboard_state = self._collect_dashboard_page_state()
         try:
@@ -922,6 +940,7 @@ class MainWindow(QMainWindow):
                 wacc_page_state=wacc_state,
                 dcf_page_state=dcf_state,
                 nwc_page_state=nwc_state,
+                debt_page_state=debt_state,
                 dashboard_page_state=dashboard_state,
                 filepath=path,
             )
@@ -964,6 +983,7 @@ class MainWindow(QMainWindow):
         self._apply_wacc_page_state(data.get("wacc_page_state", {}))
         self._apply_dcf_page_state(data.get("dcf_page_state", {}))
         self._apply_nwc_page_state(data.get("nwc_page_state", {}))
+        self._apply_debt_schedule_state(data.get("debt_page_state", {}))
         self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
 
         self.subject_financials_page.refresh()

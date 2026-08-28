@@ -10,17 +10,13 @@ LTGR / H-Model parameters.
 
 from typing import Optional, Dict, List, Any
 
-from Canneberge.Calculations.gpc_multiples import _build_lookup, _to_float, get_ticker_metric
+from Canneberge.Calculations.gpc_multiples import get_ticker_metric
+from Canneberge.Transforms.sa_key import get_sa_label
+from Canneberge.utils.sa_utils import build_lookup, to_float
 from Canneberge.Calculations.ratio_catalogue import (
     debt_free_nwc_incl_cash,
     debt_free_nwc_excl_cash,
 )
-
-_REV_KEY = "revenue"
-_NET_INC_KEY = "net income"
-_DA_CFS_KEY = "depreciation & amortization"
-_CAPEX_KEY = "capital expenditures"
-_MARKET_CAP_KEY = "market capitalization"
 
 _H_MODEL_VARS = ("Ga", "Gn", "H")
 
@@ -39,47 +35,42 @@ def extract_ticker_inputs(
     cfs_rows = sa_results.get("CFS", [])
     ratio_rows = sa_results.get("Ratios", [])
 
-    is_lookup = _build_lookup(is_rows, ticker_lower)
-    bs_lookup = _build_lookup(bs_rows, ticker_lower)
-    cfs_lookup = _build_lookup(cfs_rows, ticker_lower)
-    ratio_lookup = _build_lookup(ratio_rows, ticker_lower)
+    is_lookup = build_lookup(is_rows, ticker_lower)
+    bs_lookup = build_lookup(bs_rows, ticker_lower)
+    cfs_lookup = build_lookup(cfs_rows, ticker_lower)
+    ratio_lookup = build_lookup(ratio_rows, ticker_lower)
 
-    market_cap = _to_float(ratio_lookup.get(_MARKET_CAP_KEY, {}).get("TTM"))
+    market_cap = to_float(ratio_lookup.get(get_sa_label("market_cap"), {}).get("TTM"))
 
     revenue = {
-        "LFY": _to_float(is_lookup.get(_REV_KEY, {}).get("LFY")),
-        "TTM": _to_float(is_lookup.get(_REV_KEY, {}).get("TTM")),
+        "LFY": to_float(is_lookup.get(get_sa_label("revenue"), {}).get("LFY")),
+        "TTM": to_float(is_lookup.get(get_sa_label("revenue"), {}).get("TTM")),
         "NFY": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY", "revenue"),
         "NFY+1": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+1", "revenue"),
         "NFY+2": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+2", "revenue"),
     }
 
     net_income = {
-        "LFY": _to_float(is_lookup.get(_NET_INC_KEY, {}).get("LFY")),
-        "TTM": _to_float(is_lookup.get(_NET_INC_KEY, {}).get("TTM")),
-        "NFY": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY", "net income"),
-        "NFY+1": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+1", "net income"),
-        "NFY+2": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+2", "net income"),
+        "LFY": to_float(is_lookup.get(get_sa_label("net_income"), {}).get("LFY")),
+        "TTM": to_float(is_lookup.get(get_sa_label("net_income"), {}).get("TTM")),
+        "NFY": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY", "net_income"),
+        "NFY+1": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+1", "net_income"),
+        "NFY+2": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+2", "net_income"),
     }
 
     rev_ttm = revenue.get("TTM")
-    da_ttm_raw = _to_float(cfs_lookup.get(_DA_CFS_KEY, {}).get("TTM"))
+    da_ttm_raw = to_float(cfs_lookup.get(get_sa_label("depreciation_amortization"), {}).get("TTM"))
     da_ttm = abs(da_ttm_raw) if da_ttm_raw is not None else None
     depr_pct = (da_ttm / rev_ttm) if (da_ttm is not None and rev_ttm) else None
 
-    capex_ttm_raw = _to_float(cfs_lookup.get(_CAPEX_KEY, {}).get("TTM"))
+    capex_ttm_raw = to_float(cfs_lookup.get(get_sa_label("capex"), {}).get("TTM"))
     capex_ttm = abs(capex_ttm_raw) if capex_ttm_raw is not None else None
     capex_pct = (capex_ttm / rev_ttm) if (capex_ttm is not None and rev_ttm) else None
 
-    bs_nwc_map = {
-        "total_current_assets": "total current assets",
-        "total_current_liab": "total current liabilities",
-        "current_ltd": "current portion of long-term debt",
-        "st_debt": "short-term debt",
-        "current_leases": "current portion of leases",
-        "cash": "cash & equivalents",
-    }
-    bs_ttm = {k: _to_float(bs_lookup.get(v, {}).get("TTM")) for k, v in bs_nwc_map.items()}
+    nwc_keys = ["total_current_assets", "total_current_liab",
+                "current_ltd", "st_debt", "current_leases", "cash",
+                "st_investments", "cash_short_term_investments"]
+    bs_ttm = {k: to_float(bs_lookup.get(get_sa_label(k), {}).get("TTM")) for k in nwc_keys}
     nwc_val = debt_free_nwc_excl_cash(bs_ttm) if nwc_exclude_cash else debt_free_nwc_incl_cash(bs_ttm)
     nwc_pct = (nwc_val / rev_ttm) if (nwc_val is not None and rev_ttm) else None
 
@@ -224,30 +215,17 @@ def compute_ttm_fcfe(ttm_net_income, ttm_revenue, depr_pct, capex_pct):
 
 
 def extract_all_gpc_inputs(
-    tickers: List[str],
-    sa_results: Dict[str, Dict[str, list]],
-    ms_rows: list,
-    fred_rows: list,
-    wacc_beta_vals: Dict[str, Optional[float]],
-    erp_val: Optional[float],
-    nwc_exclude_cash: bool = True,
-) -> Dict[str, Any]:
-    """
-    Loops extract_ticker_inputs() for every ticker in the current GPC set
-    (plus subject company). Returns Dict[ticker_upper -> inputs_dict].
-
-    sa_results: Dict[ticker_upper -> {"IS": [...], "BS": [...], "CFS": [...], "Ratios": [...]}]
-    wacc_beta_vals: Dict[ticker_upper -> relevered_beta] — one beta per ticker
-    """
+    tickers, sa_results, ms_rows, fred_rows,
+    wacc_beta_vals, erp_val, nwc_exclude_cash=True,
+):
     all_inputs = {}
     for ticker in tickers:
         ticker_upper = ticker.strip().upper()
-        ticker_sa = sa_results.get(ticker_upper, {})
         beta = wacc_beta_vals.get(ticker_upper)
         try:
             inputs = extract_ticker_inputs(
                 ticker=ticker_upper,
-                sa_results=ticker_sa,
+                sa_results=sa_results,    # ← pass the whole flat pool
                 ms_rows=ms_rows,
                 fred_rows=fred_rows,
                 wacc_beta_val=beta,
@@ -256,7 +234,6 @@ def extract_all_gpc_inputs(
             )
             all_inputs[ticker_upper] = inputs
         except Exception as e:
-            # Don't let one bad ticker kill the whole loop
             all_inputs[ticker_upper] = {"ticker": ticker_upper, "_error": str(e)}
     return all_inputs
 

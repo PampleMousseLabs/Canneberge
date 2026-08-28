@@ -97,41 +97,104 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
 
 def compute_bs_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
     """
-    raw keys expected: cash, st_investments, accounts_receivable,
-        receivables, other_receivables, inventory, other_current_assets,
-        ppe, intangible_assets, goodwill, lt_investments, other_lt_assets,
-        st_debt, current_ltd, current_leases, accounts_payable,
-        accrued_expenses, unearned_revenue, other_current_liab,
-        lt_debt, lt_leases, lt_operating_leases, other_lt_liab,
-        preferred_stock, common_stock, apic, treasury_stock, aoci,
-        minority_interest, retained_earnings, placeholder2, placeholder
+    Component sums for Subject BS totals.
+    Subtotal rule: if a published subtotal is present, use it;
+    otherwise sum the parts. Never add both.
     """
+    cash_sti = raw.get("cash_short_term_investments")
+    if cash_sti is not None:
+        # Subtotal already includes Cash + ST Investments + Trading Asset
+        # Securities, so those three must NOT be added again below.
+        cash_val = cash_sti
+        trading_val = None
+    else:
+        cash_val = _add(raw.get("cash"), raw.get("st_investments"))
+        trading_val = raw.get("trading_asset_securities")
+
+    unearned_val = raw.get("unearned_revenue")
+    if unearned_val is None:
+        unearned_val = raw.get("current_unearned_revenue")
+
+    pref_val = raw.get("preferred_stock")
+    if pref_val is None:
+        pref_val = _add(
+            raw.get("preferred_stock_redeemable"),
+            raw.get("preferred_stock_non_redeemable"),
+            raw.get("preferred_stock_convertible"),
+            raw.get("preferred_stock_other"),
+        )
+
     total_current_assets = _add(
-        raw.get("cash"), raw.get("st_investments"),
-        raw.get("accounts_receivable"), raw.get("receivables"),
-        raw.get("other_receivables"), raw.get("inventory"),
+        cash_val,
+        trading_val,
+        raw.get("accounts_receivable"),
+        raw.get("receivables"),
+        raw.get("other_receivables"),
+        raw.get("inventory"),
+        raw.get("finance_div_loans_and_leases"),
+        raw.get("finance_div_other_current_assets"),
+        raw.get("prepaid_expenses"),
+        raw.get("loans_receivable_current"),
+        raw.get("restricted_cash"),
         raw.get("other_current_assets"),
     )
+
     total_assets = _add(
-        total_current_assets, raw.get("ppe"), raw.get("intangible_assets"),
-        raw.get("goodwill"), raw.get("lt_investments"), raw.get("other_lt_assets"),
+        total_current_assets,
+        raw.get("ppe"),
+        raw.get("net_nuclear_fuel"),
+        raw.get("lt_investments"),
+        raw.get("regulatory_assets"),
+        raw.get("goodwill"),
+        raw.get("intangible_assets"),
+        raw.get("finance_div_loans_and_leases_long_term"),
+        raw.get("long_term_accounts_receivable"),
+        raw.get("long_term_loans_receivable"),
+        raw.get("long_term_deferred_tax_assets"),
+        raw.get("long_term_deferred_charges"),
+        raw.get("other_lt_assets"),
     )
 
     total_current_liab = _add(
-        raw.get("st_debt"), raw.get("current_ltd"), raw.get("current_leases"),
-        raw.get("accounts_payable"), raw.get("accrued_expenses"),
-        raw.get("unearned_revenue"), raw.get("other_current_liab"),
+        raw.get("st_debt"),
+        raw.get("current_ltd"),
+        raw.get("current_leases"),
+        raw.get("accounts_payable"),
+        raw.get("accrued_expenses"),
+        unearned_val,
+        raw.get("other_current_liab"),
+        raw.get("finance_div_debt_current"),
+        raw.get("finance_div_other_current_liabilities"),
+        raw.get("current_income_taxes_payable"),
     )
+
     total_liabilities = _add(
-        total_current_liab, raw.get("lt_debt"), raw.get("lt_leases"),
-        raw.get("lt_operating_leases"), raw.get("other_lt_liab"),
+        total_current_liab,
+        raw.get("lt_debt"),
+        raw.get("finance_div_debt_long_term"),
+        raw.get("lt_leases"),
+        raw.get("lt_operating_leases"),
+        raw.get("finance_div_other_long_term_liabilities"),
+        raw.get("trust_preferred_securities"),
+        raw.get("long_term_unearned_revenue"),
+        raw.get("pension_post_retirement_benefits"),
+        raw.get("long_term_deferred_tax_liabilities"),
+        raw.get("other_lt_liab"),
     )
 
     total_equity = _add(
-        raw.get("preferred_stock"), raw.get("common_stock"), raw.get("apic"),
-        raw.get("treasury_stock"), raw.get("aoci"), raw.get("minority_interest"),
-        raw.get("retained_earnings"), raw.get("placeholder2"), raw.get("placeholder"),
+        pref_val,
+        raw.get("common_stock"),
+        raw.get("apic"),
+        raw.get("treasury_stock"),
+        raw.get("aoci"),
+        raw.get("minority_interest"),
+        raw.get("retained_earnings"),
+        raw.get("distributions_in_excess_of_earnings"),
+        raw.get("placeholder2"),
+        raw.get("placeholder"),
     )
+
     total_liab_equity = _add(total_liabilities, total_equity)
 
     return {
