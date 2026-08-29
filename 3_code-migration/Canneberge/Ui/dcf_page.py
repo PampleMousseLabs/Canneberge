@@ -86,7 +86,6 @@ HIST_BLANK_ROWS = {
     "Partial Period Adjustment", "Present Value Period",
     "Present Value Factor", "Present Value of Free Cash Flows",
 }
-NET_INT_PROJ_PLACEHOLDER = 8008135
 
 def _fmt_currency(value: Optional[float]) -> str:
     if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
@@ -1029,13 +1028,15 @@ class DCFPage(QWidget):
                  get_wacc_value_callback,
                  get_subject_financials_callback,
                  get_projection_data_callback,
-                 update_projection_callback, 
+                 update_projection_callback,
                  get_nwc_change_callback=None,
+                 get_ke_value_callback=None,
                  get_reverse_dcf_inputs_callback=None,
                  get_gpc_tickers_callback=None):
         super().__init__()
         self.get_project_inputs = get_project_inputs_callback
         self.get_wacc_value = get_wacc_value_callback
+        self.get_ke_value = get_ke_value_callback or (lambda: None)
         self._get_subject_financials = get_subject_financials_callback
         self._get_projection_data = get_projection_data_callback
         self._update_projection_callback = update_projection_callback
@@ -1066,6 +1067,12 @@ class DCFPage(QWidget):
         self._build_ui()
         self._recalculate()
         theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _get_discount_rate(self) -> Optional[float]:
+        """Returns Ke for FCFE, WACC for FCFF."""
+        if self._cash_flows_to == "FCFE":
+            return self.get_ke_value()
+        return self.get_wacc_value()
 
     def _apply_theme(self, theme=None):
         self.lbl_client.setStyleSheet(get_bold_style())
@@ -1829,13 +1836,14 @@ class DCFPage(QWidget):
     def _recalculate(self):
         self._rebuild_table_if_needed()
         inputs = self.get_project_inputs()
-        wacc_val = self.get_wacc_value()
+        wacc_val = self._get_discount_rate()
         self.lbl_client.setText(inputs.client)
         self.lbl_subject.setText(inputs.subject_company_name)
         self.lbl_date.setText(f"As of {inputs.valuation_date}")
+        rate_label = "Ke" if self._cash_flows_to == "FCFE" else "WACC"
         pct_str = f"{wacc_val * 100:.2f}%" if wacc_val is not None else "N/A%"
         if self.pv_factor_row_label is not None:
-            self.pv_factor_row_label.setText(f"Present Value Factor @ {pct_str}")
+            self.pv_factor_row_label.setText(f"Present Value Factor @ {rate_label} = {pct_str}")
         fye_years = self._compute_fye_years(inputs)
         for label, lbl_widget in self._fye_labels.items():
             lbl_widget.setText(fye_years.get(label, ""))
@@ -1870,29 +1878,23 @@ class DCFPage(QWidget):
                 lbl_item.widget().setText(f"{new_text} Margin")
 
     def _apply_net_int_proj_visibility(self):
+        """Show Net Interest row only for FCFE. Values come from populate methods."""
         if self._net_int_grid_row is None:
             return
         is_fcff = (self._cash_flows_to == "FCFF")
+        show = not is_fcff
         lbl_item = self.table_grid.itemAtPosition(self._net_int_grid_row, 0)
-        if lbl_item is not None:
-            lbl_item.widget().setVisible(not is_fcff)
+        if lbl_item is not None and lbl_item.widget() is not None:
+            lbl_item.widget().setVisible(show)
         for data_idx in range(len(self._headers)):
-            is_hist_col = self._is_historical[data_idx]
             grid_col = self._grid_col(data_idx)
-            lbl_item = self.table_grid.itemAtPosition(self._net_int_grid_row, grid_col)
-            if lbl_item is None:
+            cell_item = self.table_grid.itemAtPosition(self._net_int_grid_row, grid_col)
+            if cell_item is None:
                 continue
-            widget = lbl_item.widget()
+            widget = cell_item.widget()
             if widget is None:
                 continue
-            if is_hist_col:
-                widget.setVisible(not is_fcff)
-            else:
-                widget.setVisible(not is_fcff)
-                if is_fcff:
-                    widget.setText("0")
-                else:
-                    widget.setText(str(NET_INT_PROJ_PLACEHOLDER))
+            widget.setVisible(show)
 
     def _populate_revenue_and_growth(self, inputs):
         for data_idx, label in enumerate(self._headers):
@@ -1948,9 +1950,24 @@ class DCFPage(QWidget):
                 self._set_currency("Amortization", data_idx, amort)
                 self._set_currency("Net Interest Expense", data_idx, net_int)
             else:
+                # Residual column is owned by _populate_residual_column
+                if label == "Residual":
+                    continue
                 pd = self._get_projection_data()
                 self._set_currency("Depreciation", data_idx, pd.da.get(label))
                 self._set_currency("Amortization", data_idx, 0)
+                # Debt Schedule -> SubjectFinancials.get_metric_value("interest_expense")
+                # Sign convention: displayed as Net Interest Income (Expense),
+                # so interest_expense (positive from Debt Schedule) is shown
+                # negative here; interest_income (zero placeholder for now)
+                # is added positive. Ted's convention.
+                int_exp = self._sf_get("interest_expense", label)
+                int_inc = self._sf_get("interest_income", label) or 0.0
+                if int_exp is None:
+                    net_int = None
+                else:
+                    net_int = -(int_exp or 0.0) + int_inc
+                self._set_currency("Net Interest Expense", data_idx, net_int)
 
     def _populate_ebit_and_ebit_margin(self):
         for data_idx, label in enumerate(self._headers):
@@ -1963,21 +1980,23 @@ class DCFPage(QWidget):
                 ebitda = pd.ebitda.get(label)
                 dep = pd.da.get(label)
                 amort = 0
-            if self._is_historical[data_idx]:
-                int_exp = self._sf_get("interest_expense", label)
-                int_inc = self._sf_get("interest_income", label)
-                if int_exp is None and int_inc is None:
-                    net_int = None
-                else:
-                    net_int = -(int_exp or 0.0) + (int_inc or 0.0)
+            if label == "Residual":
+                continue  # owned by _populate_residual_column
+            int_exp = self._sf_get("interest_expense", label)
+            int_inc = self._sf_get("interest_income", label)
+            if int_exp is None and int_inc is None:
+                net_int = None
             else:
-                net_int = 0.0
+                net_int = -(int_exp or 0.0) + (int_inc or 0.0)
             if ebitda is None or dep is None:
                 ebit_or_ebt = None
             elif self._cash_flows_to == "FCFF":
                 ebit_or_ebt = ebitda - dep - (amort or 0.0)
             else:
-                ebit_or_ebt = ebitda - dep - (amort or 0.0) - (net_int or 0.0)
+                # net_int is already signed (negative for expense).
+                # Adding it correctly subtracts expense or adds income.
+                ebit_or_ebt = ebitda - dep - (amort or 0.0) + (net_int or 0.0)
+
             self._set_currency("EBIT", data_idx, ebit_or_ebt)
             rev = self._sf_get("revenue", label)
             self._set_pct("EBIT Margin", data_idx, _safe_div(ebit_or_ebt, rev))
@@ -2156,7 +2175,7 @@ class DCFPage(QWidget):
         ltgr_now = self._get_ltgr()
         wacc_now = wacc_now if wacc_now is not None else 0.10
         ltgr_now = ltgr_now if ltgr_now is not None else 0.03
-        self._lbl_wacc_ltgr_corner = QLabel("WACC \\ LTGR", styleSheet=get_bold_style())
+        self._lbl_wacc_ltgr_corner = QLabel("Discount Rate \\ LTGR", styleSheet=get_bold_style())
         grid.addWidget(self._lbl_wacc_ltgr_corner, 0, 0)
         DATA_COL_WIDTH = 78
         FIRST_DATA_COL = 2
@@ -2441,7 +2460,9 @@ class DCFPage(QWidget):
         if ebitda is None or depreciation is None:
             ebit_or_ebt = None
         elif is_fcfe:
-            ebit_or_ebt = None if net_interest is None else (ebitda - depreciation - (amortization or 0.0) - net_interest)
+            ebit_or_ebt = None if net_interest is None else (
+                ebitda - depreciation - (amortization or 0.0) + net_interest
+            )
         else:
             ebit_or_ebt = ebitda - depreciation - (amortization or 0.0)
         self._set_currency("EBIT", data_idx, ebit_or_ebt)

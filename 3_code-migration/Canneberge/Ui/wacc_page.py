@@ -289,6 +289,7 @@ class WACCPage(QWidget):
         # decimals for readability — DCF's PV Factor math must not
         # round-trip through that string, so it reads this instead.
         self.wacc_value: Optional[float] = None
+        self.ke_value: Optional[float] = None
         self._build_ui()
         self._recalculate()
 
@@ -914,6 +915,7 @@ class WACCPage(QWidget):
         cost_of_equity = None
         if None not in (risk_free_rate, adjusted_erp, size_premium, csrp):
             cost_of_equity = risk_free_rate + adjusted_erp + size_premium + csrp
+        self.ke_value = cost_of_equity
         self.lbl_cost_of_equity.setText(_fmt_pct(cost_of_equity))
 
         selected_series_label = self.pretax_debt_combo.currentText()

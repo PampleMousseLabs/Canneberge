@@ -113,12 +113,15 @@ class SubjectFinancialsPage(QWidget):
     def __init__(self, get_project_inputs_callback,
                  get_stockanalysis_results_callback,
                  get_private_financials_callback,
-                 get_projection_data_callback=None):
+                 get_projection_data_callback, 
+                 get_debt_interest_callback=None,
+                ):
         super().__init__()
         self.get_project_inputs = get_project_inputs_callback
         self.get_stockanalysis_results = get_stockanalysis_results_callback
         self.get_private_financials = get_private_financials_callback
         self.get_projection_data = get_projection_data_callback or (lambda: ProjectionData())
+        self.get_debt_interest = get_debt_interest_callback 
 
         self._current_statement = "IS"
         self._build_ui()
@@ -381,6 +384,10 @@ class SubjectFinancialsPage(QWidget):
                 calc_by_period[period]["operating_expenses"] = _sub(
                     pd.gross_profit.get(period), pd.ebitda.get(period)
                 )
+                if callable(self.get_debt_interest):
+                    raw_by_period[period]["interest_expense"] = (
+                        self.get_debt_interest(period)
+                    )
 
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
@@ -423,6 +430,10 @@ class SubjectFinancialsPage(QWidget):
                 calc_by_period[period]["operating_expenses"] = _sub(
                     pd.gross_profit.get(period), pd.ebitda.get(period)
                 )
+                if callable(self.get_debt_interest):
+                    raw_by_period[period]["interest_expense"] = (
+                        self.get_debt_interest(period)
+                    )
 
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
@@ -591,6 +602,10 @@ class SubjectFinancialsPage(QWidget):
                 return pd.gross_profit.get(period)
             if key == "ebitda":
                 return pd.ebitda.get(period)
+            if key == "interest_expense":
+                if callable(self.get_debt_interest):
+                    return self.get_debt_interest(period)
+                return None
             if key == "capex":
                 return pd.capex.get(period)
             if key == "cost_of_goods_sold":

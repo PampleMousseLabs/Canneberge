@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
             get_stockanalysis_results_callback=self._get_stockanalysis_results,
             get_private_financials_callback=self._get_private_financials,
             get_projection_data_callback=self._get_projection_data,
+            get_debt_interest_callback=self._get_projected_interest_expense,
         )
 
         self.gt_page = GTPage(
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self.dcf_page = DCFPage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
             get_wacc_value_callback=self._get_wacc_value,
+            get_ke_value_callback=self._get_ke_value,
             get_subject_financials_callback=self.subject_financials_page.get_metric_value,
             get_projection_data_callback=self._get_projection_data,
             update_projection_callback=self._update_projection_controls,
@@ -127,9 +129,9 @@ class MainWindow(QMainWindow):
         # NWC now exists, so let NWC refresh DCF after NWC inputs change.
         self.nwc_page.set_nwc_changed_callback(self.dcf_page.refresh)
 
-        # Debt Schedule — ISOLATED for now. Reads only ProjectInputs
-        # (period dates / projection years). Nothing reads from it yet;
-        # DCF wiring happens later once the schedule is validated.
+        # Debt Schedule — feeds projected interest_expense into
+        # SubjectFinancialsPage (and from there into DCF FCFE).
+        # Created after SubjectFinancialsPage; callback resolves at call time.
         self.debt_schedule_page = DebtSchedulePage(
             get_project_inputs_callback=self.home_page.get_project_inputs,
         )
@@ -156,7 +158,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.wacc_page, "WACC")
         self.tabs.addTab(self.dcf_page, "DCF")
         self.tabs.addTab(self.nwc_page, "NWC")
-        self.tabs.addTab(self.debt_schedule_page, "Debt")
+        self.tabs.addTab(self.debt_schedule_page, "Debt Schedule")
         self.tabs.addTab(self.gt_page, "GT")
         self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
@@ -186,7 +188,12 @@ class MainWindow(QMainWindow):
         nwc_page = getattr(self, "nwc_page", None)
         if nwc_page is None:
             return None
-        return nwc_page.get_changes_in_nwc(period) 
+        return nwc_page.get_changes_in_nwc(period)
+
+    def _get_projected_interest_expense(self, period: str) -> Optional[float]:
+        if hasattr(self, "debt_schedule_page"):
+            return self.debt_schedule_page.get_projected_interest_expense(period)
+        return None
 
     def _get_gpc_tickers(self) -> list:
         """
@@ -409,6 +416,8 @@ class MainWindow(QMainWindow):
             self._refresh_nwc_then_dcf()
         if self.tabs.widget(index) is self.nwc_page:
             self.nwc_page._recalculate()
+        if self.tabs.widget(index) is self.debt_schedule_page:
+            self.debt_schedule_page._recalculate()
         if self.tabs.widget(index) is self.dashboard_page:
             self.dashboard_page.refresh_from_pages()
 
@@ -513,9 +522,6 @@ class MainWindow(QMainWindow):
     def _get_subject_historical_line(self, key: str) -> dict:
         return self.subject_financials_page.get_historical_line_values(key)
 
-    def _get_subject_historical_line(self, key: str) -> dict:
-        return self.subject_financials_page.get_historical_line_values(key)
-
     def _get_subject_metric_value(self, key: str, period: str):
         return self.subject_financials_page.get_metric_value(key, period)
 
@@ -523,6 +529,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'wacc_page'):
             self.wacc_page._recalculate()
             return self.wacc_page.wacc_value
+        return None
+
+    def _get_ke_value(self) -> Optional[float]:
+        if hasattr(self, 'wacc_page'):
+            self.wacc_page._recalculate()
+            return self.wacc_page.ke_value
         return None
 
 
