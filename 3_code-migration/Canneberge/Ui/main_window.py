@@ -25,6 +25,7 @@ from Canneberge.utils.session import (
 )
 from Canneberge.Calculations.reverse_dcf import extract_ticker_inputs
 from Canneberge.utils.sa_utils import to_float as _to_float
+from Canneberge.Ui.analytics_page import AnalyticsPage
 from typing import Optional
 
 
@@ -136,6 +137,14 @@ class MainWindow(QMainWindow):
             get_project_inputs_callback=self.home_page.get_project_inputs,
         )
 
+        self.analytics_page = AnalyticsPage(
+            get_dcf_page=lambda: self.dcf_page,
+            get_wacc_page=lambda: self.wacc_page,
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+        )
+
         # Initial page calculation order matters:
         # NWC calculates first, then DCF reads NWC's Change in NWC.
         self._refresh_nwc_then_dcf()
@@ -152,7 +161,7 @@ class MainWindow(QMainWindow):
             get_subject_debt=self.get_subject_debt,
             get_subject_metric_value=self._get_subject_metric_value,
         )
-
+        
         self.tabs.addTab(self.home_page, "Home")
         self.tabs.addTab(self.dashboard_page, "Dashboard")
         self.tabs.addTab(self.wacc_page, "WACC")
@@ -163,6 +172,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.gpc_page, "GPC")
         self.tabs.addTab(self.subject_financials_page, "Subject Financials")
         self.tabs.addTab(self.source_data_page, "Source Data")
+        self.tabs.addTab(self.analytics_page, "Analytics")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self.tabs)
@@ -420,6 +430,8 @@ class MainWindow(QMainWindow):
             self.debt_schedule_page._recalculate()
         if self.tabs.widget(index) is self.dashboard_page:
             self.dashboard_page.refresh_from_pages()
+        if self.tabs.widget(index) is self.analytics_page:
+            self.analytics_page.refresh()   
 
     def _open_private_financials_dialog(self):
         inputs = self.home_page.get_project_inputs()
