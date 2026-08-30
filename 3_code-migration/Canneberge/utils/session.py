@@ -29,20 +29,12 @@ def save_session(
     nwc_page_state: dict,
     dashboard_page_state: dict,
     debt_page_state: Optional[dict] = None,
+    source_data_results: Optional[dict] = None,
     filepath: Optional[Path] = None,
 ) -> Path:
     """
-    Serialize all current inputs to a JSON file.
+    Serialize all current inputs and cached web source data to a JSON file.
     Returns the path written to.
-
-    projection_page_state dict keys:
-        revenue              {period: float | null}
-        revenue_growth       {period: float | null}
-        gp_improvement       {period: float | null}
-        ebitda_improvement   {period: float | null}
-        da_pct               {period: float | null}
-        capex_pct            {period: float | null}
-        last_edited_revenue  {period: "revenue" | "growth" | null}
     """
     _ensure_dir()
 
@@ -55,7 +47,7 @@ def save_session(
         filepath = SESSION_DIR / f"{name}_{timestamp}.json"
 
     payload = {
-        "version": 1,
+        "version": 2,
         "saved_at": datetime.now().isoformat(),
 
         "project_inputs": {
@@ -106,6 +98,7 @@ def save_session(
         "nwc_page_state":        nwc_page_state,
         "debt_page_state":       debt_page_state or {},
         "dashboard_page_state":  dashboard_page_state,
+        "source_data_results":   source_data_results or {},
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -117,28 +110,21 @@ def save_session(
 def load_session(filepath: Path) -> dict:
     """
     Load a session JSON file.
-    Returns a dict with keys:
-        project_inputs_raw      (dict)
-        private_financials      (PrivateFinancials)
-        gt_page_state           (dict)
-        gpc_page_state          (dict)
-        projection_page_state   (dict)
-        wacc_page_state         (dict)
-        dcf_page_state          (dict)
     """
     with open(filepath, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
-    pi_raw   = payload.get("project_inputs", {})
-    pf_raw   = payload.get("private_financials", {})
-    gt_raw   = payload.get("gt_page_state", {})
-    gpc_raw  = payload.get("gpc_page_state", {})
-    proj_raw = payload.get("projection_page_state", {})
-    wacc_raw = payload.get("wacc_page_state", {})
-    dcf_raw  = payload.get("dcf_page_state", {})
-    nwc_raw  = payload.get("nwc_page_state", {})
-    debt_raw = payload.get("debt_page_state", {})
+    pi_raw        = payload.get("project_inputs", {})
+    pf_raw        = payload.get("private_financials", {})
+    gt_raw        = payload.get("gt_page_state", {})
+    gpc_raw       = payload.get("gpc_page_state", {})
+    proj_raw      = payload.get("projection_page_state", {})
+    wacc_raw      = payload.get("wacc_page_state", {})
+    dcf_raw       = payload.get("dcf_page_state", {})
+    nwc_raw       = payload.get("nwc_page_state", {})
+    debt_raw      = payload.get("debt_page_state", {})
     dashboard_raw = payload.get("dashboard_page_state", {})
+    sources_raw   = payload.get("source_data_results", {})
 
     pf = PrivateFinancials(
         is_data=pf_raw.get("is_data", {}),
@@ -146,6 +132,7 @@ def load_session(filepath: Path) -> dict:
     )
 
     return {
+        "saved_at":             payload.get("saved_at", ""),
         "project_inputs_raw":    pi_raw,
         "private_financials":    pf,
         "gt_page_state":         gt_raw,
@@ -156,14 +143,11 @@ def load_session(filepath: Path) -> dict:
         "nwc_page_state":        nwc_raw,
         "debt_page_state":       debt_raw,
         "dashboard_page_state":  dashboard_raw,
+        "source_data_results":   sources_raw,
     }
 
 
 def list_sessions() -> list:
-    """
-    Returns list of session files sorted newest first.
-    Each entry: {"path": Path, "name": str, "saved_at": str}
-    """
     _ensure_dir()
     files = sorted(
         SESSION_DIR.glob("*.json"),

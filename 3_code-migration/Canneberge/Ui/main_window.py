@@ -27,6 +27,7 @@ from Canneberge.Calculations.reverse_dcf import extract_ticker_inputs
 from Canneberge.utils.sa_utils import to_float as _to_float
 from Canneberge.Ui.analytics_page import AnalyticsPage
 from typing import Optional
+from datetime import datetime
 
 
 class MainWindow(QMainWindow):
@@ -934,6 +935,44 @@ class MainWindow(QMainWindow):
                 self, "Save Failed", f"Could not save session:\n{e}"
             )
 
+    def _on_save_session(self):
+        inputs = self.home_page.get_project_inputs()
+        gt_state   = self._collect_gt_page_state()
+        gpc_state  = self._collect_gpc_page_state()
+        proj_state = self._collect_projection_page_state()
+        wacc_state = self._collect_wacc_page_state()
+        dcf_state = self._collect_dcf_page_state()
+        nwc_state = self._collect_nwc_page_state()
+        debt_state = self._collect_debt_schedule_state()
+        dashboard_state = self._collect_dashboard_page_state()
+        source_data_results = getattr(self.source_data_page, "all_results", {})
+
+        try:
+            path = save_session(
+                project_inputs=inputs,
+                private_financials=self._private_financials,
+                gt_page_state=gt_state,
+                gpc_page_state=gpc_state,
+                projection_page_state=proj_state,
+                wacc_page_state=wacc_state,
+                dcf_page_state=dcf_state,
+                nwc_page_state=nwc_state,
+                debt_page_state=debt_state,
+                dashboard_page_state=dashboard_state,
+                source_data_results=source_data_results,
+                filepath=self._current_session_path,
+            )
+            self._current_session_path = path
+            self.setWindowTitle(f"Canneberge — {path.stem}")
+            QMessageBox.information(
+                self, "Session Saved",
+                f"Session saved to:\n{path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Save Failed", f"Could not save session:\n{e}"
+            )
+
     def _on_save_session_as(self):
         path_str, _ = QFileDialog.getSaveFileName(
             self, "Save Session As", str(SESSION_DIR), "JSON files (*.json)"
@@ -954,6 +993,8 @@ class MainWindow(QMainWindow):
         debt_state = self._collect_debt_schedule_state()
         nwc_state = self._collect_nwc_page_state()
         dashboard_state = self._collect_dashboard_page_state()
+        source_data_results = getattr(self.source_data_page, "all_results", {})
+
         try:
             saved_path = save_session(
                 project_inputs=inputs,
@@ -966,6 +1007,7 @@ class MainWindow(QMainWindow):
                 nwc_page_state=nwc_state,
                 debt_page_state=debt_state,
                 dashboard_page_state=dashboard_state,
+                source_data_results=source_data_results,
                 filepath=path,
             )
             self._current_session_path = saved_path
@@ -980,8 +1022,6 @@ class MainWindow(QMainWindow):
             )
 
     def _on_load_session(self):
-        sessions = list_sessions()
-
         path_str, _ = QFileDialog.getOpenFileName(
             self, "Load Session",
             str(SESSION_DIR),
@@ -999,6 +1039,7 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 1. Restore UI and Page States
         self._apply_project_inputs_to_home(data["project_inputs_raw"])
         self._private_financials = data["private_financials"]
         self._apply_gt_page_state(data["gt_page_state"])
@@ -1010,23 +1051,52 @@ class MainWindow(QMainWindow):
         self._apply_debt_schedule_state(data.get("debt_page_state", {}))
         self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
 
-        self.subject_financials_page.refresh()
-        self.gt_page._recalculate()
-        self.gpc_page._recalculate()
-        self._refresh_nwc_then_dcf()
+        # 2. Restore cached source data into SourceDataPage
+        cached_sources = data.get("source_data_results", {})
+        if cached_sources and hasattr(self.source_data_page, "all_results"):
+            self.source_data_page.all_results = cached_sources
 
-        # Block on a full source refresh before confirming the session
-        # is loaded. QProgressDialog.exec() runs its own local event
-        # loop, so it does NOT freeze Qt's signal processing — the
-        # SourceDataWorker QThreads keep running and their signals
-        # still reach _update_progress/_on_all_done while this dialog
-        # is up. No Cancel button: a partial refresh mid-batch would
-        # leave some sources stale with no clear recovery path, so
-        # canceling isn't offered here.
+        # 3. Recalculate all pages instantly in memory (0.05 seconds)
+        self._on_source_data_refresh_finished()
+
+        self._current_session_path = filepath
+        self.setWindowTitle(f"Canneberge — {filepath.stem}")
+
+        # 4. Optional Web Refresh Prompt
+        saved_at_str = data.get("saved_at", "Unknown")
+        if saved_at_str != "Unknown":
+            try:
+                dt = datetime.fromisoformat(saved_at_str)
+                saved_at_str = dt.strftime("%B %d, %Y at %I:%M %p")
+            except Exception:
+                pass
+
+        has_cached_data = bool(cached_sources)
+        prompt_msg = (
+            f"Session '{filepath.stem}' loaded instantly.\n\n"
+            f"Cached Data Saved At: {saved_at_str}\n\n"
+            "Would you like to refresh live market data from the web now?"
+            if has_cached_data else
+            "Session loaded. No cached market data found in file.\nRefresh market data from web now?"
+        )
+
+        reply = QMessageBox.question(
+            self,
+            "Session Loaded",
+            prompt_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No if has_cached_data else QMessageBox.StandardButton.Yes,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self._trigger_web_refresh_with_progress()
+
+    def _trigger_web_refresh_with_progress(self):
+        """Runs the web scraping refresh with a modal progress dialog."""
         progress_dialog = QProgressDialog(
             "Refreshing all sources...", None, 0, len(self.source_data_page.SOURCES), self
         )
-        progress_dialog.setWindowTitle("Loading Session")
+        progress_dialog.setWindowTitle("Refreshing Market Data")
         progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         progress_dialog.setMinimumDuration(0)
         progress_dialog.setValue(0)
@@ -1041,17 +1111,10 @@ class MainWindow(QMainWindow):
                 self.source_data_page.source_progress.disconnect(_update_progress)
                 self.source_data_page.all_sources_finished.disconnect(_on_all_done)
             except TypeError:
-                pass  # already disconnected — harmless
+                pass
 
             progress_dialog.setValue(len(self.source_data_page.SOURCES))
             progress_dialog.close()
-
-            self._current_session_path = filepath
-            self.setWindowTitle(f"Canneberge — {filepath.stem}")
-            QMessageBox.information(
-                self, "Session Loaded",
-                f"Session loaded:\n{filepath.stem}"
-            )
 
         self.source_data_page.source_progress.connect(_update_progress)
         self.source_data_page.all_sources_finished.connect(_on_all_done)

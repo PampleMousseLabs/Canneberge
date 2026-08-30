@@ -2219,52 +2219,80 @@ class DCFPage(QWidget):
         self,
         wacc_override: float,
         ltgr_override: float,
+        ga_override: Optional[float] = None,
+        h_override: Optional[float] = None,
     ) -> Optional[float]:
         """
-        Pure WACC/LTGR override FV calculation.
-        Does not mutate any visible UI state permanently.
-        Used by both the sensitivity table and the valuation surface.
-
-        Returns unrounded fair value float or None.
+        Pure mathematical WACC/LTGR override FV calculation.
+        Executes entirely in memory with zero Qt widget mutation.
         """
-        orig_ltgr_text = self.ltg_input.text()
-        try:
-            self.ltg_input.setText(f"{ltgr_override * 100:.4f}%")
-            inputs = self.get_project_inputs()
-            self._populate_residual_column(inputs)
-            self._populate_pv_chain(wacc_override, inputs)
-            self._populate_terminal_value(wacc_override, inputs)
+        from Canneberge.Calculations.valuation_surface import evaluate_dcf_fv
 
-            # Roll up FV directly from labels — same as bridge
-            pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
-            sum_pv_fcf = 0.0
-            any_val = False
-            for data_idx, label in enumerate(self._headers):
-                if self._is_historical[data_idx] or label == "Residual":
-                    continue
-                v = _read_label(self._calc_labels, pv_fcf_idx, data_idx)
-                if v is not None:
-                    sum_pv_fcf += v
-                    any_val = True
-            sum_pv_fcf = sum_pv_fcf if any_val else None
+        final_idx = self._num_hist + self._num_proj - 1
+        if final_idx < 0:
+            return None
 
-            model = self.tv_model_combo.currentText()
-            disc_resid_lbl = self._tv_outputs.get(model, {}).get("pv_residual_value")
-            disc_resid = _parse_label_as_float(disc_resid_lbl.text()) if disc_resid_lbl else None
+        # 1. Sum explicit PV FCFs
+        pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
+        sum_pv_fcf = 0.0
+        any_val = False
+        for data_idx, label in enumerate(self._headers):
+            if self._is_historical[data_idx] or label == "Residual":
+                continue
+            v = _read_label(self._calc_labels, pv_fcf_idx, data_idx)
+            if v is not None:
+                sum_pv_fcf += v
+                any_val = True
 
-            other_adj_text = self.bridge_other_adj_input.text().strip()
-            other_adj = _parse_label_as_float(other_adj_text) if other_adj_text else 0.0
+        # 2. Extract final projected year base metrics
+        pvp_idx = self._row_idx.get("Present Value Period")
+        final_pvp = _read_label(self._calc_labels, pvp_idx, final_idx)
+        final_fcf = _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), final_idx)
+        final_revenue = _read_label(self._calc_labels, self._row_idx.get("Revenue"), final_idx)
+        final_capex = _read_label(self._calc_labels, self._row_idx.get("Less: Capital Expenditures (CapEx)"), final_idx)
 
-            if sum_pv_fcf is None and disc_resid is None:
-                return None
-            return (sum_pv_fcf or 0.0) + (disc_resid or 0.0) + (other_adj or 0.0)
-        finally:
-            self.ltg_input.setText(orig_ltgr_text)
-            inputs = self.get_project_inputs()
-            self._populate_residual_column(inputs)
-            self._populate_pv_chain(self.get_wacc_value(), inputs)
-            self._populate_terminal_value(self.get_wacc_value(), inputs)
-            self._populate_fv_bridge(inputs)
+        # 3. Extract inputs
+        inputs = self.get_project_inputs()
+        model = self.tv_model_combo.currentText()
+
+        other_adj_bridge_text = self.bridge_other_adj_input.text().strip()
+        other_adj_bridge = _parse_label_as_float(other_adj_bridge_text) or 0.0
+
+        # H-Model params (allow overrides from 3D surface sliders)
+        num_years = h_override if h_override is not None else (
+            _parse_label_as_float(self._tv_inputs.get("H-Model", {}).get("num_years").text())
+            if self._tv_inputs.get("H-Model", {}).get("num_years") else 5.0
+        )
+        short_growth_text = self._tv_inputs.get("H-Model", {}).get("short_term_growth")
+        short_growth = ga_override if ga_override is not None else (
+            _parse_pct_field(short_growth_text.text()) if short_growth_text else 0.20
+        )
+
+        # Multiples
+        ebitda_m = _parse_multiple(self._tv_inputs.get("EBITDA Multiple", {}).get("multiple"))
+        rev_m    = _parse_multiple(self._tv_inputs.get("Revenue Multiple", {}).get("multiple"))
+
+        return evaluate_dcf_fv(
+            wacc=wacc_override,
+            ltgr=ltgr_override,
+            sum_pv_explicit_fcf=(sum_pv_fcf if any_val else None),
+            final_pvp=final_pvp,
+            final_fcf=final_fcf,
+            final_revenue=final_revenue,
+            final_capex=final_capex,
+            dep_pct_of_capex=self._get_dep_pct_of_capex(),
+            tax_rate=inputs.subject_tax_rate,
+            dfcfnwc_residual=self._get_nwc_change("Residual"),
+            other_adj_residual=0.0,
+            other_adj_bridge=other_adj_bridge,
+            is_fcfe=(self._cash_flows_to == "FCFE"),
+            final_net_interest=_read_label(self._calc_labels, self._row_idx.get("Net Interest Expense"), final_idx),
+            model=model,
+            h_num_years=num_years,
+            h_short_growth=short_growth,
+            ebitda_mult=ebitda_m,
+            revenue_mult=rev_m,
+        )
 
     def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:
         """Legacy wrapper — sensitivity table still uses this signature."""
@@ -2275,7 +2303,7 @@ class DCFPage(QWidget):
         return self._compute_fv_for_assumptions(wacc_override, ltgr_val)
 
     def _get_surface_data(self) -> Optional[Dict]:
-        """Builds surface data from current sensitivity table inputs."""
+        """Builds surface data from current sensitivity table inputs and active model."""
         def _pct_or_none(text: str) -> Optional[float]:
             v = _parse_label_as_float(text)
             return (v / 100.0) if v is not None else None
@@ -2288,10 +2316,13 @@ class DCFPage(QWidget):
         if not wacc_clean or not ltgr_clean:
             return None
 
+        model_name = self.tv_model_combo.currentText()
+
         return compute_gg_surface_data_from_explicit(
             fv_func=self._compute_fv_for_assumptions,
             wacc_values=wacc_clean,
             ltgr_values=ltgr_clean,
+            model_name=model_name,
         )
 
     def _open_valuation_surface(self):
@@ -2303,7 +2334,7 @@ class DCFPage(QWidget):
         surface_data = self._get_surface_data()
         if surface_data is None:
             return
-        dlg = GGSurfaceChart(self)
+        dlg = GGSurfaceChart(self, fv_evaluator=self._compute_fv_for_assumptions)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.destroyed.connect(self._on_surface_dialog_closed)
         dlg.update_data(surface_data)
@@ -2327,6 +2358,7 @@ class DCFPage(QWidget):
             return
         wacc_now = self.get_wacc_value()
         ltgr_now = self._get_ltgr()
+
         if wacc_now is not None:
             for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
                 inp = self.sens_wacc_inputs[col]
@@ -2334,6 +2366,7 @@ class DCFPage(QWidget):
                     new_text = f"{(wacc_now + offset) * 100:.4f}%"
                     inp.setText(new_text)
                     self._sens_wacc_auto_text[col] = new_text
+
         if ltgr_now is not None:
             for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
                 inp = self.sens_ltgr_inputs[row]
@@ -2341,13 +2374,17 @@ class DCFPage(QWidget):
                     new_text = f"{(ltgr_now + offset) * 100:.1f}%"
                     inp.setText(new_text)
                     self._sens_ltgr_auto_text[row] = new_text
+
         def _pct_or_none(text: str) -> Optional[float]:
             v = _parse_label_as_float(text)
             return (v / 100.0) if v is not None else None
+
         wacc_vals = [_pct_or_none(w.text()) for w in self.sens_wacc_inputs]
         ltgr_vals = [_pct_or_none(l.text()) for l in self.sens_ltgr_inputs]
+
         high_coord = (3, 1)
-        low_coord = (1, 3)
+        low_coord  = (1, 3)
+
         for row in range(5):
             for col in range(5):
                 lbl = self.sens_value_labels[row][col]
@@ -2357,16 +2394,19 @@ class DCFPage(QWidget):
                     lbl.setText("-")
                     lbl.setStyleSheet("")
                     continue
-                fv = self._compute_fv_base_for(w, self.sens_ltgr_inputs[row].text())
+                fv = self._compute_fv_for_assumptions(w, l)
                 lbl.setText(_fmt_currency(fv))
-                lbl.setStyleSheet(get_bold_style() if (row, col) in (high_coord, low_coord) else "")
-        self.bridge_fv_high_label.setText(self.sens_value_labels[high_coord[0]][high_coord[1]].text())
-        self.bridge_fv_low_label.setText(self.sens_value_labels[low_coord[0]][low_coord[1]].text())
-        wacc_val = self.get_wacc_value()
-        self._populate_residual_column(inputs)
-        self._populate_pv_chain(wacc_val, inputs)
-        self._populate_terminal_value(wacc_val, inputs)
-        self._populate_fv_bridge(inputs)
+                lbl.setStyleSheet(
+                    get_bold_style() if (row, col) in (high_coord, low_coord) else ""
+                )
+
+        self.bridge_fv_high_label.setText(
+            self.sens_value_labels[high_coord[0]][high_coord[1]].text()
+        )
+        self.bridge_fv_low_label.setText(
+            self.sens_value_labels[low_coord[0]][low_coord[1]].text()
+        )
+
         self._push_surface_update()
 
     def _populate_fv_bridge(self, inputs):
