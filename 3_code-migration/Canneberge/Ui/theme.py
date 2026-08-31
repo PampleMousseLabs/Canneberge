@@ -40,6 +40,12 @@ class Theme:
     header_bg: str
     bold_text: str            # color used alongside font-weight: bold labels
     link_color: str
+    primary_button_bg: str    # solid fill for primary action buttons (Save, Commit, etc.)
+    primary_button_fg: str    # text color on primary action buttons
+    accent_button_bg: str     # emphasis button fill (e.g. Live Marks)
+    accent_button_fg: str     # emphasis button text color
+    table_selection_bg: str   # QTableWidget row selection background
+    table_selection_fg: str   # QTableWidget row selection text color
     border_color: str
     emphasis_border: str      # purple-toned border marking a special/subtotal row (NWC total row, etc.) - distinct from plain border_color
     disabled_bg: str
@@ -100,15 +106,14 @@ class Theme:
 
     def primary_button_style(self) -> str:
         """
-        Solid, filled "primary action" button (Save, etc.) - reuses
-        link_color as the fill rather than adding a new field, since
-        it was already exactly this color (#1a4a8a) hardcoded
-        independently in at least two files (private_financials_input_page.py
-        and projection_module_page.py) before this existed.
+        Solid, filled "primary action" button (Save, Commit, etc.).
+        Uses theme fields primary_button_bg and primary_button_fg.
         """
         return (
-            f"background-color: {self.link_color}; color: white; "
-            "font-weight: bold; padding: 4px 16px;"
+            f"background-color: {self.primary_button_bg}; "
+            f"color: {self.primary_button_fg}; "
+            f"font-weight: bold; padding: 4px 16px; "
+            f"border: 1px solid {self.primary_button_bg};"
         )
 
     def disabled_style(self) -> str:
@@ -125,6 +130,89 @@ class Theme:
 
     def dark_header_style(self) -> str:
         return f"background-color: {self.dark_header_bg}; color: {self.dark_header_fg};"
+
+    def button_style(self) -> str:
+        """
+        Standard QPushButton chrome for toolbars / view toggles.
+        QPalette alone does not recolor Fusion button faces.
+        """
+        return f"""
+            QPushButton {{
+                background-color: {self.header_bg};
+                color: {self.default_text};
+                border: 1px solid {self.border_color};
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.input_bg};
+                color: {self.input_text};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.input_bg};
+                color: {self.input_text};
+            }}
+            QPushButton:checked {{
+                background-color: {self.window_bg};
+                color: {self.bold_text};
+                font-weight: bold;
+                border: 1px solid {self.border_color};
+            }}
+            QPushButton:disabled {{
+                background-color: {self.disabled_bg};
+                color: {self.disabled_text};
+            }}
+        """
+
+    def accent_button_style(self) -> str:
+        """
+        Filled emphasis button (e.g. Live Marks).
+        Uses theme fields accent_button_bg and accent_button_fg.
+        """
+        return (
+            f"background-color: {self.accent_button_bg}; "
+            f"color: {self.accent_button_fg}; "
+            f"font-weight: bold; padding: 4px 10px; "
+            f"border: 1px solid {self.accent_button_bg};"
+        )
+
+    def table_style(self) -> str:
+        """
+        QTableWidget + header. Headers stay light-grey under Fusion
+        unless QHeaderView::section is styled explicitly.
+        """
+        return f"""
+            QTableWidget {{
+                background-color: {self.window_bg};
+                color: {self.default_text};
+                gridline-color: {self.border_color};
+                border: 1px solid {self.border_color};
+                outline: none;
+            }}
+            QTableWidget::item {{
+                background-color: {self.window_bg};
+                color: {self.default_text};
+                padding: 2px 4px;
+            }}
+            QTableWidget::item:selected {{
+                background-color: {self.table_selection_bg};
+                color: {self.table_selection_fg};
+            }}
+            QHeaderView::section {{
+                background-color: {self.header_bg};
+                color: {self.default_text};
+                font-weight: bold;
+                padding: 4px 6px;
+                border: 1px solid {self.border_color};
+            }}
+            QTableCornerButton::section {{
+                background-color: {self.header_bg};
+                border: 1px solid {self.border_color};
+            }}
+            QTableWidget QTableCornerButton::section {{
+                background-color: {self.header_bg};
+                border: 1px solid {self.border_color};
+            }}
+        """
 
     def tab_bar_style(self) -> str:
         """
@@ -213,6 +301,12 @@ SLATE_AND_GOLD = Theme(
     header_bg="#f0f0f0",
     bold_text="#000000",
     link_color="#1a4a8a",
+    primary_button_bg="#1a4a8a",
+    primary_button_fg="#ffffff",
+    accent_button_bg="#2e7d32",
+    accent_button_fg="#ffffff",
+    table_selection_bg="#dce9f7",
+    table_selection_fg="#1a4a8a",
     border_color="#000000",
     emphasis_border="#4b1f7a",
     disabled_bg="#f0f0f0",
@@ -247,6 +341,12 @@ ONE_DARK_PRO = Theme(
     header_bg="#3e4451",
     bold_text="#abb2bf",
     link_color="#ff9100",
+    primary_button_bg="#2b5278",
+    primary_button_fg="#ffffff",
+    accent_button_bg="#238636",
+    accent_button_fg="#ffffff",
+    table_selection_bg="#3b4048",
+    table_selection_fg="#61afef",
     border_color="#181a1f",
     emphasis_border="#c678dd",
     disabled_bg="#33383f",
@@ -281,6 +381,12 @@ GITHUB_LIGHT = Theme(
     header_bg="#f6f8fa",
     bold_text="#24292f",
     link_color="#0969da",
+    primary_button_bg="#0969da",
+    primary_button_fg="#ffffff",
+    accent_button_bg="#1a7f37",
+    accent_button_fg="#ffffff",
+    table_selection_bg="#ddf4ff",
+    table_selection_fg="#0969da",
     border_color="#d0d7de",
     emphasis_border="#8250df",
     disabled_bg="#f6f8fa",

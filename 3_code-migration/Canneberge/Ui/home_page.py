@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QSpinBox,
     QPushButton,
+    QScrollArea,
+    QFrame,
 )
 from PyQt6.QtCore import Qt
 from typing import Optional
@@ -32,12 +34,11 @@ def get_link_style() -> str:
     return theme_manager.current.link_style()
 
 
-
 class HomePage(QWidget):
     def __init__(self):
         super().__init__()
         self._private_financials_callback = None
-        self._projection_module_callback = None   # ADD THIS LINE
+        self._projection_module_callback = None
         self._build_ui()
 
         theme_manager.theme_changed.connect(self._apply_theme)
@@ -67,9 +68,17 @@ class HomePage(QWidget):
     def set_projection_module_callback(self, callback):
         """Called by MainWindow to wire the projection module dialog opener."""
         self._projection_module_callback = callback
-    
+
     def _build_ui(self):
-        main_layout = QVBoxLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
         top_layout = QHBoxLayout()
 
         # -------------------------------------------------
@@ -165,8 +174,7 @@ class HomePage(QWidget):
             self._open_private_financials
         )
 
-        # Projection module link button (shown when Private Company,
-        # positioned below Enter Financial Data)
+        # Projection module link button
         self.projection_module_btn = QPushButton("Projection Module →")
         self.projection_module_btn.setStyleSheet(
             get_link_style() + " text-align: left;"
@@ -386,9 +394,13 @@ class HomePage(QWidget):
         main_layout.addWidget(projection_box)
 
         main_layout.addStretch()
-        self.setLayout(main_layout)
 
-        # Set initial visibility state
+        scroll.setWidget(container)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        # Initial visibility state
         self._on_company_status_changed(
             self.company_status_combo.currentText()
         )
@@ -397,7 +409,7 @@ class HomePage(QWidget):
         is_private = status.strip().lower() == "private company"
         self.subject_ticker_input.setVisible(not is_private)
         self.private_financials_btn.setVisible(is_private)
-        self.projection_module_btn.setVisible(True)  
+        self.projection_module_btn.setVisible(True)
 
     def _open_projection_module(self):
         if self._projection_module_callback:

@@ -45,11 +45,20 @@ def _dbg(stage: str, msg: str):
 
 @dataclass
 class MethodRow:
-    """One row of the bridge (one method-multiple)."""
+    """One row of the bridge (one method-multiple).
+
+    source_basis identifies what basis the input (bev_low/bev_high)
+    is actually already on:
+      "BEV"    - values are BEV (pre-bridge); waterfall runs BEV -> Equity
+      "Equity" - values are already Equity (controlling or noncontrolling
+                 depending on apply_dloc); back into BEV by adding
+                 debt + liq and subtracting cash/nwc/nol/non-op
+    """
     name: str
     bev_low: Optional[float]
     bev_high: Optional[float]
     apply_dloc: bool  # True for controlling basis (DCF, GT)
+    source_basis: str = "BEV"
 
     # computed
     ic_low: Optional[float] = None
@@ -81,7 +90,17 @@ class BridgeInputs:
 
 
 def compute_bridge(rows: List[MethodRow], inputs: BridgeInputs) -> List[MethodRow]:
-    """Runs the full Excel bridge on every method row, in place."""
+    """Runs the bridge on every method row, in place.
+
+    source_basis == "BEV":
+        BEV + additions = IC; IC - debt - liq = Equity;
+        optional DLOC; / shares = $/sh
+
+    source_basis == "Equity":
+        Equity is kept exactly as the source page emitted it.
+        No DLOC. Implied BEV = Equity + debt + liq - additions.
+        $/sh = Equity / shares.
+    """
     cash = inputs.cash or 0.0
     nwc = inputs.nwc_surplus or 0.0
     nol = inputs.acquired_nol or 0.0
@@ -92,39 +111,56 @@ def compute_bridge(rows: List[MethodRow], inputs: BridgeInputs) -> List[MethodRo
     shares = inputs.shares_outstanding
 
     additions = cash + nwc + nol + non_op
+    deductions = debt + liq
 
-    _dbg("inputs",
-         f"cash={cash:,.2f} nwc={nwc:,.2f} nol={nol:,.2f} "
-         f"non_op={non_op:,.2f} debt={debt:,.2f} liq={liq:,.2f} "
-         f"dloc={dloc:.4f} shares={shares}")
+    _dbg(
+        "inputs",
+        f"cash={cash:,.2f} nwc={nwc:,.2f} nol={nol:,.2f} "
+        f"non_op={non_op:,.2f} debt={debt:,.2f} liq={liq:,.2f} "
+        f"dloc={dloc:.4f} shares={shares}",
+    )
 
     for row in rows:
         if row.bev_low is None and row.bev_high is None:
-            _dbg("row", f"{row.name}: no BEV values, skipped")
+            _dbg("row", f"{row.name}: no values, skipped")
             continue
 
         for side in ("low", "high"):
-            bev = getattr(row, f"bev_{side}")
-            if bev is None:
+            src = getattr(row, f"bev_{side}")
+            if src is None:
                 continue
 
-            ic = bev + additions
-            equity = ic - debt - liq
-            if row.apply_dloc and dloc:
-                equity *= (1.0 - dloc)
+            if getattr(row, "source_basis", "BEV") == "Equity":
+                equity = src
+                bev = equity + deductions - additions
+                ic = bev + additions
+                per_share = (equity / shares) if shares else None
 
-            per_share = (equity / shares) if shares else None
+                setattr(row, f"bev_{side}", bev)
+                setattr(row, f"ic_{side}", ic)
+                setattr(row, f"equity_{side}", equity)
+                setattr(row, f"per_share_{side}", per_share)
+            else:
+                bev = src
+                ic = bev + additions
+                equity = ic - deductions
+                if row.apply_dloc and dloc:
+                    equity = equity * (1.0 - dloc)
+                per_share = (equity / shares) if shares else None
 
-            setattr(row, f"ic_{side}", ic)
-            setattr(row, f"equity_{side}", equity)
-            setattr(row, f"per_share_{side}", per_share)
+                setattr(row, f"ic_{side}", ic)
+                setattr(row, f"equity_{side}", equity)
+                setattr(row, f"per_share_{side}", per_share)
 
-        _dbg("row",
-             f"{row.name}: BEV=({row.bev_low}, {row.bev_high}) "
-             f"IC=({row.ic_low}, {row.ic_high}) "
-             f"Eq=({row.equity_low}, {row.equity_high}) "
-             f"$/sh=({row.per_share_low}, {row.per_share_high}) "
-             f"dloc={'Y' if row.apply_dloc else 'N'}")
+        _dbg(
+            "row",
+            f"{row.name} [{getattr(row, 'source_basis', 'BEV')}]: "
+            f"BEV=({row.bev_low}, {row.bev_high}) "
+            f"IC=({row.ic_low}, {row.ic_high}) "
+            f"Eq=({row.equity_low}, {row.equity_high}) "
+            f"$/sh=({row.per_share_low}, {row.per_share_high}) "
+            f"dloc={'Y' if row.apply_dloc else 'N'}",
+        )
 
     return rows
 

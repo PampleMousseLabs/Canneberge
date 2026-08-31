@@ -370,24 +370,63 @@ class SubjectFinancialsPage(QWidget):
         proj_periods = inputs.projection_period_columns
         if self._current_statement == "IS" and proj_periods:
             pd = self.get_projection_data()
+            tax_rate = getattr(inputs, "subject_tax_rate", None)
             for period in proj_periods:
                 raw_by_period.setdefault(period, {})
                 calc_by_period.setdefault(period, {})
-                raw_by_period[period]["revenue"] = pd.revenue.get(period)
-                raw_by_period[period]["depreciation"] = pd.da.get(period)
-                calc_by_period[period]["gross_profit"] = pd.gross_profit.get(period)
-                calc_by_period[period]["ebitda"] = pd.ebitda.get(period)
+
+                # --- Raw / module-sourced inputs ---
+                rev = pd.revenue.get(period)
+                gp = pd.gross_profit.get(period)
+                ebitda_mod = pd.ebitda.get(period)
+                da = pd.da.get(period)
+
+                raw_by_period[period]["revenue"] = rev
+                raw_by_period[period]["d&a_for_ebitda"] = da
+                raw_by_period[period]["depreciation"] = da
                 raw_by_period[period]["capex"] = pd.capex.get(period)
-                calc_by_period[period]["cost_of_goods_sold"] = _sub(
-                    pd.revenue.get(period), pd.gross_profit.get(period)
-                )
-                calc_by_period[period]["operating_expenses"] = _sub(
-                    pd.gross_profit.get(period), pd.ebitda.get(period)
-                )
+
+                # Seed calc rows Projection Module already owns (keep as anchors)
+                # Also invert into COGS / OpEx components so compute_is_calculated
+                # can rebuild the same waterfall as historicals.
+                if rev is not None and gp is not None:
+                    raw_by_period[period]["cogs"] = rev - gp
+                if gp is not None and ebitda_mod is not None:
+                    # Put residual opex into other_operating so opex sum = GP - EBITDA
+                    raw_by_period[period]["other_operating"] = gp - ebitda_mod
+
                 if callable(self.get_debt_interest):
+                    val = self.get_debt_interest(period)
                     raw_by_period[period]["interest_expense"] = (
-                        self.get_debt_interest(period)
+                        -abs(val) if val is not None else None
                     )
+
+                # Full IS waterfall (EBIT, Pretax, NI, DFNI, …)
+                calc = compute_is_calculated(raw_by_period[period])
+
+                # Prefer module GP/EBITDA when present (they are the planning drivers)
+                if gp is not None:
+                    calc["gross_profit"] = gp
+                if ebitda_mod is not None:
+                    calc["ebitda"] = ebitda_mod
+                calc["cost_of_goods_sold"] = _sub(rev, gp)
+                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+                # Projected tax: no separate forecast line — apply subject statutory rate
+                pretax = calc.get("pretax_income")
+                if pretax is not None and tax_rate is not None:
+                    taxes = pretax * tax_rate
+                    raw_by_period[period]["taxes"] = taxes
+                    # Recompute NI stack with taxes in raw
+                    calc = compute_is_calculated(raw_by_period[period])
+                    if gp is not None:
+                        calc["gross_profit"] = gp
+                    if ebitda_mod is not None:
+                        calc["ebitda"] = ebitda_mod
+                    calc["cost_of_goods_sold"] = _sub(rev, gp)
+                    calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+                calc_by_period[period] = calc
 
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
@@ -416,24 +455,63 @@ class SubjectFinancialsPage(QWidget):
         proj_periods = inputs.projection_period_columns
         if self._current_statement == "IS" and proj_periods:
             pd = self.get_projection_data()
+            tax_rate = getattr(inputs, "subject_tax_rate", None)
             for period in proj_periods:
                 raw_by_period.setdefault(period, {})
                 calc_by_period.setdefault(period, {})
-                raw_by_period[period]["revenue"] = pd.revenue.get(period)
-                raw_by_period[period]["depreciation"] = pd.da.get(period)
-                calc_by_period[period]["gross_profit"] = pd.gross_profit.get(period)
-                calc_by_period[period]["ebitda"] = pd.ebitda.get(period)
+
+                # --- Raw / module-sourced inputs ---
+                rev = pd.revenue.get(period)
+                gp = pd.gross_profit.get(period)
+                ebitda_mod = pd.ebitda.get(period)
+                da = pd.da.get(period)
+
+                raw_by_period[period]["revenue"] = rev
+                raw_by_period[period]["d&a_for_ebitda"] = da
+                raw_by_period[period]["depreciation"] = da
                 raw_by_period[period]["capex"] = pd.capex.get(period)
-                calc_by_period[period]["cost_of_goods_sold"] = _sub(
-                    pd.revenue.get(period), pd.gross_profit.get(period)
-                )
-                calc_by_period[period]["operating_expenses"] = _sub(
-                    pd.gross_profit.get(period), pd.ebitda.get(period)
-                )
+
+                # Seed calc rows Projection Module already owns (keep as anchors)
+                # Also invert into COGS / OpEx components so compute_is_calculated
+                # can rebuild the same waterfall as historicals.
+                if rev is not None and gp is not None:
+                    raw_by_period[period]["cogs"] = rev - gp
+                if gp is not None and ebitda_mod is not None:
+                    # Put residual opex into other_operating so opex sum = GP - EBITDA
+                    raw_by_period[period]["other_operating"] = gp - ebitda_mod
+
                 if callable(self.get_debt_interest):
+                    val = self.get_debt_interest(period)
                     raw_by_period[period]["interest_expense"] = (
-                        self.get_debt_interest(period)
+                        -abs(val) if val is not None else None
                     )
+
+                # Full IS waterfall (EBIT, Pretax, NI, DFNI, …)
+                calc = compute_is_calculated(raw_by_period[period])
+
+                # Prefer module GP/EBITDA when present (they are the planning drivers)
+                if gp is not None:
+                    calc["gross_profit"] = gp
+                if ebitda_mod is not None:
+                    calc["ebitda"] = ebitda_mod
+                calc["cost_of_goods_sold"] = _sub(rev, gp)
+                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+                # Projected tax: no separate forecast line — apply subject statutory rate
+                pretax = calc.get("pretax_income")
+                if pretax is not None and tax_rate is not None:
+                    taxes = pretax * tax_rate
+                    raw_by_period[period]["taxes"] = taxes
+                    # Recompute NI stack with taxes in raw
+                    calc = compute_is_calculated(raw_by_period[period])
+                    if gp is not None:
+                        calc["gross_profit"] = gp
+                    if ebitda_mod is not None:
+                        calc["ebitda"] = ebitda_mod
+                    calc["cost_of_goods_sold"] = _sub(rev, gp)
+                    calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+                calc_by_period[period] = calc
 
         self._build_rows(grid, lines, periods, raw_by_period, calc_by_period)
 
@@ -502,6 +580,9 @@ class SubjectFinancialsPage(QWidget):
         inputs = self.get_project_inputs()
         periods = inputs.historical_period_columns + ["TTM"]
         lines = IS_LINES if statement == "IS" else BS_LINES
+
+        # Allow lookup of sa_key aliases that may not appear as their own IS_LINES row
+        # (e.g. d&a_for_ebitda) by temporarily resolving via get_sa_labels in the gather loop.
         is_calc = next((c for k, l, c, b in lines if k == key), False)
 
         raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
@@ -552,6 +633,41 @@ class SubjectFinancialsPage(QWidget):
             else:
                 result[period] = raw_by_period[period].get(key)
 
+        # If key was missing from IS_LINES gather (alias-only sa_key), pull via sa_key directly
+        if statement == "IS" and not any(v is not None for v in result.values()):
+            results = self.get_stockanalysis_results() if inputs.is_publicly_traded else None
+            if results and inputs.is_publicly_traded:
+                ticker = inputs.subject_ticker.lower()
+                sa_source = get_sa_source(key)
+                sa_labels = get_sa_labels(key)
+                sign_flip = get_sign_flip(key)
+                if sa_source == "CFS":
+                    source_lookup = self._build_cfs_lookup(ticker)
+                else:
+                    stmt_results = results.get("IS", []) or []
+                    subject_rows = [
+                        r for r in stmt_results
+                        if str(r.get("Ticker", "")).lower() == ticker
+                    ]
+                    source_lookup = {}
+                    for row in subject_rows:
+                        lk = str(row.get("Line Item", "")).strip().lower()
+                        source_lookup[lk] = {
+                            k: v for k, v in row.items()
+                            if k not in ("Ticker", "Key", "Line Item")
+                        }
+                row_data = {}
+                for sa_label in sa_labels:
+                    candidate = source_lookup.get(sa_label, {})
+                    if candidate:
+                        row_data = candidate
+                        break
+                for period in periods:
+                    v = _parse_val(row_data.get(period, ""))
+                    if v is not None and sign_flip:
+                        v = -v
+                    result[period] = v
+
         return result
 
     def get_metric_value(self, key: str, period: str) -> Optional[float]:
@@ -590,28 +706,74 @@ class SubjectFinancialsPage(QWidget):
 
         if period in inputs.historical_period_columns + ["TTM"]:
             statement = "BS" if any(k == key for k, *_r in BS_LINES) else "IS"
+
+            # D&A schema drift: SA/IS uses "d&a for ebitda" (internal d&a_for_ebitda).
+            # Callers still request "depreciation" — try modern key first, then legacy.
+            if key == "depreciation" and statement == "IS":
+                for try_key in (
+                    "d&a_for_ebitda",
+                    "depreciation_amortization",
+                    "depreciation",
+                ):
+                    val = self.get_historical_line_values(try_key, "IS").get(period)
+                    if val is not None:
+                        return val
+                return None
+
+            # Interest income alias drift: RKLB and similar list this as
+            # "Interest & Investment Income" on the IS. sa_key already lists
+            # every alias; this just ensures the alias-fallback branch in
+            # get_historical_line_values runs when the primary label misses.
+            if key == "interest_income" and statement == "IS":
+                val = self.get_historical_line_values("interest_income", "IS").get(period)
+                return val
+
             return self.get_historical_line_values(key, statement).get(period)
 
         if period in inputs.projection_period_columns:
             pd = self.get_projection_data()
-            if key == "revenue":
-                return pd.revenue.get(period)
-            if key == "depreciation":
-                return pd.da.get(period)
-            if key == "gross_profit":
-                return pd.gross_profit.get(period)
-            if key == "ebitda":
-                return pd.ebitda.get(period)
-            if key == "interest_expense":
-                if callable(self.get_debt_interest):
-                    return self.get_debt_interest(period)
-                return None
-            if key == "capex":
-                return pd.capex.get(period)
-            if key == "cost_of_goods_sold":
-                return _sub(pd.revenue.get(period), pd.gross_profit.get(period))
-            if key == "operating_expenses":
-                return _sub(pd.gross_profit.get(period), pd.ebitda.get(period))
+            # Build the same raw + calc stack the IS grid uses for projections
+            raw: Dict[str, Optional[float]] = {
+                "revenue": pd.revenue.get(period),
+                "d&a_for_ebitda": pd.da.get(period),
+                "depreciation": pd.da.get(period),
+                "capex": pd.capex.get(period),
+            }
+            rev = pd.revenue.get(period)
+            gp = pd.gross_profit.get(period)
+            ebitda_mod = pd.ebitda.get(period)
+            if rev is not None and gp is not None:
+                raw["cogs"] = rev - gp
+            if gp is not None and ebitda_mod is not None:
+                raw["other_operating"] = gp - ebitda_mod
+            if callable(self.get_debt_interest):
+                val = self.get_debt_interest(period)
+                raw["interest_expense"] = -abs(val) if val is not None else None
+
+            tax_rate = getattr(inputs, "subject_tax_rate", None)
+            calc = compute_is_calculated(raw)
+            if gp is not None:
+                calc["gross_profit"] = gp
+            if ebitda_mod is not None:
+                calc["ebitda"] = ebitda_mod
+            calc["cost_of_goods_sold"] = _sub(rev, gp)
+            calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+            pretax = calc.get("pretax_income")
+            if pretax is not None and tax_rate is not None:
+                raw["taxes"] = pretax * tax_rate
+                calc = compute_is_calculated(raw)
+                if gp is not None:
+                    calc["gross_profit"] = gp
+                if ebitda_mod is not None:
+                    calc["ebitda"] = ebitda_mod
+                calc["cost_of_goods_sold"] = _sub(rev, gp)
+                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+
+            if key in raw and raw.get(key) is not None:
+                return raw.get(key)
+            if key in calc:
+                return calc.get(key)
             return None
 
         return None

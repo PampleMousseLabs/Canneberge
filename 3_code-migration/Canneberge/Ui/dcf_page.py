@@ -1064,6 +1064,13 @@ class DCFPage(QWidget):
         self._num_hist = 0
         self._num_proj = 0
         self._cash_flows_to = "FCFF"
+        # Per cash-flow-mode memory for TV multiple inputs so an
+        # EBITDA exit multiple typed under FCFF is not reused under FCFE.
+        self._per_cf_tv_multiples = {
+            "FCFF": {"EBITDA Multiple": None, "Revenue Multiple": None},
+            "FCFE": {"EBITDA Multiple": None, "Revenue Multiple": None},
+        }
+        self._last_cf_mode = None
         self._build_ui()
         self._recalculate()
         theme_manager.theme_changed.connect(self._apply_theme)
@@ -1645,9 +1652,9 @@ class DCFPage(QWidget):
         hl_spacer = QLabel("")
         hl_spacer.setFixedWidth(LABEL_COL_WIDTH)
         h_hl_hdr.addWidget(hl_spacer)
-        h_hl_hdr.addWidget(QLabel("FV High"))
-        h_hl_hdr.addSpacing(20)
         h_hl_hdr.addWidget(QLabel("FV Low"))
+        h_hl_hdr.addSpacing(20)
+        h_hl_hdr.addWidget(QLabel("FV High"))
         h_hl_hdr.addStretch()
         layout.addLayout(h_hl_hdr)
         h_hl_val = QHBoxLayout()
@@ -1656,20 +1663,15 @@ class DCFPage(QWidget):
         h_hl_val.addWidget(hl_spacer2)
         self.bridge_fv_high_label = QLabel("-")
         self.bridge_fv_low_label = QLabel("-")
-        h_hl_val.addWidget(self.bridge_fv_high_label)
-        h_hl_val.addSpacing(20)
         h_hl_val.addWidget(self.bridge_fv_low_label)
+        h_hl_val.addSpacing(20)
+        h_hl_val.addWidget(self.bridge_fv_high_label)
         h_hl_val.addStretch()
         layout.addLayout(h_hl_val)
         layout.addSpacing(14)
         self._lbl_sensitivity_header = QLabel("Sensitivity: Fair Value by WACC / LTGR", styleSheet=get_bold_style())
         layout.addWidget(self._lbl_sensitivity_header)
         layout.addWidget(self._build_sensitivity_table())
-        self.link_valuation_surface = QPushButton("Valuation Surface →")
-        self.link_valuation_surface.setStyleSheet(get_link_style())
-        self.link_valuation_surface.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.link_valuation_surface.clicked.connect(self._open_valuation_surface)
-        layout.addWidget(self.link_valuation_surface)
         layout.addStretch(1)
         widget.setLayout(layout)
         return widget
@@ -1834,8 +1836,36 @@ class DCFPage(QWidget):
         self._set(row_label, data_idx, _fmt_currency(value))
 
     def _recalculate(self):
-        self._rebuild_table_if_needed()
         inputs = self.get_project_inputs()
+        
+        # Sync cash flows mode with basis of value if set
+        if getattr(inputs, "basis_of_value", None) == "Equity Value":
+            new_cf = "FCFE"
+        elif getattr(inputs, "basis_of_value", None) == "Business Enterprise Value":
+            new_cf = "FCFF"
+        else:
+            new_cf = self._cash_flows_to
+
+        if self._last_cf_mode is not None and new_cf != self._last_cf_mode:
+            # Save outgoing mode's multiples
+            for model in ("EBITDA Multiple", "Revenue Multiple"):
+                w = self._tv_inputs.get(model, {}).get("multiple")
+                if w is not None:
+                    self._per_cf_tv_multiples[self._last_cf_mode][model] = w.text()
+            # Restore incoming (blank on first visit)
+            for model in ("EBITDA Multiple", "Revenue Multiple"):
+                w = self._tv_inputs.get(model, {}).get("multiple")
+                if w is None:
+                    continue
+                saved = self._per_cf_tv_multiples[new_cf][model]
+                w.blockSignals(True)
+                w.setText(saved if saved is not None else "")
+                w.blockSignals(False)
+
+        self._cash_flows_to = new_cf
+        self._last_cf_mode = new_cf
+            
+        self._rebuild_table_if_needed()
         wacc_val = self._get_discount_rate()
         self.lbl_client.setText(inputs.client)
         self.lbl_subject.setText(inputs.subject_company_name)
@@ -1935,38 +1965,43 @@ class DCFPage(QWidget):
             self._set_pct("Gross Profit Margin", data_idx, _safe_div(gp, rev))
             self._set_pct("EBITDA Margin", data_idx, _safe_div(ebitda, rev))
 
+    def _get_net_interest_value(self, data_idx: int) -> Optional[float]:
+        label = self._headers[data_idx]
+        int_exp = self._sf_get("interest_expense", label)
+        int_inc = self._sf_get("interest_income", label)
+
+        if int_exp is None and int_inc is None:
+            return None
+
+        exp_abs = abs(int_exp) if int_exp is not None else 0.0
+        inc_val = int_inc if int_inc is not None else 0.0
+        return inc_val - exp_abs
+
     def _populate_dep_amort_net_int(self):
         for data_idx, label in enumerate(self._headers):
             if self._is_historical[data_idx]:
-                dep = self._sf_get("depreciation", label)
+                dep = self._sf_get("d&a_for_ebitda", label)
+                if dep is None:
+                    dep = self._sf_get("depreciation", label)
+                if dep is None:
+                    dep = self._sf_get("depreciation_amortization", label)
                 amort = self._sf_get("amortization", label)
-                int_exp = self._sf_get("interest_expense", label)
-                int_inc = self._sf_get("interest_income", label)
-                if int_exp is None and int_inc is None:
-                    net_int = None
-                else:
-                    net_int = -(int_exp or 0.0) + (int_inc or 0.0)
+                if dep is not None and amort is None:
+                    amort = 0.0
+
+                net_int = self._get_net_interest_value(data_idx)
+
                 self._set_currency("Depreciation", data_idx, dep)
                 self._set_currency("Amortization", data_idx, amort)
                 self._set_currency("Net Interest Expense", data_idx, net_int)
             else:
-                # Residual column is owned by _populate_residual_column
                 if label == "Residual":
                     continue
                 pd = self._get_projection_data()
                 self._set_currency("Depreciation", data_idx, pd.da.get(label))
                 self._set_currency("Amortization", data_idx, 0)
-                # Debt Schedule -> SubjectFinancials.get_metric_value("interest_expense")
-                # Sign convention: displayed as Net Interest Income (Expense),
-                # so interest_expense (positive from Debt Schedule) is shown
-                # negative here; interest_income (zero placeholder for now)
-                # is added positive. Ted's convention.
-                int_exp = self._sf_get("interest_expense", label)
-                int_inc = self._sf_get("interest_income", label) or 0.0
-                if int_exp is None:
-                    net_int = None
-                else:
-                    net_int = -(int_exp or 0.0) + int_inc
+
+                net_int = self._get_net_interest_value(data_idx)
                 self._set_currency("Net Interest Expense", data_idx, net_int)
 
     def _populate_ebit_and_ebit_margin(self):
@@ -1974,33 +2009,31 @@ class DCFPage(QWidget):
             if self._is_historical[data_idx]:
                 ebitda = self._sf_get("ebitda", label)
                 dep = self._sf_get("depreciation", label)
+                if dep is None:
+                    dep = self._sf_get("d&a_for_ebitda", label)
                 amort = self._sf_get("amortization", label)
             else:
                 pd = self._get_projection_data()
                 ebitda = pd.ebitda.get(label)
                 dep = pd.da.get(label)
                 amort = 0
+
             if label == "Residual":
-                continue  # owned by _populate_residual_column
-            int_exp = self._sf_get("interest_expense", label)
-            int_inc = self._sf_get("interest_income", label)
-            if int_exp is None and int_inc is None:
-                net_int = None
-            else:
-                net_int = -(int_exp or 0.0) + (int_inc or 0.0)
+                continue
+
+            net_int = self._get_net_interest_value(data_idx)
+
             if ebitda is None or dep is None:
                 ebit_or_ebt = None
             elif self._cash_flows_to == "FCFF":
                 ebit_or_ebt = ebitda - dep - (amort or 0.0)
             else:
-                # net_int is already signed (negative for expense).
-                # Adding it correctly subtracts expense or adds income.
+                # FCFE Mode: EBT = EBITDA - Dep - Amort + NetInterest (where NetInterest is negative for expense)
                 ebit_or_ebt = ebitda - dep - (amort or 0.0) + (net_int or 0.0)
 
             self._set_currency("EBIT", data_idx, ebit_or_ebt)
             rev = self._sf_get("revenue", label)
             self._set_pct("EBIT Margin", data_idx, _safe_div(ebit_or_ebt, rev))
-
     def _populate_taxes(self, inputs):
         tax_rate = inputs.subject_tax_rate
         ebit_idx = self._row_idx.get("EBIT")
@@ -2029,7 +2062,11 @@ class DCFPage(QWidget):
     def _populate_capex_other_nwc(self):
         for data_idx, label in enumerate(self._headers):
             if self._is_historical[data_idx]:
-                plus_dep = self._sf_get("depreciation", label)
+                plus_dep = self._sf_get("d&a_for_ebitda", label)
+                if plus_dep is None:
+                    plus_dep = self._sf_get("depreciation", label)
+                if plus_dep is None:
+                    plus_dep = self._sf_get("depreciation_amortization", label)
             else:
                 plus_dep = self._get_projection_data().da.get(label)
             self._set_currency("Plus: Depreciation", data_idx, plus_dep)
@@ -2171,7 +2208,7 @@ class DCFPage(QWidget):
         grid.setHorizontalSpacing(0)
         grid.setVerticalSpacing(4)
         grid.setColumnMinimumWidth(1, 16)
-        wacc_now = self.get_wacc_value()
+        wacc_now = self._get_discount_rate()
         ltgr_now = self._get_ltgr()
         wacc_now = wacc_now if wacc_now is not None else 0.10
         ltgr_now = ltgr_now if ltgr_now is not None else 0.03
@@ -2181,7 +2218,7 @@ class DCFPage(QWidget):
         FIRST_DATA_COL = 2
         self.sens_wacc_inputs = []
         self._sens_wacc_auto_text = []
-        for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+        for col, offset in enumerate([0.02, 0.01, 0.0, -0.01, -0.02]):
             text = f"{(wacc_now + offset) * 100:.4f}%"
             inp = QLineEdit(text)
             inp.setStyleSheet(get_input_style())
@@ -2194,7 +2231,7 @@ class DCFPage(QWidget):
         self.sens_ltgr_inputs = []
         self._sens_ltgr_auto_text = []
         self.sens_value_labels = []
-        for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+        for row, offset in enumerate([0.02, 0.01, 0.0, -0.01, -0.02]):
             text = f"{(ltgr_now + offset) * 100:.1f}%"
             inp = QLineEdit(text)
             inp.setStyleSheet(get_input_style())
@@ -2272,6 +2309,30 @@ class DCFPage(QWidget):
         ebitda_m = _parse_multiple(self._tv_inputs.get("EBITDA Multiple", {}).get("multiple"))
         rev_m    = _parse_multiple(self._tv_inputs.get("Revenue Multiple", {}).get("multiple"))
 
+        # Gordon Growth: use exact Residual column FCF matching _populate_terminal_value
+        if model == "Gordon Growth":
+            residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
+            residual_fcf = (
+                _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), residual_idx)
+                if residual_idx is not None else None
+            )
+            current_ltgr = self._get_ltgr()
+            if residual_fcf is not None and current_ltgr is not None and (1.0 + current_ltgr) != 0:
+                residual_fcf = residual_fcf * (1.0 + ltgr_override) / (1.0 + current_ltgr)
+
+            cap_rate = (wacc_override - ltgr_override) if wacc_override is not None else None
+            if (
+                residual_fcf is not None
+                and cap_rate is not None
+                and cap_rate > 0
+                and final_pvp is not None
+                and any_val
+            ):
+                residual_value = residual_fcf / cap_rate
+                pv_factor = 1.0 / ((1.0 + wacc_override) ** final_pvp)
+                return sum_pv_fcf + (residual_value * pv_factor) + other_adj_bridge
+            return None
+
         return evaluate_dcf_fv(
             wacc=wacc_override,
             ltgr=ltgr_override,
@@ -2302,65 +2363,18 @@ class DCFPage(QWidget):
             return None
         return self._compute_fv_for_assumptions(wacc_override, ltgr_val)
 
-    def _get_surface_data(self) -> Optional[Dict]:
-        """Builds surface data from current sensitivity table inputs and active model."""
-        def _pct_or_none(text: str) -> Optional[float]:
-            v = _parse_label_as_float(text)
-            return (v / 100.0) if v is not None else None
-
-        wacc_vals  = [_pct_or_none(w.text()) for w in self.sens_wacc_inputs]
-        ltgr_vals  = [_pct_or_none(l.text()) for l in self.sens_ltgr_inputs]
-        wacc_clean = [w for w in wacc_vals if w is not None]
-        ltgr_clean = [l for l in ltgr_vals if l is not None]
-
-        if not wacc_clean or not ltgr_clean:
-            return None
-
-        model_name = self.tv_model_combo.currentText()
-
-        return compute_gg_surface_data_from_explicit(
-            fv_func=self._compute_fv_for_assumptions,
-            wacc_values=wacc_clean,
-            ltgr_values=ltgr_clean,
-            model_name=model_name,
-        )
-
-    def _open_valuation_surface(self):
-        if (self._valuation_surface_dialog is not None and
-                not self._valuation_surface_dialog.isHidden()):
-            self._valuation_surface_dialog.raise_()
-            self._valuation_surface_dialog.activateWindow()
-            return
-        surface_data = self._get_surface_data()
-        if surface_data is None:
-            return
-        dlg = GGSurfaceChart(self, fv_evaluator=self._compute_fv_for_assumptions)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.destroyed.connect(self._on_surface_dialog_closed)
-        dlg.update_data(surface_data)
-        dlg.show()
-        self._valuation_surface_dialog = dlg
-
-    def _on_surface_dialog_closed(self):
-        self._valuation_surface_dialog = None
-
-    def _push_surface_update(self):
-        """Push fresh surface data to open dialog if it exists."""
-        if (self._valuation_surface_dialog is None or
-                self._valuation_surface_dialog.isHidden()):
-            return
-        surface_data = self._get_surface_data()
-        if surface_data is not None:
-            self._valuation_surface_dialog.update_data(surface_data)
-
     def _populate_sensitivity_table(self, inputs):
         if not hasattr(self, "sens_value_labels"):
             return
-        wacc_now = self.get_wacc_value()
+        wacc_now = self._get_discount_rate()
         ltgr_now = self._get_ltgr()
 
+        rate_label = "Ke" if self._cash_flows_to == "FCFE" else "WACC"
+        if hasattr(self, "_lbl_sensitivity_header"):
+            self._lbl_sensitivity_header.setText(f"Sensitivity: Fair Value by {rate_label} / LTGR")
+
         if wacc_now is not None:
-            for col, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+            for col, offset in enumerate([0.02, 0.01, 0.0, -0.01, -0.02]):
                 inp = self.sens_wacc_inputs[col]
                 if inp.text() == self._sens_wacc_auto_text[col]:
                     new_text = f"{(wacc_now + offset) * 100:.4f}%"
@@ -2368,7 +2382,7 @@ class DCFPage(QWidget):
                     self._sens_wacc_auto_text[col] = new_text
 
         if ltgr_now is not None:
-            for row, offset in enumerate([-0.02, -0.01, 0.0, 0.01, 0.02]):
+            for row, offset in enumerate([0.02, 0.01, 0.0, -0.01, -0.02]):
                 inp = self.sens_ltgr_inputs[row]
                 if inp.text() == self._sens_ltgr_auto_text[row]:
                     new_text = f"{(ltgr_now + offset) * 100:.1f}%"
@@ -2382,23 +2396,70 @@ class DCFPage(QWidget):
         wacc_vals = [_pct_or_none(w.text()) for w in self.sens_wacc_inputs]
         ltgr_vals = [_pct_or_none(l.text()) for l in self.sens_ltgr_inputs]
 
-        high_coord = (3, 1)
-        low_coord  = (1, 3)
+        high_coord = (1, 3)
+        low_coord  = (3, 1)
+        center_coord = (2, 2)
 
+        # 1. First pass: evaluate pure math grid
+        grid_fvs = {}
+        valid_fvs = []
+        for row in range(5):
+            for col in range(5):
+                w = wacc_vals[col]
+                l = ltgr_vals[row]
+                if w is not None and l is not None and w > 0:
+                    fv = self._compute_fv_for_assumptions(w, l)
+                    grid_fvs[(row, col)] = fv
+                    if fv is not None and fv > 0:
+                        valid_fvs.append(fv)
+                else:
+                    grid_fvs[(row, col)] = None
+
+        min_fv = min(valid_fvs) if valid_fvs else 0.0
+        max_fv = max(valid_fvs) if valid_fvs else 0.0
+        t = theme_manager.current
+
+        # 2. Second pass: display formatted text + RGBA Heatmap tint
         for row in range(5):
             for col in range(5):
                 lbl = self.sens_value_labels[row][col]
-                w = wacc_vals[col]
-                l = ltgr_vals[row]
-                if w is None or l is None or w <= 0:
+                fv = grid_fvs.get((row, col))
+
+                if fv is None:
                     lbl.setText("-")
                     lbl.setStyleSheet("")
                     continue
-                fv = self._compute_fv_for_assumptions(w, l)
+
                 lbl.setText(_fmt_currency(fv))
-                lbl.setStyleSheet(
-                    get_bold_style() if (row, col) in (high_coord, low_coord) else ""
-                )
+
+                # Normalize range 0.0 (Lowest = Red) to 1.0 (Highest = Green)
+                if max_fv > min_fv:
+                    norm = (fv - min_fv) / (max_fv - min_fv)
+                else:
+                    norm = 0.5
+
+                if norm < 0.5:
+                    # Interpolate Red -> Muted Gray
+                    ratio = norm / 0.5
+                    r = int(211 * (1 - ratio) + 120 * ratio)
+                    g = int(47 * (1 - ratio) + 120 * ratio)
+                    b = int(47 * (1 - ratio) + 120 * ratio)
+                    alpha = 0.35 * (1 - ratio) + 0.1 * ratio
+                else:
+                    # Interpolate Muted Gray -> Soft Green
+                    ratio = (norm - 0.5) / 0.5
+                    r = int(120 * (1 - ratio) + 46 * ratio)
+                    g = int(120 * (1 - ratio) + 125 * ratio)
+                    b = int(120 * (1 - ratio) + 50 * ratio)
+                    alpha = 0.1 * (1 - ratio) + 0.35 * ratio
+
+                bg_color = f"rgba({r}, {g}, {b}, {alpha:.2f})"
+                is_bold = (row, col) in (high_coord, low_coord, center_coord)
+                weight_css = "font-weight: bold;" if is_bold else ""
+                text_color = f"color: {t.bold_text if is_bold else t.default_text};"
+                border_css = f"border: 1px solid {t.emphasis_border};" if (row, col) == center_coord else ""
+
+                lbl.setStyleSheet(f"background-color: {bg_color}; {weight_css} {text_color} {border_css} padding: 2px 4px; border-radius: 3px;")
 
         self.bridge_fv_high_label.setText(
             self.sens_value_labels[high_coord[0]][high_coord[1]].text()
@@ -2406,8 +2467,6 @@ class DCFPage(QWidget):
         self.bridge_fv_low_label.setText(
             self.sens_value_labels[low_coord[0]][low_coord[1]].text()
         )
-
-        self._push_surface_update()
 
     def _populate_fv_bridge(self, inputs):
         pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
@@ -2549,6 +2608,8 @@ class DCFPage(QWidget):
             "cash_flows_to": self._cash_flows_to,
             "other_adj_inputs": other_adj,
             "residual_amortization": residual_amortization,
+            "per_cf_tv_multiples": self._per_cf_tv_multiples,
+            "last_cf_mode": self._last_cf_mode,
         }
 
     def apply_state(self, state: dict):
@@ -2557,6 +2618,9 @@ class DCFPage(QWidget):
         self.ltg_input.setText(state.get("ltg_input", "3.0%"))
         self.capex_dep_pct.setText(state.get("capex_dep_pct", "100.0%"))
         self._cash_flows_to = state.get("cash_flows_to", "FCFF")
+        if isinstance(state.get("per_cf_tv_multiples"), dict):
+            self._per_cf_tv_multiples = state["per_cf_tv_multiples"]
+        self._last_cf_mode = state.get("last_cf_mode", self._cash_flows_to)
         tv_model = state.get("tv_model", "Gordon Growth")
         idx = self.tv_model_combo.findText(tv_model)
         if idx >= 0:

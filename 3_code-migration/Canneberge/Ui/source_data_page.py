@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from Canneberge.Workers.source_data_worker import SourceDataWorker
+from Canneberge.Ui.theme import theme_manager
 
 
 class SourceDataPage(QWidget):
@@ -23,6 +24,7 @@ class SourceDataPage(QWidget):
         "marketscreener": "MarketScreener",
         "fred": "FRED",
         "beta_vol": "Beta/Vol (Yahoo)",
+        "live_marks": "Live Marks (yfinance + FRED)",
     }
 
     # Emitted every time any single worker reports a progress message,
@@ -46,6 +48,8 @@ class SourceDataPage(QWidget):
         self.current_statement = "IS"
         self._pending_batch_sources = set()
         self._build_ui()
+        theme_manager.theme_changed.connect(self._apply_theme)
+        self._apply_theme(theme_manager.current)
 
     def _build_ui(self):
         layout = QVBoxLayout()
@@ -58,6 +62,11 @@ class SourceDataPage(QWidget):
         refresh_all_btn = QPushButton("Refresh All Sources")
         refresh_all_btn.clicked.connect(self._on_refresh_all_clicked)
         refresh_layout.addWidget(refresh_all_btn)
+
+        # Live Marks Button
+        self.btn_live_marks = QPushButton("⚡ Update Live Marks (2s)")
+        self.btn_live_marks.clicked.connect(self._on_refresh_live_marks_clicked)
+        refresh_layout.addWidget(self.btn_live_marks)
 
         for source in self.SOURCES:
             btn = QPushButton(f"Refresh {self.SOURCE_LABELS[source]}")
@@ -127,6 +136,28 @@ class SourceDataPage(QWidget):
         self.setLayout(layout)
         self._sync_controls_visibility()
 
+    def _apply_theme(self, theme=None):
+        t = theme or theme_manager.current
+        btn_css = t.button_style()
+        accent_css = t.accent_button_style()
+
+        # Refresh toolbar + view/statement toggles
+        for btn in self.findChildren(QPushButton):
+            if btn is getattr(self, "btn_live_marks", None):
+                btn.setStyleSheet(accent_css)
+            else:
+                btn.setStyleSheet(btn_css)
+
+        self.results_table.setStyleSheet(t.table_style())
+        self.results_table.horizontalHeader().setStyleSheet("")  # inherit from table QSS
+        self.results_table.verticalHeader().setStyleSheet(
+            f"QHeaderView::section {{"
+            f" background-color: {t.header_bg}; color: {t.default_text};"
+            f" font-weight: bold; border: 1px solid {t.border_color}; padding: 2px 4px;"
+            f"}}"
+        )
+        self.status_label.setStyleSheet(f"color: {t.default_text};")
+
     def _sync_controls_visibility(self):
         show_sa = self.current_source == "stockanalysis"
         for btn in self.statement_buttons.values():
@@ -140,6 +171,55 @@ class SourceDataPage(QWidget):
         self._pending_batch_sources = set(self.SOURCES)
         for source in self.SOURCES:
             self._on_refresh_clicked(source)
+
+    def _on_refresh_live_marks_clicked(self):
+        worker = self.workers.get("live_marks")
+        if worker and worker.isRunning():
+            self.status_label.setText("Live marks refresh already running...")
+            return
+
+        project_inputs = self.get_project_inputs_callback()
+        if not project_inputs.active_public_tickers:
+            self.status_label.setText("No public tickers configured on Home page.")
+            return
+
+        self.status_label.setText("Updating Live Market Marks via yfinance & FRED...")
+
+        # Pass current StockAnalysis cache for surgical overlay
+        kwargs = {"existing_sa_results": self.all_results.get("stockanalysis", {})}
+
+        worker = SourceDataWorker(project_inputs, "live_marks", **kwargs)
+        worker.progress.connect(self._on_progress)
+        worker.error.connect(lambda msg: self._on_error("live_marks", msg))
+        worker.results.connect(self._on_live_marks_results)
+        worker.finished.connect(lambda: None)  # status + dialog handled in _on_live_marks_results
+        self.workers["live_marks"] = worker
+        worker.start()
+
+    def _on_live_marks_results(self, source, results):
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtCore import QTimer
+
+        if "stockanalysis" in results:
+            self.all_results["stockanalysis"] = results["stockanalysis"]
+        if "fred" in results:
+            self.all_results["fred"] = results["fred"]
+        self._redraw()
+        self.status_label.setText("Live market marks updated successfully.")
+        # Recalc dependent pages (WACC / GPC / DCF / etc.)
+        self.all_sources_finished.emit()
+
+        # Confirmation after worker teardown so it isn't suppressed
+        QTimer.singleShot(
+            0,
+            lambda: QMessageBox.information(
+                self,
+                "Live Marks Complete",
+                "Live market marks updated.\n\n"
+                "Market Cap, Enterprise Value, Last Close, and FRED rates "
+                "were refreshed. Fundamentals (IS / BS / CFS) were left unchanged.",
+            ),
+        )
 
     def _on_refresh_clicked(self, source):
         worker = self.workers.get(source)

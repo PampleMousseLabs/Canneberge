@@ -2160,6 +2160,27 @@ class DashboardPage(QWidget):
         value_row.addStretch(1)
         outer.addLayout(value_row)
 
+        # Observed market reference — basis-dependent:
+        #   $/Share -> last close price
+        #   Equity  -> market cap
+        #   BEV     -> market cap + debt - cash
+        observed_row = QHBoxLayout()
+        observed_row.setSpacing(6)
+
+        self.observed_market_label = QLabel("Observed EV:")
+        self.observed_market_label.setFixedWidth(210)
+
+        self.observed_market_value = QLabel("-")
+        self.observed_market_value.setFixedWidth(95)
+        self.observed_market_value.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        observed_row.addWidget(self.observed_market_label)
+        observed_row.addWidget(self.observed_market_value)
+        observed_row.addStretch(1)
+        outer.addLayout(observed_row)
+
         frame.setLayout(outer)
         frame.adjustSize()
         return frame
@@ -2278,8 +2299,27 @@ class DashboardPage(QWidget):
 
     def _collect_method_rows(self):
         """One MethodRow per chart line: DCF, each active GPC
-        multiple, each active GT multiple."""
+        multiple, each active GT multiple.
+
+        source_basis must match what the labels actually contain:
+          DCF  -> Equity if _cash_flows_to == FCFE else BEV
+          GPC  -> Equity if Home basis is Equity Value else BEV
+          GT   -> always BEV
+        """
         from Canneberge.Ui.dcf_page import _parse_label_as_float as parse
+
+        inputs = self._get_project_inputs()
+        home_basis = getattr(
+            inputs, "basis_of_value", "Business Enterprise Value"
+        )
+        gpc_source = (
+            "Equity" if home_basis == "Equity Value" else "BEV"
+        )
+        dcf_source = (
+            "Equity"
+            if getattr(self._dcf_page, "_cash_flows_to", "FCFF") == "FCFE"
+            else "BEV"
+        )
 
         rows = []
 
@@ -2287,7 +2327,10 @@ class DashboardPage(QWidget):
             name="Discounted Cash Flow Method",
             bev_low=parse(self._dcf_page.bridge_fv_low_label.text()),
             bev_high=parse(self._dcf_page.bridge_fv_high_label.text()),
-            apply_dloc=True,
+            # FCFE FV is already equity — do not DLOC again.
+            # FCFF FV is BEV — DLOC applies on BEV->Equity bridge.
+            apply_dloc=(dcf_source == "BEV"),
+            source_basis=dcf_source,
         ))
 
         gpc_count = self._gpc_page.num_multiples_spin.value()
@@ -2300,7 +2343,8 @@ class DashboardPage(QWidget):
                 bev_high=parse(
                     self._gpc_page.indicated_bev_high_labels[i].text()
                 ),
-                apply_dloc=False,   # GPC already noncontrolling
+                apply_dloc=False,
+                source_basis=gpc_source,
             ))
 
         gt_count = self._gt_page.num_multiples_spin.value()
@@ -2314,18 +2358,23 @@ class DashboardPage(QWidget):
                     self._gt_page.indicated_bev_high_labels[i].text()
                 ),
                 apply_dloc=True,
+                source_basis="BEV",
             ))
 
         return rows
 
     def _single_bridged_pair(self, name, low, high, apply_dloc,
-                             bridge_inputs, basis):
-        """Run ONE (low, high) BEV pair through the bridge and return
-        the values on the requested display basis."""
+                             bridge_inputs, basis, source_basis="BEV"):
+        """Run ONE (low, high) pair through the bridge and return
+        values on the requested display basis."""
         if low is None and high is None:
             return None, None
         row = MethodRow(
-            name=name, bev_low=low, bev_high=high, apply_dloc=apply_dloc
+            name=name,
+            bev_low=low,
+            bev_high=high,
+            apply_dloc=apply_dloc,
+            source_basis=source_basis,
         )
         compute_bridge([row], bridge_inputs)
         return row.values_for_basis(basis)
@@ -2353,8 +2402,17 @@ class DashboardPage(QWidget):
 
         basis = self.display_combo.currentText()
 
-        # Box rows are METHOD-level: DCF's own pair, plus the GPC/GT
-        # pages' weighted FMV BEV run through the same bridge.
+        inputs = self._get_project_inputs()
+        home_basis = getattr(
+            inputs, "basis_of_value", "Business Enterprise Value"
+        )
+        gpc_source = (
+            "Equity" if home_basis == "Equity Value" else "BEV"
+        )
+
+        # DCF row comes from _bridge_rows (see _collect_method_rows).
+        # GPC/GT weighted FMV pairs are bridged here with explicit
+        # source_basis tags.
         method_pairs = {
             "DCF": self._method_pair(
                 "Discounted Cash Flow Method", basis
@@ -2366,6 +2424,7 @@ class DashboardPage(QWidget):
                 False,
                 bridge_inputs,
                 basis,
+                source_basis=gpc_source,
             ),
             "GT": self._single_bridged_pair(
                 "GT (weighted)",
@@ -2374,6 +2433,7 @@ class DashboardPage(QWidget):
                 True,
                 bridge_inputs,
                 basis,
+                source_basis="BEV",
             ),
             "GIPO": (None, None),
             "NAV": (None, None),
@@ -2400,6 +2460,9 @@ class DashboardPage(QWidget):
         concluded = weighted_conclusion(pairs, weights)
         self.fv_value.setText(fmt(concluded))
         self._last_concluded_fv = concluded
+
+        observed = self._share_price_on_basis(bridge_inputs, basis)
+        self.observed_market_value.setText(fmt(observed))
 
         self._update_football_field(bridge_inputs, basis, concluded)
 
@@ -2433,9 +2496,16 @@ class DashboardPage(QWidget):
     def _on_display_toggle(self, mode: str):
         if mode == "Equity":
             self.fv_bottom_label.setText("FV of Equity (Base):")
+            self.observed_market_label.setText("Observed Market Cap:")
         elif mode == "$/Share":
             self.fv_bottom_label.setText("Concluded FV ($/Share):")
+            self.observed_market_label.setText("Observed Share Price:")
         else:
             self.fv_bottom_label.setText(
                 "FV of Business Enterprise (Base):"
             )
+            self.observed_market_label.setText("Observed EV:")
+
+        # Keep values/chart in sync with the new basis.
+        if getattr(self, "_gpc_page", None) is not None:
+            self.recompute_reconciliation()

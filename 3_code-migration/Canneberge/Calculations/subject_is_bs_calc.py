@@ -41,18 +41,27 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
     """
     raw keys expected (all optional, missing = None):
         revenue, cogs, cogs_adjustment, sga, rd, other_operating,
-        operating_expense_adj, d&a_for_ebitda, amortization,
-        interest_expense, interest_income, other_income, taxes,
-        nonrecurring
+        operating_expense_adj, amortization_of_goodwill_intangibles,
+        d&a_for_ebitda, amortization,
+        interest_expense, interest_income, currency_exchange_gain_loss,
+        earnings_from_equity_investments, income_loss_on_equity_investments,
+        other_income, merger_restructuring_charges, impairment_of_goodwill,
+        gain_loss_on_sale_of_investments, gain_loss_on_sale_of_assets,
+        asset_writedown, legal_settlements, insurance_settlements,
+        other_unusual_items, taxes, nonrecurring
 
     Returns every is_calc=True IS key for this one period.
     """
     cost_of_goods_sold = _add(raw.get("cogs"), raw.get("cogs_adjustment"))
     gross_profit = _sub(raw.get("revenue"), cost_of_goods_sold)
 
+    # Amort of GW/intangibles sits in the operating block on SA (between GP and OpInc)
     operating_expenses = _add(
-        raw.get("sga"), raw.get("rd"),
-        raw.get("other_operating"), raw.get("operating_expense_adj"),
+        raw.get("sga"),
+        raw.get("rd"),
+        raw.get("amortization_of_goodwill_intangibles"),
+        raw.get("other_operating"),
+        raw.get("operating_expense_adj"),
     )
 
     ebitda = _sub(gross_profit, operating_expenses)
@@ -60,22 +69,46 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
     da = _add(raw.get("d&a_for_ebitda"), raw.get("amortization"))
     ebit = _sub(ebitda, da)
 
-    pretax_income = _add(
+    # Interest expense: SA often publishes negative; Debt Schedule positive.
+    # Always treat as a cost: income - |expense|
+    int_exp_raw = raw.get("interest_expense")
+    int_inc_raw = raw.get("interest_income")
+    int_exp_cost = abs(int_exp_raw) if int_exp_raw is not None else None
+    net_interest = None
+    if int_exp_cost is not None or int_inc_raw is not None:
+        net_interest = (int_inc_raw or 0.0) - (int_exp_cost or 0.0)
+
+    # Recurring non-operating (canonical zone: Operating Income → EBT ex unusual)
+    ebt_ex_unusual = _add(
         ebit,
-        _neg(raw.get("interest_expense")),
-        raw.get("interest_income"),
+        net_interest,
+        raw.get("currency_exchange_gain_loss"),
+        raw.get("earnings_from_equity_investments"),
+        raw.get("income_loss_on_equity_investments"),
         raw.get("other_income"),
+    )
+
+    # Unusual / non-operating charges & gains → Pretax
+    pretax_income = _add(
+        ebt_ex_unusual,
+        raw.get("merger_restructuring_charges"),
+        raw.get("impairment_of_goodwill"),
+        raw.get("gain_loss_on_sale_of_investments"),
+        raw.get("gain_loss_on_sale_of_assets"),
+        raw.get("asset_writedown"),
+        raw.get("legal_settlements"),
+        raw.get("insurance_settlements"),
+        raw.get("other_unusual_items"),
     )
 
     income_before_nonrecurring = _sub(pretax_income, raw.get("taxes"))
     net_income = _add(income_before_nonrecurring, raw.get("nonrecurring"))
 
-    int_exp = raw.get("interest_expense")
     taxes = raw.get("taxes")
-    if int_exp is not None and taxes is not None and pretax_income not in (None, 0):
-        interest_expense_after_tax = int_exp * (1 - taxes / pretax_income)
-    elif int_exp is not None:
-        interest_expense_after_tax = int_exp
+    if int_exp_cost is not None and taxes is not None and pretax_income not in (None, 0):
+        interest_expense_after_tax = int_exp_cost * (1 - taxes / pretax_income)
+    elif int_exp_cost is not None:
+        interest_expense_after_tax = int_exp_cost
     else:
         interest_expense_after_tax = None
 
@@ -87,6 +120,7 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
         "operating_expenses": operating_expenses,
         "ebitda": ebitda,
         "ebit": ebit,
+        "ebt_excluding_unusual_items": ebt_ex_unusual,
         "pretax_income": pretax_income,
         "income_before_nonrecurring": income_before_nonrecurring,
         "net_income": net_income,

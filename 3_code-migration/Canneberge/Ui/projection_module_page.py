@@ -193,7 +193,15 @@ class ProjectionModulePage(QDialog):
         self._hist_revenue      = self._get_hist_line("revenue")
         self._hist_gross_profit = self._get_hist_line("gross_profit")
         self._hist_ebitda       = self._get_hist_line("ebitda")
-        self._hist_depreciation = self._get_hist_line("depreciation")
+
+        # D&A Resolution: Fallback chain matching updated sa_key blueprint
+        hist_da = self._get_hist_line("d&a_for_ebitda")
+        if not any(v is not None for v in hist_da.values()):
+            hist_da = self._get_hist_line("depreciation")
+        if not any(v is not None for v in hist_da.values()):
+            hist_da = self._get_hist_line("depreciation_amortization")
+
+        self._hist_depreciation = hist_da
         self._hist_amortization = self._get_hist_line("amortization")
         self._hist_capex        = self._get_hist_line("capex")
 
@@ -227,6 +235,16 @@ class ProjectionModulePage(QDialog):
         self._build_ui()
         self._load_saved_data()
         self._recalculate()
+
+        theme_manager.theme_changed.connect(self._apply_theme)
+        self._apply_theme(theme_manager.current)
+
+    def _apply_theme(self, theme=None):
+        t = theme or theme_manager.current
+        if hasattr(self, "save_btn"):
+            self.save_btn.setStyleSheet(t.primary_button_style())
+        if hasattr(self, "cancel_btn"):
+            self.cancel_btn.setStyleSheet(t.button_style())
 
     # -----------------------------------------------------------------------
     # MarketScreener data loading
@@ -331,15 +349,16 @@ class ProjectionModulePage(QDialog):
         top_bar = QHBoxLayout()
         top_bar.addStretch()
 
-        save_btn = QPushButton("Save")
-        save_btn.setStyleSheet(theme_manager.current.primary_button_style())
-        save_btn.clicked.connect(self._on_save)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setStyleSheet(theme_manager.current.primary_button_style())
+        self.save_btn.clicked.connect(self._on_save)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet(theme_manager.current.button_style())
+        self.cancel_btn.clicked.connect(self.reject)
 
-        top_bar.addWidget(save_btn)
-        top_bar.addWidget(cancel_btn)
+        top_bar.addWidget(self.save_btn)
+        top_bar.addWidget(self.cancel_btn)
         outer.addLayout(top_bar)
 
         scroll = QScrollArea()
@@ -363,8 +382,6 @@ class ProjectionModulePage(QDialog):
             lbl = QLabel(period)
             lbl.setStyleSheet(get_bold_style())
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if period == "TTM":
-                lbl.setStyleSheet(f"font-weight: bold; color: {theme_manager.current.note_text};")
             grid.addWidget(lbl, 0, col_idx + 1)
 
         grid.setColumnStretch(0, LABEL_STRETCH)

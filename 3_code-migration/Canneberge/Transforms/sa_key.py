@@ -45,13 +45,30 @@ _EXPLICIT_ALIASES: Dict[str, dict] = {
         "sa_source": "IS",
         "sign_flip": False,
     },
+    # Callers (DCF, Projection seed, etc.) still use internal key "depreciation"
+    "depreciation": {
+        "sa_labels": [
+            "d&a for ebitda",
+            "depreciation & amortization",
+            "depreciation expense",
+            "depreciation",
+        ],
+        "sa_source": "IS",
+        "sign_flip": False,
+    },
     "interest_expense": {
         "sa_labels": ["interest expense"],
         "sa_source": "IS",
         "sign_flip": False,
     },
     "interest_income": {
-        "sa_labels": ["interest income", "interest & investment income"],
+        "sa_labels": [
+            "interest income",
+            "interest & investment income",
+            "interest and investment income",
+            "interest & dividend income",
+            "total interest & dividend income",
+        ],
         "sa_source": "IS",
         "sign_flip": False,
     },
@@ -60,6 +77,24 @@ _EXPLICIT_ALIASES: Dict[str, dict] = {
             "other non operating income (expenses)",
             "other non-operating income (expenses)",
             "other non-operating income",
+            "other non operating income",
+        ],
+        "sa_source": "IS",
+        "sign_flip": False,
+    },
+    "currency_exchange_gain_loss": {
+        "sa_labels": [
+            "currency exchange gain (loss)",
+            "currency exchange gains",
+            "currency exchange gain/loss",
+        ],
+        "sa_source": "IS",
+        "sign_flip": False,
+    },
+    "amortization_of_goodwill_intangibles": {
+        "sa_labels": [
+            "amortization of goodwill & intangibles",
+            "amortization of goodwill and intangibles",
         ],
         "sa_source": "IS",
         "sign_flip": False,

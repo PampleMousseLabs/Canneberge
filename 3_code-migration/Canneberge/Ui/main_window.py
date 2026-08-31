@@ -184,6 +184,11 @@ class MainWindow(QMainWindow):
             lambda theme: self.tabs.setStyleSheet(theme.tab_bar_style())
         )
 
+        # Sync GPC and DCF modes with Home Page Basis of Value
+        self.home_page.basis_value_combo.currentTextChanged.connect(
+            self._on_basis_of_value_changed
+        )
+
         self._build_menu()
 
     def _get_nwc_change(self, period: str) -> Optional[float]:
@@ -550,6 +555,18 @@ class MainWindow(QMainWindow):
             return self.wacc_page.ke_value
         return None
 
+    def _on_basis_of_value_changed(self, basis_text: str):
+        """
+        Auto-syncs DCF and GPC pages when Home Page Basis of Value changes.
+        - "Equity Value" -> DCF FCFE, GPC Equity mode (P/S, P/E, P/B)
+        - "Business Enterprise Value" -> DCF FCFF, GPC BEV mode (EV/Sales, EV/EBITDA)
+        """
+        if hasattr(self, "dcf_page"):
+            self.dcf_page._cash_flows_to = "FCFE" if basis_text == "Equity Value" else "FCFF"
+            self.dcf_page.refresh()
+        if hasattr(self, "gpc_page"):
+            self.gpc_page._recalculate()
+
 
     # ------------------------------------------------------------------
     # SAVE / LOAD
@@ -665,10 +682,17 @@ class MainWindow(QMainWindow):
                 self.gt_page.tx_exclude_checks[i].setChecked(checked)
 
     def _collect_gpc_page_state(self) -> dict:
+        # Flush active basis into memory before serializing so the
+        # on-disk session has both BEV and EQUITY snapshots current.
+        if self.gpc_page._last_basis_mode is not None:
+            self.gpc_page._save_basis_state(self.gpc_page._last_basis_mode)
+
         return {
             "num_multiples": self.gpc_page.num_multiples_spin.value(),
             "dloc": self.gpc_page.dloc_input.text(),
             "control_premium": self.gpc_page.control_premium_input.text(),
+            # Legacy single-basis fields (still written for backward
+            # compat with older sessions).
             "metric_selections": [
                 combo.currentText()
                 for combo in self.gpc_page.metric_combos
@@ -689,6 +713,9 @@ class MainWindow(QMainWindow):
                 chk.isChecked()
                 for chk in self.gpc_page.tick_exclude_checks
             ],
+            # Dual-basis memory
+            "per_basis_state": self.gpc_page._per_basis_state,
+            "last_basis_mode": self.gpc_page._last_basis_mode,
         }
 
     def _apply_gpc_page_state(self, state: dict):
@@ -706,6 +733,14 @@ class MainWindow(QMainWindow):
         if control_premium:
             self.gpc_page.control_premium_input.setText(control_premium)
 
+        # Restore dual-basis memory when present (new sessions).
+        per_basis = state.get("per_basis_state")
+        if isinstance(per_basis, dict):
+            for basis_key in ("BEV", "EQUITY"):
+                if basis_key in per_basis:
+                    self.gpc_page._per_basis_state[basis_key] = per_basis[basis_key]
+
+        # Apply the active (or legacy single-basis) UI values.
         for i, text in enumerate(state.get("metric_selections", [])):
             if i < len(self.gpc_page.metric_combos):
                 idx = self.gpc_page.metric_combos[i].findText(text)
@@ -727,6 +762,13 @@ class MainWindow(QMainWindow):
         for i, checked in enumerate(state.get("excluded_rows", [])):
             if i < len(self.gpc_page.tick_exclude_checks):
                 self.gpc_page.tick_exclude_checks[i].setChecked(checked)
+
+        # If session recorded a last basis, mark it so the next
+        # toggle saves/restores correctly. Actual dropdown options
+        # still get installed by _recalculate from Home basis.
+        if state.get("last_basis_mode") in ("BEV", "EQUITY"):
+            self.gpc_page._last_basis_mode = state["last_basis_mode"]
+            self.gpc_page._save_basis_state(state["last_basis_mode"])
 
     def _collect_projection_page_state(self) -> dict:
         pd = self._projection_data
@@ -909,42 +951,6 @@ class MainWindow(QMainWindow):
         nwc_state = self._collect_nwc_page_state()
         debt_state = self._collect_debt_schedule_state()
         dashboard_state = self._collect_dashboard_page_state()
-
-        try:
-            path = save_session(
-                project_inputs=inputs,
-                private_financials=self._private_financials,
-                gt_page_state=gt_state,
-                gpc_page_state=gpc_state,
-                projection_page_state=proj_state,
-                wacc_page_state=wacc_state,
-                dcf_page_state=dcf_state,
-                nwc_page_state=nwc_state,
-                debt_page_state=debt_state,
-                dashboard_page_state=dashboard_state,
-                filepath=self._current_session_path,
-            )
-            self._current_session_path = path
-            self.setWindowTitle(f"Canneberge — {path.stem}")
-            QMessageBox.information(
-                self, "Session Saved",
-                f"Session saved to:\n{path}"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Save Failed", f"Could not save session:\n{e}"
-            )
-
-    def _on_save_session(self):
-        inputs = self.home_page.get_project_inputs()
-        gt_state   = self._collect_gt_page_state()
-        gpc_state  = self._collect_gpc_page_state()
-        proj_state = self._collect_projection_page_state()
-        wacc_state = self._collect_wacc_page_state()
-        dcf_state = self._collect_dcf_page_state()
-        nwc_state = self._collect_nwc_page_state()
-        debt_state = self._collect_debt_schedule_state()
-        dashboard_state = self._collect_dashboard_page_state()
         source_data_results = getattr(self.source_data_page, "all_results", {})
 
         try:
@@ -1039,7 +1045,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 1. Restore UI and Page States
+        # 1. Restore UI and Page States instantly
         self._apply_project_inputs_to_home(data["project_inputs_raw"])
         self._private_financials = data["private_financials"]
         self._apply_gt_page_state(data["gt_page_state"])
@@ -1051,18 +1057,18 @@ class MainWindow(QMainWindow):
         self._apply_debt_schedule_state(data.get("debt_page_state", {}))
         self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
 
-        # 2. Restore cached source data into SourceDataPage
+        # 2. Restore cached web results
         cached_sources = data.get("source_data_results", {})
         if cached_sources and hasattr(self.source_data_page, "all_results"):
             self.source_data_page.all_results = cached_sources
 
-        # 3. Recalculate all pages instantly in memory (0.05 seconds)
+        # 3. Recalculate model in memory (0.05s)
         self._on_source_data_refresh_finished()
 
         self._current_session_path = filepath
         self.setWindowTitle(f"Canneberge — {filepath.stem}")
 
-        # 4. Optional Web Refresh Prompt
+        # 4. Smart Boot Prompt
         saved_at_str = data.get("saved_at", "Unknown")
         if saved_at_str != "Unknown":
             try:
@@ -1071,28 +1077,27 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        has_cached_data = bool(cached_sources)
-        prompt_msg = (
-            f"Session '{filepath.stem}' loaded instantly.\n\n"
-            f"Cached Data Saved At: {saved_at_str}\n\n"
-            "Would you like to refresh live market data from the web now?"
-            if has_cached_data else
-            "Session loaded. No cached market data found in file.\nRefresh market data from web now?"
-        )
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Session Loaded")
+        msg_box.setText(f"Session '{filepath.stem}' loaded instantly.\nCached Data Saved: {saved_at_str}")
+        msg_box.setInformativeText("Choose how to update market data for this session:")
 
-        reply = QMessageBox.question(
-            self,
-            "Session Loaded",
-            prompt_msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No if has_cached_data else QMessageBox.StandardButton.Yes,
-        )
+        btn_live = msg_box.addButton("⚡ Update Live Marks (2s)", QMessageBox.ButtonRole.AcceptRole)
+        btn_full = msg_box.addButton("🌐 Full Web Refresh (40s)", QMessageBox.ButtonRole.ActionRole)
+        btn_skip = msg_box.addButton("📁 Use Cached Data Only (0s)", QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(btn_live)
 
-        if reply == QMessageBox.StandardButton.Yes:
+        msg_box.exec()
+
+        if msg_box.clickedButton() == btn_live:
+            self.source_data_page._on_refresh_live_marks_clicked()
+        elif msg_box.clickedButton() == btn_full:
             self._trigger_web_refresh_with_progress()
 
     def _trigger_web_refresh_with_progress(self):
         """Runs the web scraping refresh with a modal progress dialog."""
+        from PyQt6.QtCore import QTimer
+
         progress_dialog = QProgressDialog(
             "Refreshing all sources...", None, 0, len(self.source_data_page.SOURCES), self
         )
@@ -1104,7 +1109,9 @@ class MainWindow(QMainWindow):
         def _update_progress(completed: int, total: int, message: str):
             progress_dialog.setValue(completed)
             pct = int((completed / total) * 100) if total else 0
-            progress_dialog.setLabelText(f"{message}\n\n{completed}/{total} sources complete ({pct}%)")
+            progress_dialog.setLabelText(
+                f"{message}\n\n{completed}/{total} sources complete ({pct}%)"
+            )
 
         def _on_all_done():
             try:
@@ -1115,6 +1122,18 @@ class MainWindow(QMainWindow):
 
             progress_dialog.setValue(len(self.source_data_page.SOURCES))
             progress_dialog.close()
+
+            # Defer so the progress dialog fully tears down first;
+            # otherwise the confirmation can flash behind the main window.
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.information(
+                    self,
+                    "Full Refresh Complete",
+                    "All sources finished refreshing.\n\n"
+                    "StockAnalysis, MarketScreener, FRED, and Beta/Vol are up to date.",
+                ),
+            )
 
         self.source_data_page.source_progress.connect(_update_progress)
         self.source_data_page.all_sources_finished.connect(_on_all_done)

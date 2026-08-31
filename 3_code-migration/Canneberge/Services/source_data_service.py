@@ -3,6 +3,7 @@ from Canneberge.Sources.marketscreener import MarketScreenerClient
 from Canneberge.Sources.fred import FREDClient
 from Canneberge.Sources.beta_vol import BetaVolClient
 from Canneberge import config
+from Canneberge.Sources.yfinance_live import YFinanceLiveClient
 
 
 class SourceDataService:
@@ -145,3 +146,79 @@ class SourceDataService:
         except Exception as e:
             self.progress(f"Beta/Vol: Error - {str(e)}")
             return []
+
+    def _get_scale_divisor(self) -> float:
+        """
+        Parses ProjectInputs.numeric_scale ('Millions', 'Thousands', 'Actual')
+        into a clean float divisor (1000000.0, 1000.0, or 1.0).
+        """
+        scale_str = str(getattr(self.project_inputs, "numeric_scale", "Millions")).strip().lower()
+        if "million" in scale_str:
+            return 1_000_000.0
+        elif "thousand" in scale_str:
+            return 1_000.0
+        return 1.0
+
+    def refresh_live_marks(self, existing_sa_results: dict = None):
+        """
+        Fast refresh (~2 seconds): pulls live market marks from yfinance.
+        Scales Market Cap, EV, and Shares Outstanding to match the Home Page numeric scale.
+        """
+        tickers = self.project_inputs.active_public_tickers
+        scale_divisor = self._get_scale_divisor()
+
+        self.progress(f"Live Marks: Fetching live prices & caps for {len(tickers)} tickers via yfinance...")
+
+        yf_client = YFinanceLiveClient(tickers)
+        live_marks = yf_client.fetch_live_marks()
+
+        sa_results = existing_sa_results if isinstance(existing_sa_results, dict) else {}
+        if "Ratios" not in sa_results:
+            sa_results["Ratios"] = []
+
+        ratios = sa_results["Ratios"]
+
+        # Map existing (ticker, line_item) -> list index in Ratios array
+        existing_map = {
+            (str(r.get("Ticker", "")).strip().lower(), str(r.get("Line Item", "")).strip().lower()): idx
+            for idx, r in enumerate(ratios)
+        }
+
+        # Items that need scaling (everything except per-share price)
+        ITEMS_TO_SCALE = {"market capitalization", "enterprise value", "shares outstanding"}
+
+        patched_count = 0
+        for ticker_lower, marks in live_marks.items():
+            for line_item, val in marks.items():
+                if val is None:
+                    continue
+
+                # Scale currency caps and shares count; leave stock price in actual dollars
+                if line_item in ITEMS_TO_SCALE:
+                    scaled_val = val / scale_divisor
+                else:
+                    scaled_val = val
+
+                key = f"{ticker_lower}|{line_item}"
+                idx = existing_map.get((ticker_lower, line_item))
+
+                if idx is not None:
+                    ratios[idx]["TTM"] = scaled_val
+                else:
+                    new_row = {
+                        "Ticker": ticker_lower,
+                        "Line Item": line_item,
+                        "TTM": scaled_val,
+                        "Key": key,
+                    }
+                    ratios.append(new_row)
+                    existing_map[(ticker_lower, line_item)] = len(ratios) - 1
+                patched_count += 1
+
+        self.progress(f"Live Marks: Updated {patched_count} entries (scale divisor: {scale_divisor:,.0f}).")
+        
+        fred_results = self.refresh_fred()
+        return {
+            "stockanalysis": sa_results,
+            "fred": fred_results,
+        }
