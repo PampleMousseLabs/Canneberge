@@ -126,16 +126,21 @@ Home, Dashboard, WACC, DCF, NWC, Debt Schedule, GT, GPC, Subject Financials, Sou
 | yfinance (Beta/Vol) | ✅ Live | Replicates Excel VBA beta/volatility methodology exactly — do not substitute Yahoo's own reported beta, different methodology |
 | yfinance (live marks) | ✅ Live | Separate, faster path for price/market cap/EV only — powers the session-reload "Update Live Marks (2s)" option |
 
-### Session Save/Load
+### Session Save/Load (also functions as the data cache)
 
-Fully built. `utils/session.py` serializes the entire app state — every page's inputs, GT/GPC/WACC/DCF/NWC/Debt Schedule/Dashboard page state, Projection Module data, private financials, and cached source-data results — to one versioned JSON file.
+Fully built. `utils/session.py` serializes the entire app state — every page's inputs, GT/GPC/WACC/DCF/NWC/Debt Schedule/Dashboard page state, Projection Module data, private financials, and the full `source_data_results` blob from the last refresh — to one versioned JSON file (`save_session()` writes it, `load_session()` reads it straight back out).
 
-Loading a session is near-instant (state restores from the file, no network calls), then presents a choice:
-- **Update Live Marks (~2s)** — refresh price/market cap/EV only
-- **Full Web Refresh (~40s)** — re-scrape all four sources fresh
-- **Use Cached Data Only (0s)** — no network calls at all
+**There is no separate cache or database.** The session JSON file *is* the cache — a complete, self-contained snapshot of everything, including every prior source pull. This is simpler than the SQLite-based caching layer once discussed as a future addition, and is the actual mechanism in production use today.
 
-This is also the mechanism that made cross-machine use (e.g. moving a session file from the Windows desktop to a Chromebook install) work without any extra effort — sessions are portable JSON with no hardcoded local file paths.
+Loading a session is near-instant (state restores from the file, no network calls needed at all), then presents a three-way choice — available both at session-load time and directly from the Source Data page's own refresh controls:
+
+| Option | Time | Behavior |
+|---|---|---|
+| **Load Cached Data** | 0s | Everything stays exactly as last saved — StockAnalysis, MarketScreener, FRED, Beta/Vol, all frozen. No network calls. |
+| **Update Live Marks** | ~2s | Only Enterprise Value, Market Capitalization, Last Sale Price, and Shares Outstanding are overwritten via a fresh yfinance pull. StockAnalysis and MarketScreener data remain frozen from the saved session. |
+| **Full Web Refresh** | ~40s | Re-scrapes all four sources (StockAnalysis, MarketScreener, FRED, Beta/Vol) fresh, same as a full Source Data page refresh. |
+
+This is also the mechanism that made cross-machine use (e.g. moving a session file from the Windows desktop to a Chromebook install) work without any extra effort — sessions are portable JSON with no hardcoded local file paths, and the cached source data travels with the file, so a moved session is usable offline immediately via "Load Cached Data."
 
 ### Reverse-DCF
 
@@ -153,7 +158,7 @@ This is the mechanism intended to catch future StockAnalysis wording changes —
 
 | Item | Status |
 |---|---|
-| Data caching layer (SQLite) | Not started. Every "Full Web Refresh" re-scrapes live; matters because of MarketScreener's daily rate limit and because it's also the prerequisite for reasonable offline/degraded-network behavior once a web (Dash) version exists. |
+| Independent/shared cache (vs. per-session snapshot) | The current cache *is* the session file — there's no cache independent of an explicit save, and no shared cache across sessions/users. Fine for single-user desktop use today. Worth revisiting once Dash exists and multiple users/devices might want to share one live data pool rather than each maintaining separate session snapshots — a real shared store (SQLite or similar) becomes more justified at that point, mainly to avoid each user separately burning MarketScreener's daily rate limit on the same tickers. |
 | StockAnalysis "Depreciation Expense" → "D&A for EBITDA" rename | Confirmed drift, not yet patched into `SA_KEY_MAP`/downstream depreciation ratios. |
 | Installer / packaging | None. Manual per-machine Python + `pip install -r requirements.txt` setup (documented but manual). Deliberately deprioritized — small known user base, and the problem disappears once Dash exists (no per-machine Python install needed at all for a browser client). |
 | MarketScreener connection health / silent partial-data failure | MarketScreener being down or rate-limited produces a session that loads fine but with only partial forward-estimate coverage, no visible error. No in-app diagnostic for this yet. |
@@ -170,7 +175,7 @@ This is the mechanism intended to catch future StockAnalysis wording changes —
 - `Calculations/`, `Sources/`, `Services/`, `Transforms/` carry over largely as-is (no PyQt dependency) — only the UI layer (`Ui/`) requires a full rewrite, not a port, since Qt widget layout logic doesn't translate to Dash/HTML.
 - PyQt6 desktop version is expected to freeze once Dash is stable, rather than maintaining both UIs in parallel indefinitely — avoids doubling every future UI-facing change across two codebases.
 
-**Not yet started:** any actual Dash code, `dash-ag-grid` spike, SQLite caching layer, or the login/folder-per-user mechanism.
+**Not yet started:** any actual Dash code, `dash-ag-grid` spike, a shared/persistent cache layer (if one ends up being needed — see Known Gaps above), or the login/folder-per-user mechanism.
 
 **Recommended first step when this work begins:** one small vertical slice — a single "Refresh FRED" button wired to the existing `Sources/fred.py`, rendered in a `dash-ag-grid` table — proving the pattern end-to-end before committing to a full tab-by-tab migration. Suggested migration order once that spike works: Source Data → Home → GT → GPC → WACC → DCF → Projection Module (roughly easiest-to-hardest given current UI complexity).
 

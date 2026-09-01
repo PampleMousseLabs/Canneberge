@@ -87,14 +87,14 @@ All four live sources are fully wired end-to-end through `Services/source_data_s
 
 **Key architectural facts:**
 - Calculation logic lives in `Calculations/` (DCF, Reverse-DCF, GPC/GT multiples, debt schedule, valuation surface, ratio catalogue, subject IS/BS calc, projection resolution, analytics/theory math) — has **no PyQt dependency**, making it portable to a future Dash backend without a rewrite.
-- Session save/load is fully built (`utils/session.py`) — serializes essentially the entire app state (every page's inputs + cached source-data pulls) to a single JSON file. Reloading a session gives a choice: use cached data only, refresh just live market marks (~2s), or do a full web re-scrape (~40s).
+- Session save/load is fully built (`utils/session.py`) — serializes essentially the entire app state (every page's inputs + the full cached source-data results blob) to a single JSON file. **The session file itself is the cache** — there is no separate database or persistent store; a saved session is a complete, self-contained snapshot including every prior source pull. Loading a session offers three choices: **Load Cached Data** (0s, everything frozen exactly as last saved), **Update Live Marks** (~2s, refreshes only price/market cap/enterprise value/shares outstanding via yfinance, StockAnalysis and MarketScreener data stays frozen from the save), or **Full Web Refresh** (~40s, re-scrapes all four sources fresh). This same three-way choice is also available directly from the Source Data page's refresh controls, not just at session-load time.
 - Reverse-DCF (market-implied growth solver) is live, using each comparable's own observed beta (not the WACC page's re-levered beta), consistent with each ticker's own market price and capital structure.
 - Projection Module supports two-way binding between typed $ values and typed growth %, tracked per-period so the app knows which one to treat as the driver.
 - A StockAnalysis drift-detection prototype exists (`Prototypes/drift_tool/`) — canonical line-item ordering + a schema-drift analyzer comparing current scrapes against a reference set, aimed at catching future StockAnalysis wording changes (like the Depreciation Expense → D&A rename) before they silently break calculations.
 
 **Known technical debt:**
 - `if(CompanyStatus)` two-way binding between public/private data paths — check current state in `code-migration.md`, this may now be resolved.
-- No data-caching layer yet (SQLite planned) — every "Full Web Refresh" re-scrapes live, which matters given MarketScreener's daily rate limit.
+- The session-file-as-cache model means there's no cache at all until you've explicitly saved a session at least once, and "freshness" is only ever as good as your last save — there's no independent, always-current cache separate from a session snapshot. Worth keeping in mind for the eventual Dash version, where multiple users/devices sharing one live data pool (rather than each pulling their own session snapshot) may call for a real shared cache layer instead.
 - No installer/packaging — running the app requires a manual Python + dependency setup per machine (documented, but manual). Considered low priority given the small, known user base and the planned Dash migration, which removes the need for per-machine installs entirely.
 
 ---
