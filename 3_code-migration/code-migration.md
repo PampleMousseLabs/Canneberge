@@ -8,7 +8,7 @@ Markdown
 
 ## Overview
 
-THIS IS THE GITHUB VS CODE TEST TEXT TO CHECK FOR - Phase 3 migrates the Excel-based ETL pipeline and valuation model into a standalone Python desktop application. The system preserves all functional requirements from Phase 1 while eliminating Excel/VBA dependencies, reducing runtime from ~25 minutes to target <2 minutes, and enabling future web/mobile deployment.
+THIS IS THE EDITED ON GITHUB SITE VERSION TO PULL DOWN TO VS CODE - Phase 3 migrates the Excel-based ETL pipeline and valuation model into a standalone Python desktop application. The system preserves all functional requirements from Phase 1 while eliminating Excel/VBA dependencies, reducing runtime from ~25 minutes to target <2 minutes, and enabling future web/mobile deployment.
 
 The Python application is organized as a modular package (`Canneberge/`) with clear separation between:
 - **UI Layer** — PyQt6 desktop interface
