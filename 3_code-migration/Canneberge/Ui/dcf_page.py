@@ -370,7 +370,6 @@ class ReverseDCFDialog(QDialog):
             w.setStyleSheet(get_input_style())
             w.setFixedWidth(90)
         self.in_ga.editingFinished.connect(self._format_ga)
-        self.in_ga.editingFinished.connect(self._format_ga)
         self.in_gn.editingFinished.connect(self._format_gn)
         self.in_h.editingFinished.connect(self._on_h_changed)
         h_form.addRow("Ga (ST Growth):", self.in_ga)
@@ -1123,7 +1122,6 @@ class DCFPage(QWidget):
         self.bridge_fv_base_label.setStyleSheet(get_bold_style() + get_border_above_style() + get_border_below_style())
         self._lbl_sensitivity_header.setStyleSheet(get_bold_style())
         self._lbl_wacc_ltgr_corner.setStyleSheet(get_bold_style())
-        self.link_valuation_surface.setStyleSheet(get_link_style())
         for inp in self.sens_wacc_inputs:
             inp.setStyleSheet(get_input_style())
         for inp in self.sens_ltgr_inputs:

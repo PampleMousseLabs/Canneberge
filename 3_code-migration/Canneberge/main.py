@@ -1,8 +1,12 @@
+import os
 import sys
 import traceback
 
-from PyQt6.QtWidgets import QApplication
+# Force X11 backend on Linux (ChromeOS/Crostini Wayland compatibility fix)
+if sys.platform.startswith("linux") and "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
 
+from PyQt6.QtWidgets import QApplication
 from Canneberge.Ui.main_window import MainWindow
 
 
