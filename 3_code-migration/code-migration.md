@@ -1,23 +1,23 @@
-3_code-migration/code-migration.md
-Markdown
-
 # Phase 3 — Code Migration
 
-> Last updated: 2026-07-28
-> Status: In Progress — Source Layer Wired, Calculation Layer Active (GT/GPC), Subject Financials + Projection Module Complete
+> Last updated: 2026-08-31
+> Status: Desktop app functionally mature. Planning underway for Dash (web/tablet) migration — not yet started.
 
 ## Overview
 
-Phase 3 migrates the Excel-based ETL pipeline and valuation model into a standalone Python desktop application. The system preserves all functional requirements from Phase 1 while eliminating Excel/VBA dependencies, reducing runtime from ~25 minutes to target <2 minutes, and enabling future web/mobile deployment.
+Phase 3 replaced the Excel-based ETL pipeline and valuation model with a standalone Python desktop application. All four live data sources (StockAnalysis, MarketScreener, FRED, yfinance) are wired end-to-end, and all core valuation approaches (DCF, WACC, NWC, GT, GPC, Debt Schedule, Reverse-DCF) are implemented and in active use.
 
-The Python application is organized as a modular package (`Canneberge/`) with clear separation between:
-- **UI Layer** — PyQt6 desktop interface
-- **Source Clients** — Data fetchers (StockAnalysis, MarketScreener, FRED, Yahoo/Beta-Vol)
-- **Calculations** — Pure calculation modules, no UI dependency (GPC multiples, IS/BS roll-ups, EBITDA/EBIT derivation)
-- **Services** — Coordination logic for multi-source pulls
-- **Workers** — QThread wrappers for async execution
-- **Transforms** — Schema normalization and period mapping
-- **State** — Application inputs and configuration (`ProjectInputs`, `PrivateFinancials`, `ProjectionData`)
+The Excel workbook (Phase 1) is now considered **frozen and stale** — see the README's Phase 1 status note. StockAnalysis.com wording drift since the Excel Power Queries were last touched means Excel can no longer be trusted as a live cross-check against this app's output. No plan currently exists to re-sync it; this app is the source of truth going forward.
+
+The package is organized as:
+- **UI Layer** (`Ui/`) — PyQt6 desktop interface, one file per tab/dialog
+- **Sources** (`Sources/`) — live data fetchers, one per external source
+- **Services** (`Services/`) — coordinates multi-source pulls
+- **Workers** (`Workers/`) — QThread wrapper for async execution (keeps UI responsive during refresh)
+- **Transforms** (`Transforms/`) — schema/period normalization
+- **Calculations** (`Calculations/`) — all valuation math, **zero PyQt dependency** (this is what makes a future Dash backend a realistic reuse rather than a rewrite)
+- **State** (`app_state.py`) — `ProjectInputs`, `PrivateFinancials`, `ProjectionData`, `Transaction` dataclasses
+- **Utils** (`utils/`) — session save/load, StockAnalysis-specific helpers
 
 ---
 
@@ -25,249 +25,167 @@ The Python application is organized as a modular package (`Canneberge/`) with cl
 
 ```text
 3_code-migration/
-├── Canneberge/                      ← Main application package
-│   ├── __init__.py
-│   ├── main.py                      ← Entry point (python -m Canneberge.main)
-│   ├── app_state.py                 ← ProjectInputs / PrivateFinancials / ProjectionData dataclasses
-│   ├── config.py                    ← Local config (FRED API key path)
+├── Canneberge/
+│   ├── main.py                          ← Entry point (python -m Canneberge.main)
+│   ├── app_state.py                     ← ProjectInputs, PrivateFinancials, ProjectionData, Transaction; IS_LINES/BS_LINES schema
+│   ├── config.py                        ← Reads ~/.canneberge/config.json (FRED key, never committed)
+│   ├── debug_analytics.py               ← Standalone debug/inspection script
+│   ├── debug_capital_structure.py       ← Standalone debug/inspection script
+│   ├── debug_reverse_dcf.py             ← Standalone debug/inspection script; mirrors Reverse-DCF extraction logic for offline testing
 │   │
 │   ├── Ui/
-│   │   ├── __init__.py
-│   │   ├── main_window.py                    ← Tabbed shell, session save/load, cross-page wiring
-│   │   ├── home_page.py                      ← General/Subject/Market inputs, GPC ticker+name grid, GT grid
-│   │   ├── source_data_page.py               ← Data refresh (all 4 sources) + results table + batch progress signals
-│   │   ├── subject_financials_page.py        ← Read-only IS/BS display; single source of truth for other pages
-│   │   ├── private_financials_input_page.py  ← Manual IS/BS entry dialog for private subject companies
-│   │   ├── projection_module_page.py         ← Forward-period projection dialog (Revenue/GP/EBITDA/D&A/CapEx)
-│   │   ├── gt_page.py                        ← Guideline Transaction method
-│   │   └── gpc_page.py                       ← Guideline Public Company method
-│   │
-│   ├── Calculations/
-│   │   ├── __init__.py
-│   │   ├── gpc_metrics.py           ← GPC_METRICS catalogue (display name, period, line_key)
-│   │   ├── gpc_multiples.py         ← BEV computation + multiple calc for GPC comp set
-│   │   └── subject_is_bs_calc.py    ← Shared IS/BS roll-up formulas (compute_is_calculated, compute_bs_calculated)
+│   │   ├── main_window.py               ← Tabbed shell; owns cross-page callback wiring and save/load session logic
+│   │   ├── home_page.py                 ← General/Subject/Market inputs, GPC + GT grids
+│   │   ├── dashboard_page.py            ← Reconciliation of approaches, football field + candlestick charts
+│   │   ├── source_data_page.py          ← Live source refresh controls + results table
+│   │   ├── subject_financials_page.py   ← Subject company IS/BS (public or private path)
+│   │   ├── private_financials_input_page.py  ← Manual entry dialog for private subject companies
+│   │   ├── wacc_page.py                 ← WACC build-up, beta selection, capital structure
+│   │   ├── dcf_page.py                  ← DCF model + Reverse-DCF dialog
+│   │   ├── nwc_page.py                  ← Net working capital schedule
+│   │   ├── debt_schedule_page.py        ← Debt schedule feeding projected interest expense into DCF
+│   │   ├── gt_page.py                   ← Guideline Transaction comps
+│   │   ├── gpc_page.py                  ← Guideline Public Company comps, dual BEV/Equity basis
+│   │   ├── projection_module_page.py    ← Projection Module dialog (two-way $ / growth % binding)
+│   │   ├── analytics_page.py            ← Supplementary analytics/theory views
+│   │   ├── football_field_chart.py      ← Popup chart dialog
+│   │   ├── gpc_candlestick_chart.py     ← Popup chart dialog
+│   │   ├── valuation_surface_chart.py   ← Popup chart dialog
+│   │   ├── theme.py                     ← theme_manager singleton (Slate & Gold, One Dark Pro, GitHub Light)
+│   │   ├── font_scale.py                ← font_scale singleton (Ctrl+=/-/0)
+│   │   └── shared_input_widgets.py      ← MultipleInputEdit, PctInputEdit, CurrencyInputEdit
 │   │
 │   ├── Sources/
-│   │   ├── __init__.py
-│   │   ├── stockanalysis.py         ← IS, BS, CFS, Ratios scraper (multi-table union per statement)
-│   │   ├── marketscreener.py        ← Forward estimates (Revenue/EBITDA/EBIT/Net Income, NFY–NFY+2)
-│   │   ├── fred.py                  ← Interest rates via FRED REST API
-│   │   └── beta_vol.py              ← Beta/volatility calc (yfinance price history)
+│   │   ├── stockanalysis.py             ← IS, BS, CFS, Ratios — live
+│   │   ├── marketscreener.py            ← Forward estimates — live
+│   │   ├── fred.py                      ← Interest rates — live
+│   │   ├── beta_vol.py                  ← Beta/volatility, replicates Excel VBA methodology exactly — live
+│   │   └── yfinance_live.py             ← Fast batch live-marks fetch (price, market cap, EV, shares out) — live
 │   │
 │   ├── Services/
-│   │   ├── __init__.py
-│   │   └── source_data_service.py   ← Coordinates all 4 source clients
+│   │   └── source_data_service.py       ← Coordinates all four source clients
 │   │
 │   ├── Workers/
-│   │   ├── __init__.py
-│   │   └── source_data_worker.py    ← QThread per source, async pulls
+│   │   └── source_data_worker.py        ← QThread for async pulls
 │   │
 │   ├── Transforms/
-│   │   ├── __init__.py
-│   │   └── period_mapper.py         ← TTM/LFY column mapping logic
+│   │   ├── period_mapper.py             ← TTM/LFY/LFY-N column mapping logic
+│   │   └── sa_key.py                    ← StockAnalysis key-normalization helper
+│   │
+│   ├── Calculations/
+│   │   ├── reverse_dcf.py               ← Market-implied growth solver
+│   │   ├── gpc_multiples.py             ← GPC multiple selection/weighting
+│   │   ├── gpc_metrics.py               ← GPC ratio computation
+│   │   ├── debt_schedule.py             ← Debt schedule math
+│   │   ├── valuation_surface.py         ← Sensitivity surface (WACC × LTGR grid, etc.)
+│   │   ├── ratio_catalogue.py           ← Ratio definitions feeding comparable toggle tables
+│   │   ├── subject_is_bs_calc.py        ← Subject company IS/BS derived-line calculations
+│   │   ├── projection_resolve.py        ← Resolves Projection Module two-way-bound values
+│   │   ├── analytics_math.py            ← Supplementary analytics calculations
+│   │   ├── theory_math.py               ← Supplementary theory/reference calculations
+│   │   └── chart_helper.py              ← Data shaping for chart consumption
 │   │
 │   └── utils/
-│       ├── __init__.py
-│       └── session.py               ← Save/load session state to JSON
+│       ├── session.py                   ← save_session / load_session / list_sessions — full app-state JSON serialization
+│       └── sa_utils.py                  ← Shared StockAnalysis parsing helpers (e.g. to_float)
 │
-├── Prototypes/                      ← Archived test scripts
-├── Tests/                           ← Future unit/integration tests
-├── Run_Canneberge.bat               ← Double-click launcher
-└── code-migration.md                ← This file
+├── Prototypes/
+│   ├── drift_tool/                      ← StockAnalysis schema-drift detection prototype (see below)
+│   ├── test_app_StockAnalysisScraper_v2.py
+│   ├── test_app_MarketScreenerScraper.py
+│   ├── test_app_FREDfetcher.py
+│   └── test_app_Beta_Vol_Module.py
+│
+├── Run_Canneberge.bat                   ← Windows double-click launcher
+├── requirements.txt
+└── code-migration.md                    ← This file
 ```
 
 ---
 
 ## Completed Components
 
-### UI Layer
+### UI Layer — all 11 tabs functional
 
-| Component | File | Status |
+Home, Dashboard, WACC, DCF, NWC, Debt Schedule, GT, GPC, Subject Financials, Source Data, Analytics.
+
+**Notable UI behaviors:**
+- Three-theme system (Slate & Gold, One Dark Pro, GitHub Light) switchable live from the View menu, no restart required.
+- Font-scale control (Ctrl+=/-/0), independent of theme.
+- Tab-change triggers recalculation of the page being switched to, so numbers are always current without a manual refresh.
+- NWC always recalculates before DCF (DCF pulls Change in NWC from NWC) — enforced via `_refresh_nwc_then_dcf()` in `main_window.py`, not left to incidental ordering.
+- Basis of Value (Home page) auto-syncs DCF's cash-flow basis (FCFE vs FCFF) and GPC's multiple mode (Equity vs BEV).
+
+### Source Clients — all four live, none are stubs
+
+| Source | Status | Notes |
 |---|---|---|
-| Main Window (tabbed shell) | `Ui/main_window.py` | ✅ Complete |
-| Home Page (inputs) | `Ui/home_page.py` | ✅ Complete |
-| Source Data Page | `Ui/source_data_page.py` | ✅ Complete — all 4 sources wired |
-| Subject Financials Page | `Ui/subject_financials_page.py` | ✅ Complete — see below |
-| Private Financials Input Dialog | `Ui/private_financials_input_page.py` | ✅ Complete |
-| Projection Module Dialog | `Ui/projection_module_page.py` | ✅ Complete |
-| GT Page | `Ui/gt_page.py` | ✅ Complete (TTM-only multiples, by design) |
-| GPC Page | `Ui/gpc_page.py` | ✅ Complete (TTM + NFY/NFY+1/NFY+2 multiples) |
+| StockAnalysis | ✅ Live | Header-driven column mapping, no hardcoded years |
+| MarketScreener | ✅ Live | Subject to MarketScreener's documented daily rate limit |
+| FRED | ✅ Live | Reads key from `~/.canneberge/config.json` |
+| yfinance (Beta/Vol) | ✅ Live | Replicates Excel VBA beta/volatility methodology exactly — do not substitute Yahoo's own reported beta, different methodology |
+| yfinance (live marks) | ✅ Live | Separate, faster path for price/market cap/EV only — powers the session-reload "Update Live Marks (2s)" option |
 
-**Subject Financials Page — architecture note:** This page is the single source of truth for subject-company data consumed by every other page (GT, GPC, and future DCF/NWC). Key rules, established this session:
-- All `is_calc=True` rows (Cost of Goods Sold, Gross Profit, Operating Expenses, EBITDA, EBIT, Pretax Income, Income Before Nonrecurring, Net Income, Debt-free Net Income) are computed locally from raw components via `Calculations/subject_is_bs_calc.py` — never read as a pre-computed value from StockAnalysis or the private-entry dialog. Exception: `total_current_liab`, `total_liabilities`, `total_equity`, `total_liab_equity` are direct StockAnalysis pulls (`BS_DIRECT_PULL_KEYS`) rather than local sums, because their raw BS components don't scrape reliably.
-- EBITDA/EBIT are **never** read from StockAnalysis's own "EBITDA"/"EBIT" rows. Formula: `EBITDA = Revenue − COGS − (SG&A + R&D + Other Operating)` (deliberately excludes D&A from Operating Expenses), `EBIT = EBITDA − Depreciation − Amortization`. This applies to the subject company only — GPC comp-set tickers still use StockAnalysis's as-reported EBITDA/EBIT (deliberate methodology choice: comps should reflect what the market saw, not a recomputed figure).
-- Forward periods (NFY through NFY+N) are sourced **exclusively** from the Projection Module's saved `ProjectionData` — never from MarketScreener directly. `ProjectionData` stores resolved dollar values (`revenue`, `gross_profit`, `ebitda`, `da`, `capex`) for every projection period, including the three periods (NFY/NFY+1/NFY+2) where the dialog itself sources from MarketScreener — the dialog persists the resolved number, so nothing downstream needs its own MarketScreener dependency.
-- `get_historical_line_values(key, statement)` and `get_metric_value(key, period)` are the two public entry points other pages should call. GT and GPC both route subject-company metrics through `get_metric_value` — no page besides Subject Financials itself should read StockAnalysis/PrivateFinancials/MarketScreener directly for subject data.
+### Session Save/Load
 
-**StockAnalysis scraper fix (this session):** `fetch_statement()` previously took only the *first* `<table>` on a page matching a row/column size filter. Confirmed live (ADBE balance sheet returns 4 `<table>` elements) that statements can split across multiple tables — assets in one, liabilities/equity in another. Fix: union rows from every table sharing the same header row as the first match.
+Fully built. `utils/session.py` serializes the entire app state — every page's inputs, GT/GPC/WACC/DCF/NWC/Debt Schedule/Dashboard page state, Projection Module data, private financials, and cached source-data results — to one versioned JSON file.
 
-**Session load progress (this session):** File → Open now triggers a full "Refresh All Sources" automatically and blocks (via `QProgressDialog`) until all 4 sources report complete, with live per-source progress and a running count/percentage, before showing the "Session Loaded" confirmation.
+Loading a session is near-instant (state restores from the file, no network calls), then presents a choice:
+- **Update Live Marks (~2s)** — refresh price/market cap/EV only
+- **Full Web Refresh (~40s)** — re-scrape all four sources fresh
+- **Use Cached Data Only (0s)** — no network calls at all
+
+This is also the mechanism that made cross-machine use (e.g. moving a session file from the Windows desktop to a Chromebook install) work without any extra effort — sessions are portable JSON with no hardcoded local file paths.
+
+### Reverse-DCF
+
+Solves for market-implied growth (Gordon Growth or H-Model) given a ticker's market cap and cost of equity. Uses each comparable's **own observed beta** (matching its own market price and capital structure) — explicitly distinct from the WACC page's re-levered beta, which normalizes GPC betas to the *subject's* target capital structure for the subject's own Ke/WACC calc. This distinction is documented directly in `main_window.py`'s `_get_reverse_dcf_inputs()` docstring and should not be "fixed" by someone who hasn't read that reasoning first.
+
+### StockAnalysis Drift Detection (prototype)
+
+`Prototypes/drift_tool/` contains a working prototype: canonical line-item ordering references for IS/BS/CFS/Ratios, a live scraper (`line_item_scraper.py`), and `schema_drift_analyzer.py` producing a `master_vs_scraper_drift.csv` comparing current scrapes against the canonical reference set.
+
+This is the mechanism intended to catch future StockAnalysis wording changes — the same failure class as the historical `"market cap"` → `"market capitalization"` and `current_leases` naming bugs, and the still-open **"Depreciation Expense" → "D&A for EBITDA"** rename that currently affects `SA_KEY_MAP`-driven depreciation lookups. Promoting this from prototype to an in-app health check (per the original roadmap) is still pending, but the core detection logic already exists and works — it isn't starting from zero.
 
 ---
 
-### Source Clients
+## Known Gaps / Technical Debt
 
-| Source | File | Status | Notes |
-|---|---|---|---|
-| StockAnalysis | `Sources/stockanalysis.py` | ✅ Complete | IS, BS, CFS, Ratios; multi-table union fix applied |
-| MarketScreener | `Sources/marketscreener.py` | ✅ Wired | Revenue, EBITDA, EBIT, Net Income for NFY/NFY+1/NFY+2 |
-| FRED | `Sources/fred.py` | ✅ Wired | Reads API key via `config.get_fred_api_key()` |
-| Beta/Vol | `Sources/beta_vol.py` | ✅ Wired | Yahoo Finance price history, 2yr weekly / 5yr monthly beta, volatility |
-
-**StockAnalysis Features:**
-- Header-driven column mapping (no hardcoded years)
-- `TTM`/`LTM`/`Current` → `TTM`
-- Highest `FY XXXX` → `LFY`, next → `LFY-1`, etc.
-- Multi-table union per statement (see above) — required for BS totals and EBITDA/EBIT rows to resolve
-- Clean null handling (`-`, `N/A`, `—`, `nan` → blank)
-- Metadata columns: `Ticker`, `Key` (`ticker|line item`)
-
----
-
-### Calculation Layer
-
-| Component | File | Status |
-|---|---|---|
-| Subject IS/BS roll-ups | `Calculations/subject_is_bs_calc.py` | ✅ Complete |
-| GPC multiples engine | `Calculations/gpc_multiples.py` | ✅ Complete |
-| GPC metrics catalogue | `Calculations/gpc_metrics.py` | ✅ Complete |
-| WACC | — | ⏳ Not started. Blocker (capital structure sourcing) is cleared. |
-| DCF | — | ⏳ Not started |
-| NAV | — | ⏳ Not started. Blocker (PBC data entry) is cleared — now user input fields, BS recovery method only. |
-| NWC | — | ⏳ Not started |
-
----
-
-### Services & Workers
-
-| Component | File | Status |
-|---|---|---|
-| Source Data Service | `Services/source_data_service.py` | ✅ Complete — all 4 sources |
-| Source Data Worker | `Workers/source_data_worker.py` | ✅ Complete |
-
-**Worker Architecture:**
-- QThread per source, async execution (UI never freezes)
-- Progress signals to status label, plus batch-level `source_progress`/`all_sources_finished` signals for session-load blocking progress
-- Error signals for graceful per-source failure (doesn't block the rest of a batch)
-
----
-
-### Transforms
-
-| Component | File | Status |
-|---|---|---|
-| Period Mapper | `Transforms/period_mapper.py` | ✅ Complete |
-
----
-
-### Application State
-
-| Component | File | Status |
-|---|---|---|
-| `ProjectInputs` | `app_state.py` | ✅ Complete |
-| `PrivateFinancials` | `app_state.py` | ✅ Complete |
-| `ProjectionData` | `app_state.py` | ✅ Complete — now stores resolved dollar values, not just drivers (see Subject Financials note above) |
-
----
-
-## Execution Flow
-
-```text
-Run_Canneberge.bat
-    ↓
-Canneberge/main.py
-    ↓
-MainWindow (QMainWindow)
-    ├── Home Tab (HomePage) — get_project_inputs() → ProjectInputs
-    ├── Source Data Tab (SourceDataPage) — Refresh All / per-source
-    ├── Subject Financials Tab — single source of truth for subject data
-    ├── GT Tab — Guideline Transaction method
-    └── GPC Tab — Guideline Public Company method
-```
-
-## Performance Targets
-
-| Metric | Excel (Phase 1) | Python Target | Current Status |
-|---|---|---|---|
-| ETL Runtime (10 tickers) | ~25 minutes | <2 minutes | All 4 sources wired; full-batch timing not yet formally measured |
-| UI Responsiveness | Frozen during refresh | Always responsive | ✅ Achieved |
-| Year Mapping | Hardcoded | Dynamic from inputs | ✅ Achieved |
-| Error Handling | ETL_LOG sheet | Console + UI status | ⚠️ Partial |
-
-## Known Technical Debt (Carried from Excel)
-
-| Item | Excel Location | Python Status |
-|---|---|---|
-| Hardcoded year references | `fn*.m`, `modExtraction` | ✅ Resolved in Python |
-| `if(CompanyStatus)` two-way binding | `IS`, `BS` sheets | ✅ Resolved — Subject Financials branches on `is_publicly_traded` |
-| MarketScreener rate limiting | Stage 0.5 VBA | ⏳ Not yet replicated (Python has no rate-limit guard yet) |
-
-## Known Technical Debt (New, from Python migration)
-
-| Item | Location | Status |
-|---|---|---|
-| `Calculations/projection_resolve.py` | New file, no longer called | Dead code — nothing references `resolve_projection_dollars` since Subject Financials switched to reading `ProjectionData` directly. Safe to delete. |
-| GPC company name lookup | `home_page.py` / `gpc_page.py` | ✅ Resolved this session — `gpc_company_names` dict added to `ProjectInputs`, keyed by ticker |
-| No theming / dark mode | All UI files | Queued, not started. No quick fix available — every page uses hardcoded inline `setStyleSheet()` calls; a real fix requires extracting colors into a shared theme module across ~6 files. |
-
-## Deletion Candidates (from Excel)
-
-| Excel Sheet | Recommendation |
+| Item | Status |
 |---|---|
-| `Summary` | Absorb into dashboard |
-| `Tax Depreciation` | Delete if not developed |
-| `Amortization` | Delete if not developed |
-| `NOL` | Delete (applied as discrete DCF adjustments) |
-| `Market Data` | Delete (scratch use of `pmlPRICE()`) |
-| `Historic Capital Structure` | Sourcing decided per Ted — ready to wire into WACC when that module is built |
-| `ETL_STATE` (Sheet5) | Investigate (hidden/orphaned) |
+| Data caching layer (SQLite) | Not started. Every "Full Web Refresh" re-scrapes live; matters because of MarketScreener's daily rate limit and because it's also the prerequisite for reasonable offline/degraded-network behavior once a web (Dash) version exists. |
+| StockAnalysis "Depreciation Expense" → "D&A for EBITDA" rename | Confirmed drift, not yet patched into `SA_KEY_MAP`/downstream depreciation ratios. |
+| Installer / packaging | None. Manual per-machine Python + `pip install -r requirements.txt` setup (documented but manual). Deliberately deprioritized — small known user base, and the problem disappears once Dash exists (no per-machine Python install needed at all for a browser client). |
+| MarketScreener connection health / silent partial-data failure | MarketScreener being down or rate-limited produces a session that loads fine but with only partial forward-estimate coverage, no visible error. No in-app diagnostic for this yet. |
+| Projection Module ↔ Subject Company IS/DCF/NWC wiring | Two-way $ / growth % binding exists at the Projection Module level (`ProjectionData`, `projection_resolve.py`); confirm during next working session whether this is now fully wired into Subject Company IS, DCF, and NWC, or whether that connection is still partial. |
 
 ---
 
-## Queue (as of 2026-07-28)
+## Dash / Web Migration — Planning Status
 
-Roughly ordered, not strict priority:
+**Decided:**
+- Target framework: **Dash** (Python, Flask-based), not React/FastAPI-separated-frontend. Rationale: single developer, Python-fluent, dense financial tables are well-served by `dash-ag-grid`, and staying all-Python avoids a second language/toolchain for a single-user internal tool.
+- Hosting: **home network only**, no public internet exposure, no VPS. An always-on host machine (starting with an old computer, Raspberry Pi considered as a future upgrade but not cost-justified over free existing hardware) runs the Dash server; other devices reach it via local network / `localhost`.
+- Multi-user: lightweight, folder-per-user session storage with a simple login gate — explicitly **not** a database-backed multi-tenant auth system, since the actual user base is two known people (not a public product).
+- `Calculations/`, `Sources/`, `Services/`, `Transforms/` carry over largely as-is (no PyQt dependency) — only the UI layer (`Ui/`) requires a full rewrite, not a port, since Qt widget layout logic doesn't translate to Dash/HTML.
+- PyQt6 desktop version is expected to freeze once Dash is stable, rather than maintaining both UIs in parallel indefinitely — avoids doubling every future UI-facing change across two codebases.
 
-1. **GPC Multiples Range candlestick chart** — Open=Third Quartile, High=Maximum, Low=Minimum, Close=First Quartile, per selected metric column. Hyperlink popout on GPC page (below the "As of" date), live-bound to `stat_label_widgets` so it redraws on every `_recalculate()` (e.g. exclude-toggle). Will later also live on the Dashboard page.
-2. **Light/dark mode theming** — no quick win available (see Technical Debt above). Requires extracting hardcoded colors into a shared theme module across GT/GPC/Subject Financials/Projection Module/Private Financials Input/Home pages, plus a toggle + persistence mechanism.
-3. **Dashboard page** — start populating now rather than waiting for DCF/NAV/WACC to be finished. Will eventually host the GPC candlestick chart, valuation reconciliation, and other Excel `Dash_Prjctn` equivalents.
-4. **WACC calculation module** — capital structure sourcing decision is made; ready to build.
-5. **NAV calculation module** — PBC data entry is now user input fields; BS recovery method only; ready to build.
-6. **DCF valuation engine** — not started; depends on WACC.
-7. **NWC schedule** — not started.
-8. **`fmv_bev` summary row** — cross-method valuation summary (DCF/GPC/GT/NAV reconciliation), correctly sequenced last since it depends on all four methods existing.
+**Not yet started:** any actual Dash code, `dash-ag-grid` spike, SQLite caching layer, or the login/folder-per-user mechanism.
 
----
-
-## Deferred: Post-Phase-3 Data Source Evaluation — EdgarTools
-
-**Status:** Not to be started until Phase 3 is complete. Noted here so it isn't lost, not because it's near-term work.
-
-`edgartools` (PyPI: `edgartools`, docs: https://edgartools.readthedocs.io/) is a Python library that pulls SEC EDGAR/XBRL filings directly and includes a built-in standardization layer that maps ~2,900 raw XBRL tags to a normalized set of financial statement concepts (92 distinct Balance Sheet concepts confirmed via direct inspection of the installed package's `gaap_mappings.json`, cross-referenced against `display_names.json`).
-
-**Why this is worth evaluating later:** StockAnalysis.com scraping is fragile by nature — no published schema, label text and structure can change without notice, and completeness has already been shown to vary silently by ticker (e.g., "Minority Interest" appears for SPCX but not ADBE; "Total Common Shareholders' Equity" is a real StockAnalysis label with no equivalent in EdgarTools' standard concept set, confirmed by direct comparison). EdgarTools would source data from the same XBRL filings companies submit to the SEC, with a maintained standardization layer, removing dependency on a third-party site's presentation layer.
-
-**Why this is NOT a straightforward swap:** EdgarTools' 92-concept Balance Sheet taxonomy is *coarser* than StockAnalysis's actual displayed line items in at least one confirmed case (Total Common Shareholders' Equity, distinct from Total Stockholders' Equity, has no EdgarTools standard concept). Switching would require rebuilding `SA_KEY_MAP`, `stockanalysis.py`, and the transform layer, and would trade "unreliable but granular" for "reliable but coarser" — not a strict upgrade. This needs a real evaluation pass against the full GPC/ticker set before any migration decision, not a default assumption that it's better.
-
-**Action when revisited:** Compare EdgarTools' actual BS/IS output against StockAnalysis's for the full ticker universe (not just SPCX/ADBE) before deciding whether to migrate any source client.
+**Recommended first step when this work begins:** one small vertical slice — a single "Refresh FRED" button wired to the existing `Sources/fred.py`, rendered in a `dash-ag-grid` table — proving the pattern end-to-end before committing to a full tab-by-tab migration. Suggested migration order once that spike works: Source Data → Home → GT → GPC → WACC → DCF → Projection Module (roughly easiest-to-hardest given current UI complexity).
 
 ---
 
-## Deferred: Full IS/BS Line-Item Audit (Final Review Phase)
+## File Reference Quick-Link
 
-**Status:** Not a current priority. Current `IS_LINES`/`BS_LINES` in the Python migration are considered "good enough to get out of the starting blocks" — functional gaps will surface incrementally as new tickers are added and will be patched as found.
-
-**Deferred work:** A full audit of `IS_LINES`/`BS_LINES` (in `app_state.py`) against actual StockAnalysis output across a wide ticker sample (target: hundreds of tickers, not the current ~9-GPC set) to confirm completeness and correct labeling. The `Line Item Needs` sheet (Excel, ~45-company empirical build) is the current best reference for expected line items and has already surfaced several gaps not yet reflected in the Python `BS_LINES` list (e.g., Total Trade Receivables, Total Long-Term Liabilities, current/long-term Unearned Revenue split, deferred tax asset/liability lines, Comprehensive Income & Other, multiple shares-outstanding variants, Working Capital).
-
-**Action when revisited:** Treat this as final-review-phase QA, not Phase 3 blocking work. Patch individual gaps opportunistically as they're discovered during normal use in the meantime.
-
----
-
-## Live Resources
-
-| Resource | Link |
+| Purpose | File Path |
 |---|---|
-| Excel Workbook | `Project_Canneberge.xlsm` |
-| Excel System Docs | `1_excel-system/excel-system.md` |
-| Project Brief | `README.md` |
+| Entry point | `Canneberge/main.py` |
+| App state | `Canneberge/app_state.py` |
+| Config / secrets | `Canneberge/config.py` |
+| Main window / cross-page wiring | `Canneberge/Ui/main_window.py` |
+| Session save/load | `Canneberge/utils/session.py` |
+| Calculation engine | `Canneberge/Calculations/` |
+| Source clients | `Canneberge/Sources/` |
+| Drift detection prototype | `Prototypes/drift_tool/` |
+| Launcher | `Run_Canneberge.bat` |

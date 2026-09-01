@@ -1,10 +1,10 @@
 # Canneberge — Project Context Brief
 
-> Last updated: 2026-07-03
+> Last updated: 2026-08-31
 
 ## What this is
 
-A parametric business enterprise valuation model. Inputs flow through a defined ETL pipeline and calculation layer to produce a financial analysis report. Built first in Excel, migrating to code, eventually to a wizard-style desktop → web → mobile (read-only) application.
+A parametric business enterprise valuation model. Inputs flow through a defined ETL pipeline and calculation layer to produce a financial analysis report. Originally built in Excel, now a standalone Python desktop application (PyQt6), with a browser-based (Dash) version planned as the long-term primary interface.
 
 A parametric model means: a fixed set of inputs flows through defined logic to produce a deterministic output. Any input can be adjusted to recalculate the result.
 
@@ -14,240 +14,108 @@ A parametric model means: a fixed set of inputs flows through defined logic to p
 
 Notation: Phase > Section (#.#) > Sub-topic (#.#.#) > Artifact (filename)
 
-### Phase 1 — Excel system (active)
+### Phase 1 — Excel system (frozen, reference-only)
 | Section | Name | Status |
 |---|---|---|
-| 1.1 | Data ingestion | Complete |
-| 1.2 | Data transformation — tier 1 | Complete |
-| 1.3 | Data transformation — tier 2 | Complete |
-| 1.4 | Calculation layer | Complete |
-| 1.5 | Report output | Complete |
+| 1.1 | Data ingestion | Complete, **stale** |
+| 1.2 | Data transformation — tier 1 | Complete, **stale** |
+| 1.3 | Data transformation — tier 2 | Complete, **stale** |
+| 1.4 | Calculation layer | Complete, **stale** |
+| 1.5 | Report output | Complete, **stale** |
+
+> **Status note:** the Excel system is no longer maintained and should not be trusted as a live audit reference. StockAnalysis.com has changed source-table wording/structure ("Depreciation Expense" → "D&A for EBITDA" is one confirmed instance) since the Excel Power Queries were last updated, and the Excel model has not been patched to follow. Re-syncing the Excel workbook to the current source shape would mean re-writing the affected Power Queries and VBA extraction logic to match today's page structure — a real, non-trivial effort with no planned owner. Until/unless that happens, the Excel workbook is kept only as a historical reference for original methodology, not as a live cross-check against the Python app's output. Treat any Excel-vs-Python mismatch as *expected*, not a bug, unless it's freshly confirmed which side is wrong.
 
 ### Phase 2 — Refinement and documentation
 | Section | Name | Status |
 |---|---|---|
 | 2.1 | Input reduction | Complete |
 | 2.2 | Model specification | Complete |
-| 2.3 | Testing and validation | In progress |
+| 2.3 | Testing and validation | Ongoing, informal (manual session-based spot checks) |
 
-### Phase 3 — Code migration
+### Phase 3 — Code migration (active)
 | Section | Name | Status |
 |---|---|---|
-| 3.1 | Tech stack selection | Not started |
-| 3.2 | ETL pipeline rebuild | Not started |
-| 3.3 | Calculation engine rebuild | Not started |
+| 3.1 | Tech stack selection | Complete — Python, PyQt6 desktop |
+| 3.2 | ETL pipeline rebuild | Complete — StockAnalysis, MarketScreener, FRED, yfinance all live |
+| 3.3 | Calculation engine rebuild | Complete for DCF/WACC/NWC/GT/GPC/Debt Schedule/Reverse-DCF; ongoing refinement |
 
-### Phase 4 — Application
+See `3_code-migration/code-migration.md` for full detail on this phase.
+
+### Phase 4 — Web/Tablet Access (planning)
 | Section | Name | Status |
 |---|---|---|
-| 4.1 | Backend / API layer | Not started |
-| 4.2 | Web / mobile frontend | Not started |
-| 4.3 | Deployment and distribution | Not started |
+| 4.1 | Backend/data-layer decoupling | Not started |
+| 4.2 | Dash web frontend | Not started |
+| 4.3 | Multi-user (folder-per-user) access | Not started |
+| 4.4 | Local hosting (always-on home machine) | Not started |
 
----
-
-## How to reference topics in a new chat
-
-Start every new conversation by pasting this document (or the relevant section brief), then use:
-
-> "Referencing the project brief — I am in Phase [#], Section [#.#] — [section name]. [what I need help with]"
-
-Example:
-> "Referencing the project brief — I am in Phase 1, Section 1.5 — report output. Here is what I am building next..."
+**Scope, decided:** home-network-only access (no public internet exposure, no VPS). One always-on host machine (old desktop, upgradeable to a dedicated device later) runs the app; other devices (tablet, Chromebook, laptop) reach it over the local network as browser clients. Desktop PyQt6 version stays as the actively-developed source; once Dash exists, PyQt6 development is expected to freeze and Dash becomes the single ongoing UI, rather than maintaining two UIs in parallel indefinitely.
 
 ---
 
 ## Ticker Capabilities
 
-The model is an **evergreen template** — it works with whatever tickers are configured. Tickers are not hardcoded into any code or formulas.
+The model is an **evergreen template** — it works with whatever tickers are configured. Tickers are not hardcoded.
 
 | Slot | Count | Source | Notes |
 |---|---|---|---|
-| Guideline Public Companies (GPCs) | Up to 15 | `tblIngest` named table on `Control` sheet | User-configurable; model scales to however many are populated |
-| Subject Company | 0 or 1 | `SubjectCompanyTicker` named range on `Control` sheet | Only pulled when `CompanyStatus` = `"Publicly Traded"` |
+| Guideline Public Companies (GPCs) | Up to 15 | `Home` page ticker grid | User-configurable |
+| Guideline Transactions (GTs) | Up to 5 (extendable) | `Home` page GT grid | Manually entered deal data |
+| Subject Company | 0 or 1 | `Home` page ticker field | Only pulled from public sources when Company Status = "Publicly Traded" |
 
-The subject company ticker flows through the same ETL pipeline as GPCs but is gated by the `CompanyStatus` toggle. When `CompanyStatus` = `"Private"`, no public data is pulled for the subject — financial inputs come from the PBC (Provided by Client) sheets instead.
-
----
-
-## Subject Company Configuration
-
-| Named Range | Current Value | Purpose |
-|---|---|---|
-| `SubjectCompanyTicker` | `SPCX` | Ticker symbol for subject company (when publicly traded) |
-| `SubjectName` | `SpaceX` | Display name |
-| `CompanyStatus` | `Publicly Traded` | Gates whether subject ticker flows through ETL |
-| `ClientName` | `Ted & Co.` | Engagement / client name |
-| `SubjectTaxRate` | `21%` | Subject company tax rate |
-| `MainTitle` | `Sensitivity Analysis of SpaceX` | Report title |
-| `StandardOfValue` | `Fair Market Value` | Standard of value for valuation |
+When Company Status = "Private Company," subject financials come from the Private Financials input dialog (manual entry) instead of live source pulls.
 
 ---
 
-## Fiscal Year Configuration
+## Data Sources (current, Python app)
 
-All year references throughout the model are driven by named ranges on the `Control` sheet. These anchor the entire year schema — source data columns, forward estimates, and historical lookups all derive from these values.
-
-| Named Range | Current Value | Semantic Meaning |
-|---|---|---|
-| `FiscalYearEnd` | `12/31/2025` | Last completed fiscal year (LFY) |
-| `FiscalQuarter` | `3/31/2026` | Most recent fiscal quarter |
-| `NextFiscalYear` | `12/31/2026` | Next fiscal year end (NFY) |
-| `NFY_1` | `12/31/2027` | NFY + 1 |
-| `NFY_2` | `12/31/2028` | NFY + 2 |
-
-**Year derivation logic:**
-- `LFY` = `YEAR(FiscalYearEnd)` → 2025
-- `LFY-1` = `YEAR(FiscalYearEnd) - 1` → 2024
-- `LFY-2` = `YEAR(FiscalYearEnd) - 2` → 2023
-- `LFY-3` = `YEAR(FiscalYearEnd) - 3` → 2022
-- `NFY` = `YEAR(NextFiscalYear)` → 2026
-- `NFY+1` = `YEAR(NFY_1)` → 2027
-- `NFY+2` = `YEAR(NFY_2)` → 2028
-
-**Source data column formats (important for parser/transformer logic):**
-
-| Source | First Column | Historical Columns | Notes |
+| Data | Source | Status | Notes |
 |---|---|---|---|
-| stockanalysis.com — IS, BS, CFS | `TTM` | `FY 2025`, `FY 2024`, `FY 2023`, `FY 2022`, `FY 2021` | Prefixed with `FY ` |
-| stockanalysis.com — Ratios | `Current` | `FY 2025`, `FY 2024`, `FY 2023`, `FY 2022`, `FY 2021` | `Current` instead of `TTM` |
-| MarketScreener — Financials | — | `2023`, `2024`, `2025`, `2026`, `2027`, `2028` | Raw `YYYY`, no prefix |
+| Income Statement, Balance Sheet, Cash Flow Statement, Ratios | StockAnalysis.com | ✅ Live | Header-driven column mapping (TTM/LFY/LFY-N), not position-based; handles short-history tickers |
+| Forward Estimates (NFY/NFY+1/NFY+2: Revenue, EBITDA, EBIT, Net Income) | MarketScreener | ✅ Live | Slug resolution via POST to `async/search/quick`; subject to MarketScreener's daily rate limit |
+| Interest Rates (Fed Funds, SOFR, Treasury, corporate spreads) | FRED (St. Louis Fed) | ✅ Live | Requires API key in `~/.canneberge/config.json` (never committed) |
+| Beta / Volatility | yfinance (custom calc replicating Excel VBA methodology exactly) | ✅ Live | 2yr weekly / 5yr monthly beta, Blume-adjusted; volatility via log returns |
+| Live market marks (price, market cap, EV, shares out) | yfinance | ✅ Live | Fast batch fetch, separate from the full historical Beta/Vol pull — used for the "Update Live Marks (2s)" session-reload option |
 
-> ⚠️ **Known technical debt:** Year references in `modExtraction` (VBA parser), `fnForwardEst.m`, `fnSchemaLock.m`, and several other M queries are currently **hardcoded** rather than reading from the Control sheet named ranges. A year-mapping refactor is queued to replace all hardcoded years with dynamic reads from `FiscalYearEnd` and related anchors.
-
----
-
-## Data Sources & Coverage
-
-| Data | Source | Method | Notes |
-|---|---|---|---|
-| Income Statement | stockanalysis.com | Power Query `Web.Page()` | Annual, 5 years + TTM |
-| Balance Sheet | stockanalysis.com | Power Query `Web.Page()` | Annual, 5 years + TTM |
-| Cash Flow Statement | stockanalysis.com | Power Query `Web.Page()` | Annual, 5 years + TTM |
-| Financial Ratios | stockanalysis.com | Power Query `Web.Page()` | Includes EV, Market Cap, multiples; uses `Current` column |
-| Beta | stockanalysis.com | Power Query `Web.Page()` | Single value per ticker from overview page |
-| Forward Estimates | MarketScreener (English) | VBA HTTP scrape → `ForwardEst_Raw` staging table | NFY, NFY+1, NFY+2; Net Sales, EBITDA, EBIT, Net Income |
-| Company Slugs | MarketScreener search API | VBA POST to `async/search/quick` | Auto-populated by Stage 0 in `modExtraction` |
-| Interest Rates | FRED (St. Louis Fed) | Power Query `fnFRED` via REST API | Requires FRED API key in `KeyFRED` named range |
-| Live Price | Yahoo Finance | VBA `pmlPRICE()` worksheet function | `v8/finance/chart/` endpoint |
+All four live sources are fully wired end-to-end through `Services/source_data_service.py` and `Workers/source_data_worker.py` — none are stubs as of this writing.
 
 ---
 
-## What exists right now (Phase 1)
+## What exists right now (Python App, Phase 3)
 
-### Custom ribbon — PampleMousse Labs 🍇
+**11 tabs, all functional:** Home, Dashboard, WACC, DCF, NWC, Debt Schedule, GT, GPC, Subject Financials, Source Data, Analytics.
 
-All ETL operations and diagnostics are triggered via a custom Excel ribbon tab.
+**Key architectural facts:**
+- Calculation logic lives in `Calculations/` (DCF, Reverse-DCF, GPC/GT multiples, debt schedule, valuation surface, ratio catalogue, subject IS/BS calc, projection resolution, analytics/theory math) — has **no PyQt dependency**, making it portable to a future Dash backend without a rewrite.
+- Session save/load is fully built (`utils/session.py`) — serializes essentially the entire app state (every page's inputs + cached source-data pulls) to a single JSON file. Reloading a session gives a choice: use cached data only, refresh just live market marks (~2s), or do a full web re-scrape (~40s).
+- Reverse-DCF (market-implied growth solver) is live, using each comparable's own observed beta (not the WACC page's re-levered beta), consistent with each ticker's own market price and capital structure.
+- Projection Module supports two-way binding between typed $ values and typed growth %, tracked per-period so the app knows which one to treat as the driver.
+- A StockAnalysis drift-detection prototype exists (`Prototypes/drift_tool/`) — canonical line-item ordering + a schema-drift analyzer comparing current scrapes against a reference set, aimed at catching future StockAnalysis wording changes (like the Depreciation Expense → D&A rename) before they silently break calculations.
 
-| Group | Button | Action |
-|---|---|---|
-| Financial Data Engine | Refresh Source Data | Full ETL pipeline (`Run_ETL_Pipeline`) |
-| Financial Data Engine | Refresh Beta | Async refresh of `ALL_Beta` query only |
-| Financial Data Engine | Refresh Forward Est | VBA-only slug build + finance extraction (no Power Query) |
-| Financial Data Engine | Cancel ETL | Sets `PML_IS_RUNNING = False` |
-| Diagnostics Tools | Clear ETL Log | Clears `ETL_LOG` sheet (keeps headers) |
-| Diagnostics Tools | Show ETL Log | Activates `ETL_LOG` sheet |
-| Diagnostics Tools | Test Connection | Connection diagnostic |
-| Sheet Tools | Run Summary | Runs summary calculations |
-| Sheet Tools | Refresh Comp Chart | Refreshes comparison chart via `modCharts` |
-| Dev Tools | Export Code | One-click export of all VBA + Power Query M code to local repo |
+**Known technical debt:**
+- `if(CompanyStatus)` two-way binding between public/private data paths — check current state in `code-migration.md`, this may now be resolved.
+- No data-caching layer yet (SQLite planned) — every "Full Web Refresh" re-scrapes live, which matters given MarketScreener's daily rate limit.
+- No installer/packaging — running the app requires a manual Python + dependency setup per machine (documented, but manual). Considered low priority given the small, known user base and the planned Dash migration, which removes the need for per-machine installs entirely.
 
-### ETL pipeline — fully mapped and working
-
-**Stage 0 — Slug build (VBA `modExtraction`)**
-- POST to MarketScreener `async/search/quick` endpoint per ticker
-- Extracts internal company slug (e.g. `ROCKET-LAB-CORPORATION-126208072`)
-- Writes to `MS_Slug` named table
-- Runs before all data pulls
-- Resolves up to 15 GPC tickers + 1 subject ticker (when publicly traded)
-- Runtime: ~28 seconds for 10 tickers
-
-**Stage 0.5 — MarketScreener finance scrape (VBA `modExtraction`)**
-- GET finances page per resolved slug
-- Parses Net Sales, EBITDA, EBIT, Net Income for NFY/NFY+1/NFY+2
-- Writes to `ForwardEst_Raw` staging table (`tblForwardEst_Raw` named range)
-- Includes one retry (2-second wait) on failed detection
-- On failure, dumps raw HTML to `%TEMP%\Canneberge_FailedFinance\` for post-mortem analysis
-- MarketScreener has a daily pull limit (resets every 24 hours) — use sparingly
-
-**Stage 1 — Power Query refresh (async, all triggered in sequence)**
-- `ALL_IS` → `ALL_BS` → `ALL_CFS` → `ALL_Ratio` → `ALL_Beta` → `ALL_ForwardEst`
-
-**Stage 2 — Master table refresh (async)**
-- `ALL_FINANCIALS` — calls all fetcher functions directly (not Tier 1 outputs), stacks into one long/tall table
-
-**Total runtime:** ~25 minutes end-to-end for 10 tickers (VBA extraction ~30 seconds + Power Query refresh ~24 minutes)
-
----
-
-## Repository Structure
-
-```
-ProjectCanneberge/
-├── README.md                          ← this file (project-wide context brief)
-└── 1_excel-system/
-    ├── excel-system.md                ← Phase 1 detailed documentation
-    ├── _manifest.txt                  ← auto-generated by Export Code
-    │
-    ├── 1.1_data-ingestion/            ← section docs (see 1.1_data-ingestion.md)
-    ├── 1.2_transformation-tier1/      ← section docs (see 1.2_transformation-tier1.md)
-    ├── 1.3_transformation-tier2/      ← section docs (see 1.3_transformation-tier2.md)
-    ├── 1.4_calculation-layer/         ← section docs (see 1.4_calculation-layer.md)
-    ├── 1.5_report-output/             ← section docs (see 1.5_report-output.md)
-    │
-    ├── vba/                           ← auto-populated by Export Code (11 modules + sheet code-behind)
-    ├── power-query/                   ← auto-populated by Export Code (18 queries)
-    └── RibbonX/                       ← manually maintained
-```
 ---
 
 ## Key Conventions
 
 | Convention | Detail |
 |---|---|
-| Units | All dollar values in source data are in millions USD |
-| Key format | `ticker\|line item` (lowercase) — primary INDEX/MATCH lookup |
-| Scale factor | `pmlUnits` named range on Control sheet drives all formula scaling |
-| Zero = no data | stockanalysis never returns genuine $0 — zero in `ALL_FINANCIALS` means missing |
-| Calc layer | `=IFERROR(INDEX(...) * pmlUnits, 0)` — calc cells always return numbers |
-| Presentation layer | `=IF(cell=0, "NA", cell)` — display cells never used in further calculations |
-| Custom format | `#,##0;(#,##0);"-"` on pull cells — zero displays as "-" |
-| Naming prefix | `pml` prefix on all named ranges, VBA functions, and custom identifiers |
-| Code export | One-click via `Export Code` ribbon button; dumps to `\vba\` and `\power-query\` in repo |
+| Units | Dollar values in millions USD |
+| Key format | `ticker\|line item` (lowercase) |
+| Zero = no data | StockAnalysis rarely returns genuine $0; treat blank/absent line items as true zero (validated against Excel historically) |
+| Sessions | JSON files at `~/.canneberge/sessions/` |
+| Secrets | FRED API key at `~/.canneberge/config.json`, never committed to the repo |
+| `ss/` directories | Mean "superseded/deprecated" — never reference files under an `ss/` path |
 
 ---
 
-## Data Integrity Notes
+## Live Resources
 
-- **Summary line items are pulled directly** — Revenue, Gross Profit, Operating Income, Net Income are pulled as single values, not reconstructed from components. stockanalysis normalization is inconsistent enough that calculated summaries will not reliably foot to reported totals.
-- **TTM values** have higher discrepancy rates than annual values due to period alignment differences.
-- **MarketScreener forward estimates** are consensus analyst estimates, scraped via VBA and staged in `ForwardEst_Raw` before Power Query ETL runs.
-- **MarketScreener rate limiting** — the site has a daily pull limit (resets every 24 hours). When exceeded, the response returns a ~284KB generic page instead of financial data. Failed responses are auto-dumped to `%TEMP%\Canneberge_FailedFinance\` for diagnosis.
-- **FRED data** requires a free API key stored in the `KeyFRED` named range on the Control sheet.
-- **MarketScreener slugs** are auto-populated by Stage 0 — no manual entry required.
-
----
-
-## Custom Worksheet Functions
-
-| Function | Module | Description |
-|---|---|---|
-| `pmlPRICE(ticker)` | `modPriceFunctions` | Live market price via Yahoo Finance `v8/finance/chart/` |
-
----
-
-## Known Technical Debt
-
-| Item | Scope | Status |
-|---|---|---|
-| Hardcoded years in VBA + M code | `modExtraction`, `fnForwardEst.m`, `fnSchemaLock.m`, `ALL_FINANCIALS.m`, other fn*.m files | Queued for year-mapping refactor |
-| `if(CompanyStatus)` two-way binding | `IS`, `BS` sheets — pull from ALL_FINANCIALS when public, PBC when private | Pending implementation |
-| `pmlYears` named range | Currently hardcoded array; should be computed from `FiscalYearEnd` | Part of year-mapping refactor |
-| `ETL_STATE` sheet | Exists as VBA codename `Sheet5` but not visible as a tab — may be `xlSheetVeryHidden` or orphaned | Needs investigation |
-| Several sheets flagged for possible deletion | `Summary`, `Tax Depreciation`, `Amortization`, `NOL`, `Market Data` | Review and decide |
-
----
-
-## Live Workbook
-
-[Project_Canneberge.xlsm](https://drive.google.com/drive/folders/1Uh4c7jD0-AWuaT15gkVDtA2yjFKLTphn)
+| Resource | Link |
+|---|---|
+| GitHub Repo | https://github.com/PampleMousseLabs/ProjectCanneberge |
+| Excel Workbook (frozen reference) | [Project_Canneberge.xlsm](https://drive.google.com/drive/folders/1Uh4c7jD0-AWuaT15gkVDtA2yjFKLTphn) |
+| Phase 3 detail | `3_code-migration/code-migration.md` |
