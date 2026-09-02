@@ -2371,18 +2371,23 @@ class DCFPage(QWidget):
         # Multiples
         ebitda_m = _parse_multiple(self._tv_inputs.get("EBITDA Multiple", {}).get("multiple"))
         rev_m    = _parse_multiple(self._tv_inputs.get("Revenue Multiple", {}).get("multiple"))
+        final_ebitda = _read_label(self._calc_labels, self._row_idx.get("EBITDA"), final_idx)
 
-        # Gordon Growth: use exact Residual column FCF matching _populate_terminal_value
+        # Real, pipeline-computed Residual FCF, rescaled for this LTGR
+        # override — same real number _populate_terminal_value() itself
+        # anchors on, not an approximation. Used for both Gordon Growth
+        # and H-Model (both depend on residual_fcf); Multiple-based
+        # models don't use it at all.
+        residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
+        residual_fcf = (
+            _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), residual_idx)
+            if residual_idx is not None else None
+        )
+        current_ltgr = self._get_ltgr()
+        if residual_fcf is not None and current_ltgr is not None and (1.0 + current_ltgr) != 0:
+            residual_fcf = residual_fcf * (1.0 + ltgr_override) / (1.0 + current_ltgr)
+
         if model == "Gordon Growth":
-            residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
-            residual_fcf = (
-                _read_label(self._calc_labels, self._row_idx.get("Free Cash Flow"), residual_idx)
-                if residual_idx is not None else None
-            )
-            current_ltgr = self._get_ltgr()
-            if residual_fcf is not None and current_ltgr is not None and (1.0 + current_ltgr) != 0:
-                residual_fcf = residual_fcf * (1.0 + ltgr_override) / (1.0 + current_ltgr)
-
             cap_rate = (wacc_override - ltgr_override) if wacc_override is not None else None
             if (
                 residual_fcf is not None
@@ -2416,6 +2421,8 @@ class DCFPage(QWidget):
             h_short_growth=short_growth,
             ebitda_mult=ebitda_m,
             revenue_mult=rev_m,
+            final_ebitda=final_ebitda,
+            residual_fcf_override=residual_fcf,
         )
 
     def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:

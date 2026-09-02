@@ -45,17 +45,17 @@ def extract_ticker_inputs(
     revenue = {
         "LFY": to_float(is_lookup.get(get_sa_label("revenue"), {}).get("LFY")),
         "TTM": to_float(is_lookup.get(get_sa_label("revenue"), {}).get("TTM")),
-        "NFY": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY", "revenue"),
-        "NFY+1": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+1", "revenue"),
-        "NFY+2": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+2", "revenue"),
+        "NFY": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY", "revenue"),
+        "NFY+1": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY+1", "revenue"),
+        "NFY+2": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY+2", "revenue"),
     }
 
     net_income = {
         "LFY": to_float(is_lookup.get(get_sa_label("net_income"), {}).get("LFY")),
         "TTM": to_float(is_lookup.get(get_sa_label("net_income"), {}).get("TTM")),
-        "NFY": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY", "net_income"),
-        "NFY+1": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+1", "net_income"),
-        "NFY+2": get_ticker_metric(is_rows, ms_rows, ticker_lower, "NFY+2", "net_income"),
+        "NFY": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY", "net_income"),
+        "NFY+1": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY+1", "net_income"),
+        "NFY+2": get_ticker_metric(is_rows, ms_rows, bs_rows, ticker_lower, "NFY+2", "net_income"),
     }
 
     rev_ttm = revenue.get("TTM")

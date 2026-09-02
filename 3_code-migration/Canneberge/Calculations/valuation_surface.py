@@ -31,6 +31,8 @@ def evaluate_dcf_fv(
     h_short_growth: Optional[float] = 0.20,
     ebitda_mult: Optional[float] = None,
     revenue_mult: Optional[float] = None,
+    final_ebitda: Optional[float] = None,
+    residual_fcf_override: Optional[float] = None,
 ) -> Optional[float]:
     """
     Pure mathematical DCF evaluator. Runs in microseconds with zero UI mutation.
@@ -46,7 +48,13 @@ def evaluate_dcf_fv(
     growth_factor = 1.0 + ltgr
     residual_fcf = None
 
-    if final_revenue is not None and final_fcf is not None and final_revenue > 0:
+    if residual_fcf_override is not None:
+        # Real, pipeline-computed Residual FCF (already reflects SBC,
+        # taxes, other adjustments, etc.), proportionally rescaled for
+        # this LTGR override — same anchor the Gordon Growth path uses.
+        # Preferred over the approximation below whenever available.
+        residual_fcf = residual_fcf_override
+    elif final_revenue is not None and final_fcf is not None and final_revenue > 0:
         capex_ratio = (final_capex / final_revenue) if final_capex is not None else 0.0
         res_revenue = final_revenue * growth_factor
         res_capex = res_revenue * capex_ratio
@@ -70,9 +78,9 @@ def evaluate_dcf_fv(
             gg_res = (residual_fcf / cap_rate) if residual_fcf is not None else 0.0
             h_res = (((final_fcf * h_num_years) / 2.0) * (h_short_growth - ltgr) / cap_rate) + gg_res
             pv_residual_value = h_res * pv_factor
-    elif model == "EBITDA Multiple" and ebitda_mult is not None and final_fcf is not None:
+    elif model == "EBITDA Multiple" and ebitda_mult is not None and final_ebitda is not None:
         pv_factor_m = 1.0 / ((1.0 + wacc) ** (final_pvp + 0.5))
-        pv_residual_value = (final_fcf * ebitda_mult) * pv_factor_m
+        pv_residual_value = (final_ebitda * ebitda_mult) * pv_factor_m
     elif model == "Revenue Multiple" and revenue_mult is not None:
         pv_factor_m = 1.0 / ((1.0 + wacc) ** (final_pvp + 0.5))
         pv_residual_value = (final_revenue * revenue_mult) * pv_factor_m
