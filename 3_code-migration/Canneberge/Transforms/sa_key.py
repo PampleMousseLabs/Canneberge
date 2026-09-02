@@ -114,6 +114,16 @@ _EXPLICIT_ALIASES: Dict[str, dict] = {
         "sa_source": "IS",
         "sign_flip": False,
     },
+    "ebit": {
+        "sa_labels": ["operating income", "ebit"],
+        "sa_source": "IS",
+        "sign_flip": False,
+    },
+    "ebitda": {
+        "sa_labels": ["ebitda"],
+        "sa_source": "IS",
+        "sign_flip": False,
+    },
     "capex": {
         "sa_labels": ["capital expenditures"],
         "sa_source": "CFS",

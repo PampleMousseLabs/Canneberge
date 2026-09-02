@@ -781,9 +781,16 @@ class MainWindow(QMainWindow):
             "ebitda_improvement":  dict(pd.ebitda_improvement),
             "da":                  dict(pd.da),
             "da_pct":              dict(pd.da_pct),
+            "sbc":                 dict(pd.sbc),
+            "sbc_pct":             dict(pd.sbc_pct),
+            "other_amort":         dict(pd.other_amort),
+            "other_amort_pct":     dict(pd.other_amort_pct),
+            "net_income":          dict(pd.net_income),
+            "net_income_margin":   dict(pd.net_income_margin),
             "capex":               dict(pd.capex),
             "capex_pct":           dict(pd.capex_pct),
             "last_edited_revenue": dict(pd.last_edited_revenue),
+            "last_edited_ni":      dict(pd.last_edited_ni),
         }
 
     def _apply_projection_page_state(self, state: dict):
@@ -798,9 +805,16 @@ class MainWindow(QMainWindow):
         pd.ebitda_improvement  = {k: v for k, v in state.get("ebitda_improvement", {}).items()}
         pd.da                  = {k: v for k, v in state.get("da", {}).items()}
         pd.da_pct              = {k: v for k, v in state.get("da_pct", {}).items()}
+        pd.sbc                 = {k: v for k, v in state.get("sbc", {}).items()}
+        pd.sbc_pct             = {k: v for k, v in state.get("sbc_pct", {}).items()}
+        pd.other_amort         = {k: v for k, v in state.get("other_amort", {}).items()}
+        pd.other_amort_pct     = {k: v for k, v in state.get("other_amort_pct", {}).items()}
+        pd.net_income          = {k: v for k, v in state.get("net_income", {}).items()}
+        pd.net_income_margin   = {k: v for k, v in state.get("net_income_margin", {}).items()}
         pd.capex                = {k: v for k, v in state.get("capex", {}).items()}
         pd.capex_pct           = {k: v for k, v in state.get("capex_pct", {}).items()}
         pd.last_edited_revenue = {k: v for k, v in state.get("last_edited_revenue", {}).items()}
+        pd.last_edited_ni      = {k: v for k, v in state.get("last_edited_ni", {}).items()}
 
     def _apply_project_inputs_to_home(self, pi: dict):
         hp = self.home_page

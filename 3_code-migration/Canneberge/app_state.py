@@ -230,11 +230,12 @@ class ProjectionData:
       Tracks which of {revenue $, revenue growth %} was typed last so
       two-way binding knows which direction to recompute.
 
-    last_edited_ebitda — per period: "ebitda" | "improvement" | None
-      Same pattern for EBITDA $ vs EBITDA improvement %.
-      (EBITDA $ is not directly typed — it's computed — but this tracks
-      whether improvement % was user-typed or computed from source data,
-      which determines whether the cell is editable.)
+    sbc_pct              — decimal; Stock-Based Compensation as % of revenue
+    other_amort_pct      — decimal; Other Amortization as % of revenue
+      Both apply uniformly across every projection period regardless of
+      company status or MarketScreener coverage — SBC/Other Amort are
+      industry- and basis-of-value-agnostic (see code-migration.md notes
+      on "economic" SBC treatment).
     """
     revenue:               Dict[str, Optional[float]] = field(default_factory=dict)
     revenue_growth:        Dict[str, Optional[float]] = field(default_factory=dict)
@@ -244,9 +245,18 @@ class ProjectionData:
     ebitda_improvement:    Dict[str, Optional[float]] = field(default_factory=dict)
     da:                    Dict[str, Optional[float]] = field(default_factory=dict)
     da_pct:                Dict[str, Optional[float]] = field(default_factory=dict)
+    sbc:                   Dict[str, Optional[float]] = field(default_factory=dict)
+    sbc_pct:               Dict[str, Optional[float]] = field(default_factory=dict)
+    other_amort:           Dict[str, Optional[float]] = field(default_factory=dict)
+    other_amort_pct:       Dict[str, Optional[float]] = field(default_factory=dict)
+    other_adj:             Dict[str, Optional[float]] = field(default_factory=dict)
+    net_income:            Dict[str, Optional[float]] = field(default_factory=dict)
+    net_income_margin:     Dict[str, Optional[float]] = field(default_factory=dict)
     capex:                 Dict[str, Optional[float]] = field(default_factory=dict)
     capex_pct:             Dict[str, Optional[float]] = field(default_factory=dict)
     last_edited_revenue:   Dict[str, Optional[str]]   = field(default_factory=dict)
+
+
 
     def get(self, field_name: str, period: str):
         return getattr(self, field_name, {}).get(period)

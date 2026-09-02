@@ -18,7 +18,13 @@ from Canneberge.Calculations.gpc_metrics import GPC_METRICS
 def get_ticker_equity(ratio_rows: list, ticker: str) -> Optional[float]:
     """Returns TTM Market Cap (Total Equity Value in Millions/Thousands) for a ticker."""
     ratio_lookup = build_lookup(ratio_rows, ticker)
-    return to_float(ratio_lookup.get(get_sa_label("market_cap"), {}).get("TTM"))
+    for sa_label in get_sa_labels("market_cap"):
+        row = ratio_lookup.get(sa_label, {})
+        if row:
+            val = to_float(row.get("TTM"))
+            if val is not None:
+                return val
+    return None
 
 
 def get_ticker_bev(ratio_rows: list, bs_rows: list, ticker: str) -> Optional[float]:
@@ -39,18 +45,46 @@ def get_ticker_bev(ratio_rows: list, bs_rows: list, ticker: str) -> Optional[flo
                     total_debt += val
                 break
 
-    cash = to_float(bs_lookup.get(get_sa_label("cash"), {}).get("TTM")) or 0.0
-    net_debt = total_debt - cash
-    preferred = to_float(bs_lookup.get(get_sa_label("preferred_stock"), {}).get("TTM")) or 0.0
-    minority = to_float(bs_lookup.get(get_sa_label("minority_interest"), {}).get("TTM")) or 0.0
+    cash = 0.0
+    for sa_label in get_sa_labels("cash"):
+        row = bs_lookup.get(sa_label, {})
+        if row:
+            val = to_float(row.get("TTM"))
+            if val is not None:
+                cash = val
+                break
 
+    preferred = 0.0
+    for sa_label in get_sa_labels("preferred_stock"):
+        row = bs_lookup.get(sa_label, {})
+        if row:
+            val = to_float(row.get("TTM"))
+            if val is not None:
+                preferred = val
+                break
+
+    minority = 0.0
+    for sa_label in get_sa_labels("minority_interest"):
+        row = bs_lookup.get(sa_label, {})
+        if row:
+            val = to_float(row.get("TTM"))
+            if val is not None:
+                minority = val
+                break
+
+    net_debt = total_debt - cash
     return market_cap + net_debt + preferred + minority
 
 
 def get_subject_cash(bs_rows: list, ticker: str) -> Optional[float]:
     lookup = build_lookup(bs_rows, ticker)
-    raw = lookup.get(get_sa_label("cash"), {}).get("TTM")
-    return to_float(raw)
+    for sa_label in get_sa_labels("cash"):
+        row = lookup.get(sa_label, {})
+        if row:
+            val = to_float(row.get("TTM"))
+            if val is not None:
+                return val
+    return None
 
 
 _MARKETSCREENER_PERIODS = {"NFY", "NFY+1", "NFY+2"}
@@ -77,10 +111,14 @@ def get_ticker_metric(
     else:
         lookup = build_lookup(is_rows, ticker)
 
-    sa_label = get_sa_label(line_key)
-    row_data = lookup.get(sa_label, {})
-    raw = row_data.get(period)
-    return to_float(raw)
+    for sa_label in get_sa_labels(line_key):
+        row_data = lookup.get(sa_label, {})
+        if row_data:
+            raw = row_data.get(period)
+            val = to_float(raw)
+            if val is not None:
+                return val
+    return None
 
 
 def compute_ticker_multiples(

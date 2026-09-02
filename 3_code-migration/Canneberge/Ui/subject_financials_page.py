@@ -384,6 +384,8 @@ class SubjectFinancialsPage(QWidget):
                 raw_by_period[period]["revenue"] = rev
                 raw_by_period[period]["d&a_for_ebitda"] = da
                 raw_by_period[period]["depreciation"] = da
+                raw_by_period[period]["amortization"] = pd.other_amort.get(period)
+                raw_by_period[period]["stock_based_compensation"] = pd.sbc.get(period)
                 raw_by_period[period]["capex"] = pd.capex.get(period)
 
                 # Seed calc rows Projection Module already owns (keep as anchors)
@@ -409,6 +411,8 @@ class SubjectFinancialsPage(QWidget):
                     calc["gross_profit"] = gp
                 if ebitda_mod is not None:
                     calc["ebitda"] = ebitda_mod
+                if pd.net_income.get(period) is not None:
+                    calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
                 calc["operating_expenses"] = _sub(gp, ebitda_mod)
 
@@ -423,6 +427,8 @@ class SubjectFinancialsPage(QWidget):
                         calc["gross_profit"] = gp
                     if ebitda_mod is not None:
                         calc["ebitda"] = ebitda_mod
+                    if pd.net_income.get(period) is not None:
+                        calc["net_income"] = pd.net_income.get(period)
                     calc["cost_of_goods_sold"] = _sub(rev, gp)
                     calc["operating_expenses"] = _sub(gp, ebitda_mod)
 
@@ -469,6 +475,8 @@ class SubjectFinancialsPage(QWidget):
                 raw_by_period[period]["revenue"] = rev
                 raw_by_period[period]["d&a_for_ebitda"] = da
                 raw_by_period[period]["depreciation"] = da
+                raw_by_period[period]["amortization"] = pd.other_amort.get(period)
+                raw_by_period[period]["stock_based_compensation"] = pd.sbc.get(period)
                 raw_by_period[period]["capex"] = pd.capex.get(period)
 
                 # Seed calc rows Projection Module already owns (keep as anchors)
@@ -494,6 +502,8 @@ class SubjectFinancialsPage(QWidget):
                     calc["gross_profit"] = gp
                 if ebitda_mod is not None:
                     calc["ebitda"] = ebitda_mod
+                if pd.net_income.get(period) is not None:
+                    calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
                 calc["operating_expenses"] = _sub(gp, ebitda_mod)
 
@@ -508,6 +518,8 @@ class SubjectFinancialsPage(QWidget):
                         calc["gross_profit"] = gp
                     if ebitda_mod is not None:
                         calc["ebitda"] = ebitda_mod
+                    if pd.net_income.get(period) is not None:
+                        calc["net_income"] = pd.net_income.get(period)
                     calc["cost_of_goods_sold"] = _sub(rev, gp)
                     calc["operating_expenses"] = _sub(gp, ebitda_mod)
 
@@ -737,6 +749,8 @@ class SubjectFinancialsPage(QWidget):
                 "revenue": pd.revenue.get(period),
                 "d&a_for_ebitda": pd.da.get(period),
                 "depreciation": pd.da.get(period),
+                "amortization": pd.other_amort.get(period),
+                "stock_based_compensation": pd.sbc.get(period),
                 "capex": pd.capex.get(period),
             }
             rev = pd.revenue.get(period)
@@ -756,6 +770,8 @@ class SubjectFinancialsPage(QWidget):
                 calc["gross_profit"] = gp
             if ebitda_mod is not None:
                 calc["ebitda"] = ebitda_mod
+            if pd.net_income.get(period) is not None:
+                calc["net_income"] = pd.net_income.get(period)
             calc["cost_of_goods_sold"] = _sub(rev, gp)
             calc["operating_expenses"] = _sub(gp, ebitda_mod)
 
@@ -767,6 +783,8 @@ class SubjectFinancialsPage(QWidget):
                     calc["gross_profit"] = gp
                 if ebitda_mod is not None:
                     calc["ebitda"] = ebitda_mod
+                if pd.net_income.get(period) is not None:
+                    calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
                 calc["operating_expenses"] = _sub(gp, ebitda_mod)
 

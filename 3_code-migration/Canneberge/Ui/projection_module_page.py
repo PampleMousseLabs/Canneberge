@@ -187,12 +187,14 @@ class ProjectionModulePage(QDialog):
         # MarketScreener data for projection periods
         self._ms_revenue: Dict[str, Optional[float]] = {}
         self._ms_ebitda:  Dict[str, Optional[float]] = {}
+        self._ms_net_income: Dict[str, Optional[float]] = {}
         self._load_ms_data(inputs)
 
         # Historical raw line values, pulled from Subject Financials
         self._hist_revenue      = self._get_hist_line("revenue")
         self._hist_gross_profit = self._get_hist_line("gross_profit")
         self._hist_ebitda       = self._get_hist_line("ebitda")
+        self._hist_net_income   = self._get_hist_line("net_income")
 
         # D&A Resolution: Fallback chain matching updated sa_key blueprint
         hist_da = self._get_hist_line("d&a_for_ebitda")
@@ -203,6 +205,8 @@ class ProjectionModulePage(QDialog):
 
         self._hist_depreciation = hist_da
         self._hist_amortization = self._get_hist_line("amortization")
+        self._hist_sbc          = self._get_hist_line("stock_based_compensation")
+        self._hist_other_amort  = self._get_hist_line("other_amortization")
         self._hist_capex        = self._get_hist_line("capex")
 
         # Historical derived metrics (margins, growth, improvement) — computed once
@@ -210,6 +214,9 @@ class ProjectionModulePage(QDialog):
         self._hist_ebitda_margin: Dict[str, Optional[float]] = {}
         self._hist_da: Dict[str, Optional[float]] = {}
         self._hist_da_pct: Dict[str, Optional[float]] = {}
+        self._hist_sbc_pct: Dict[str, Optional[float]] = {}
+        self._hist_other_amort_pct: Dict[str, Optional[float]] = {}
+        self._hist_net_income_margin: Dict[str, Optional[float]] = {}
         self._hist_capex_pct: Dict[str, Optional[float]] = {}
         self._hist_growth: Dict[str, Optional[float]] = {}
         self._hist_gp_improvement: Dict[str, Optional[float]] = {}
@@ -284,6 +291,8 @@ class ProjectionModulePage(QDialog):
                     self._ms_revenue[period] = val
                 elif metric == "ebitda":
                     self._ms_ebitda[period] = val
+                elif metric == "net income":
+                    self._ms_net_income[period] = val
 
     # -----------------------------------------------------------------------
     # Historical derived metrics — computed once at init, never recalculated
@@ -308,12 +317,21 @@ class ProjectionModulePage(QDialog):
                 da = (dep or 0.0) + (amort or 0.0)
             da_pct    = _div(da, rev)
             capex_pct = _div(capex, rev)
+            sbc         = self._hist_sbc.get(period)
+            sbc_pct     = _div(sbc, rev)
+            other_am    = self._hist_other_amort.get(period)
+            other_amort_pct = _div(other_am, rev)
+            ni          = self._hist_net_income.get(period)
+            ni_margin   = _div(ni, rev)
 
             self._hist_gp_margin[period]     = gp_margin
             self._hist_ebitda_margin[period] = ebitda_margin
+            self._hist_net_income_margin[period] = ni_margin
             self._hist_da[period]            = da
             self._hist_da_pct[period]        = da_pct
             self._hist_capex_pct[period]     = capex_pct
+            self._hist_sbc_pct[period]       = sbc_pct
+            self._hist_other_amort_pct[period] = other_amort_pct
 
             # TTM never displays its own growth/improvement rates —
             # it only serves as the "prior" anchor for NFY's calculation.
@@ -393,6 +411,11 @@ class ProjectionModulePage(QDialog):
         gr = self._build_gross_profit_section(grid, gr)
         gr = self._build_ebitda_section(grid, gr)
         gr = self._build_da_section(grid, gr)
+        gr = self._build_other_amort_section(grid, gr)
+        gr = self._build_sbc_section(grid, gr)
+        gr = self._build_other_adj_section(grid, gr)
+        gr = self._build_taxes_section(grid, gr)
+        gr = self._build_net_income_section(grid, gr)
         gr = self._build_capex_section(grid, gr)
 
         grid.setRowStretch(gr, 1)
@@ -512,6 +535,83 @@ class ProjectionModulePage(QDialog):
 
         return gr
 
+    def _build_other_adj_section(self, grid: QGridLayout, gr: int) -> int:
+        """
+        +Other Adjustments — spill between (EBITDA − D&A − OA − SBC) and Taxes.
+        MS-covered public periods: computed plug so waterfall foots to analyst NI.
+        Later periods / private: user-editable $, default 0.
+        Positive adds to pretax base (lifts NI); negative subtracts.
+        """
+        self._labels.setdefault("other_adj", {})
+        self._inputs.setdefault("other_adj", {})
+
+        oa_lbl = QLabel("+Other Adjustments")
+        oa_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(oa_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            is_ms = self._is_public and period in MS_COVERED_PERIODS
+            if is_hist or is_ms:
+                lbl = self._make_calc_label(sourced=is_hist or is_ms)
+                self._labels["other_adj"][period] = lbl
+                grid.addWidget(lbl, gr, col_idx + 1)
+            else:
+                inp = self._make_input(period, "other_adj")
+                inp.setStyleSheet(get_pct_input_style())
+                self._inputs["other_adj"][period] = inp
+                grid.addWidget(inp, gr, col_idx + 1)
+        gr += 1
+        return gr
+
+    def _build_taxes_section(self, grid: QGridLayout, gr: int) -> int:
+        self._labels.setdefault("taxes", {})
+
+        tax_lbl = QLabel("Taxes")
+        tax_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(tax_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            lbl = self._make_calc_label(sourced=is_hist)
+            self._labels["taxes"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+        gr += 1
+        return gr
+
+    def _build_net_income_section(self, grid: QGridLayout, gr: int) -> int:
+        """
+        Net Income is never a free type-in on projection years.
+        MS-covered: analyst-wins locked label.
+        Otherwise: computed from EBITDA − D&A − OA − SBC + OtherAdj − Taxes.
+        """
+        self._labels.setdefault("net_income", {})
+        self._labels.setdefault("net_income_margin", {})
+
+        ni_lbl = QLabel("Net Income")
+        ni_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(ni_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            is_ms = self._is_public and period in MS_COVERED_PERIODS
+            lbl = self._make_calc_label(sourced=is_hist or is_ms)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_net_income.get(period)))
+            self._labels["net_income"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+        gr += 1
+
+        nim_lbl = QLabel("    Margin (%)")
+        grid.addWidget(nim_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            is_ms = self._is_public and period in MS_COVERED_PERIODS
+            lbl = self._make_calc_label(sourced=is_hist or is_ms)
+            if is_hist:
+                lbl.setText(_fmt_pct(self._hist_net_income_margin.get(period)))
+            self._labels["net_income_margin"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+        gr += 1
+        return gr
+
     def _build_da_section(self, grid: QGridLayout, gr: int) -> int:
         self._labels.setdefault("da", {})
         self._inputs.setdefault("da_pct", {})
@@ -540,6 +640,72 @@ class ProjectionModulePage(QDialog):
             else:
                 inp = self._make_pct_input(period, "da_pct")
                 self._inputs["da_pct"][period] = inp
+                grid.addWidget(inp, gr, col_idx + 1)
+        gr += 1
+
+        return gr
+
+    def _build_sbc_section(self, grid: QGridLayout, gr: int) -> int:
+        self._labels.setdefault("sbc", {})
+        self._inputs.setdefault("sbc_pct", {})
+        self._labels.setdefault("sbc_pct_hist", {})
+
+        sbc_lbl = QLabel("Stock-Based Compensation")
+        sbc_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(sbc_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            lbl = self._make_calc_label(sourced=is_hist)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_sbc.get(period)))
+            self._labels["sbc"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+        gr += 1
+
+        sbc_pct_lbl = QLabel("    as % of Revenue")
+        grid.addWidget(sbc_pct_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            if period in self._historical_periods:
+                lbl = self._make_calc_label(sourced=True)
+                lbl.setText(_fmt_pct(self._hist_sbc_pct.get(period)))
+                self._labels["sbc_pct_hist"][period] = lbl
+                grid.addWidget(lbl, gr, col_idx + 1)
+            else:
+                inp = self._make_pct_input(period, "sbc_pct")
+                self._inputs["sbc_pct"][period] = inp
+                grid.addWidget(inp, gr, col_idx + 1)
+        gr += 1
+
+        return gr
+
+    def _build_other_amort_section(self, grid: QGridLayout, gr: int) -> int:
+        self._labels.setdefault("other_amort", {})
+        self._inputs.setdefault("other_amort_pct", {})
+        self._labels.setdefault("other_amort_pct_hist", {})
+
+        oa_lbl = QLabel("Other Amortization")
+        oa_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(oa_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            lbl = self._make_calc_label(sourced=is_hist)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_other_amort.get(period)))
+            self._labels["other_amort"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+        gr += 1
+
+        oa_pct_lbl = QLabel("    as % of Revenue")
+        grid.addWidget(oa_pct_lbl, gr, 0)
+        for col_idx, period in enumerate(self._all_periods):
+            if period in self._historical_periods:
+                lbl = self._make_calc_label(sourced=True)
+                lbl.setText(_fmt_pct(self._hist_other_amort_pct.get(period)))
+                self._labels["other_amort_pct_hist"][period] = lbl
+                grid.addWidget(lbl, gr, col_idx + 1)
+            else:
+                inp = self._make_pct_input(period, "other_amort_pct")
+                self._inputs["other_amort_pct"][period] = inp
                 grid.addWidget(inp, gr, col_idx + 1)
         gr += 1
 
@@ -708,9 +874,11 @@ class ProjectionModulePage(QDialog):
                     resolved_ebitda_margin.get(prior_period) if prior_period else None
                 )
 
+                sbc_pct = self._get_pct_input("sbc_pct", period)
+                sbc = _mul(rev, sbc_pct)
+
                 if self._is_public and period in MS_COVERED_PERIODS:
-                    # Sourced directly from MarketScreener — no dependency
-                    # on prior_ebitda_margin existing.
+                    # Sourced directly from MarketScreener analyst estimate (analyst-wins).
                     ebitda = self._ms_ebitda.get(period)
                     ebitda_margin = _div(ebitda, rev)
                     ebitda_imp_display = (
@@ -740,13 +908,22 @@ class ProjectionModulePage(QDialog):
                 capex = _mul(rev, capex_pct)
                 self._set_label("capex", period, _fmt_dollars(capex))
 
-                self._resolved[period] = {
-                    "revenue": rev,
-                    "gross_profit": gp,
-                    "ebitda": ebitda,
-                    "da": da,
-                    "capex": capex,
-                }
+                other_amort_pct = self._get_pct_input("other_amort_pct", period)
+                other_amort = _mul(rev, other_amort_pct)
+                self._set_label("sbc", period, _fmt_dollars(sbc))
+                self._set_label("other_amort", period, _fmt_dollars(other_amort))
+
+                # --- EBITDA → NI bridge ---
+                # pretax_before_adj = EBITDA − D&A − Other Amort − SBC
+                # +Other Adjustments (sign: + lifts NI)
+                # Taxes = subject_tax_rate × (pretax_before_adj + OtherAdj)
+                # NI = pretax_before_adj + OtherAdj − Taxes
+                #
+                # MS-covered: NI locked to analyst; OtherAdj is the plug.
+                # Later years: OtherAdj user-typed (default 0); NI computed.
+                
+                tax_rate = getattr(
+                    self._get_project_inputs(), "subject_tax_rate", None
 
         finally:
             self._recalc_guard = False
@@ -754,6 +931,54 @@ class ProjectionModulePage(QDialog):
     # -----------------------------------------------------------------------
     # Resolution helpers
     # -----------------------------------------------------------------------
+
+    def _resolve_net_income(
+        self,
+        period: str,
+        resolved_revenue: Dict[str, Optional[float]],
+    ) -> Optional[float]:
+        if self._is_public and period in MS_COVERED_PERIODS:
+            ni = self._ms_net_income.get(period)
+            return ni
+
+        rev = resolved_revenue.get(period)
+        ni_text = self._get_input_text("net_income", period)
+        nim_text = self._get_input_text("net_income_margin", period)
+        last = self._last_edited_ni.get(period)
+
+        ni_val = _parse_float(ni_text)
+        nim_val = _parse_pct_input(nim_text)
+
+        if last == "margin" and nim_val is not None and rev is not None:
+            computed_ni = rev * nim_val
+            inp = self._inputs.get("net_income", {}).get(period)
+            if inp and not inp.hasFocus():
+                inp.setText(_fmt_dollars(computed_ni))
+            return computed_ni
+
+        if ni_val is not None:
+            return ni_val
+
+        if nim_val is not None and rev is not None:
+            computed_ni = rev * nim_val
+            inp = self._inputs.get("net_income", {}).get(period)
+            if inp and not inp.hasFocus():
+                inp.setText(_fmt_dollars(computed_ni))
+            return computed_ni
+
+        return None
+
+    def _display_ni_margin(self, period: str, ni_margin: Optional[float]):
+        if self._is_public and period in MS_COVERED_PERIODS:
+            self._set_label("net_income_margin", period, _fmt_pct(ni_margin))
+            return
+
+        inp = self._inputs.get("net_income_margin", {}).get(period)
+        if inp is None:
+            return
+        last = self._last_edited_ni.get(period)
+        if last != "margin" and not inp.hasFocus():
+            inp.setText(_fmt_pct(ni_margin) if ni_margin is not None else "")
 
     def _resolve_revenue(
         self,
@@ -861,6 +1086,18 @@ class ProjectionModulePage(QDialog):
                     if val_g is not None:
                         inp_g.setText(_fmt_pct(val_g))
 
+                inp_ni = self._inputs.get("net_income", {}).get(period)
+                if inp_ni:
+                    val_ni = pd.net_income.get(period)
+                    if val_ni is not None:
+                        inp_ni.setText(_fmt_dollars(val_ni))
+
+                inp_nim = self._inputs.get("net_income_margin", {}).get(period)
+                if inp_nim:
+                    val_nim = pd.net_income_margin.get(period)
+                    if val_nim is not None:
+                        inp_nim.setText(_fmt_pct(val_nim))
+
                 inp_ei = self._inputs.get("ebitda_improvement", {}).get(period)
                 if inp_ei:
                     val_ei = pd.ebitda_improvement.get(period)
@@ -879,6 +1116,18 @@ class ProjectionModulePage(QDialog):
                 if val_da is not None:
                     inp_da.setText(_fmt_pct(val_da))
 
+            inp_sbc = self._inputs.get("sbc_pct", {}).get(period)
+            if inp_sbc:
+                val_sbc = pd.sbc_pct.get(period)
+                if val_sbc is not None:
+                    inp_sbc.setText(_fmt_pct(val_sbc))
+
+            inp_oa = self._inputs.get("other_amort_pct", {}).get(period)
+            if inp_oa:
+                val_oa = pd.other_amort_pct.get(period)
+                if val_oa is not None:
+                    inp_oa.setText(_fmt_pct(val_oa))
+
             inp_cx = self._inputs.get("capex_pct", {}).get(period)
             if inp_cx:
                 val_cx = pd.capex_pct.get(period)
@@ -888,6 +1137,10 @@ class ProjectionModulePage(QDialog):
             last = pd.last_edited_revenue.get(period)
             if last:
                 self._last_edited_revenue[period] = last
+
+            last_ni = pd.last_edited_ni.get(period)
+            if last_ni:
+                self._last_edited_ni[period] = last_ni
 
     # -----------------------------------------------------------------------
     # Collect and save — projection periods only
@@ -904,10 +1157,18 @@ class ProjectionModulePage(QDialog):
                 grow_text = self._get_input_text("revenue_growth", period)
                 pd.revenue_growth[period] = _parse_pct_input(grow_text)
 
+                ni_text = self._get_input_text("net_income", period)
+                pd.net_income[period] = _parse_float(ni_text)
+
+                nim_text = self._get_input_text("net_income_margin", period)
+                pd.net_income_margin[period] = _parse_pct_input(nim_text)
+
                 ei_text = self._get_input_text("ebitda_improvement", period)
                 pd.ebitda_improvement[period] = _parse_pct_input(ei_text)
             else:
                 pd.revenue[period] = self._ms_revenue.get(period)
+                pd.net_income[period] = self._ms_net_income.get(period)
+                pd.net_income_margin[period] = None
                 pd.ebitda_improvement[period] = None  # computed, not stored
 
             gp_text = self._get_input_text("gp_improvement", period)
@@ -916,12 +1177,22 @@ class ProjectionModulePage(QDialog):
             da_text = self._get_input_text("da_pct", period)
             pd.da_pct[period] = _parse_pct_input(da_text)
 
+            sbc_text = self._get_input_text("sbc_pct", period)
+            pd.sbc_pct[period] = _parse_pct_input(sbc_text)
+
+            oa_text = self._get_input_text("other_amort_pct", period)
+            pd.other_amort_pct[period] = _parse_pct_input(oa_text)
+
             cx_text = self._get_input_text("capex_pct", period)
             pd.capex_pct[period] = _parse_pct_input(cx_text)
 
             last = self._last_edited_revenue.get(period)
             if last:
                 pd.last_edited_revenue[period] = last
+
+            last_ni = self._last_edited_ni.get(period)
+            if last_ni:
+                pd.last_edited_ni[period] = last_ni
 
             # Resolved dollar values — the actual numbers Subject
             # Financials and every downstream page (GT, GPC, DCF, NWC)
@@ -931,6 +1202,8 @@ class ProjectionModulePage(QDialog):
             pd.gross_profit[period] = resolved.get("gross_profit")
             pd.ebitda[period] = resolved.get("ebitda")
             pd.da[period] = resolved.get("da")
+            pd.sbc[period] = resolved.get("sbc")
+            pd.other_amort[period] = resolved.get("other_amort")
             pd.capex[period] = resolved.get("capex")
 
         return pd
@@ -945,7 +1218,14 @@ class ProjectionModulePage(QDialog):
         self._projection_data.ebitda_improvement  = collected.ebitda_improvement
         self._projection_data.da                   = collected.da
         self._projection_data.da_pct              = collected.da_pct
+        self._projection_data.sbc                 = collected.sbc
+        self._projection_data.sbc_pct             = collected.sbc_pct
+        self._projection_data.other_amort         = collected.other_amort
+        self._projection_data.other_amort_pct     = collected.other_amort_pct
         self._projection_data.capex                = collected.capex
         self._projection_data.capex_pct           = collected.capex_pct
+        self._projection_data.net_income           = collected.net_income
+        self._projection_data.net_income_margin    = collected.net_income_margin
         self._projection_data.last_edited_revenue = collected.last_edited_revenue
+        self._projection_data.last_edited_ni      = collected.last_edited_ni
         self.accept()

@@ -1260,7 +1260,10 @@ class DCFPage(QWidget):
             net_income = {}
             for lbl in ["LFY","TTM","NFY","NFY+1","NFY+2"]:
                 try:
-                    net_income[lbl] = self._get_subject_financials("net income", lbl)
+                    val = self._get_subject_financials("net_income", lbl)
+                    if val is None:
+                        val = self._get_subject_financials("net income", lbl)
+                    net_income[lbl] = val
                 except:
                     net_income[lbl] = None
 
@@ -1268,7 +1271,9 @@ class DCFPage(QWidget):
             dep_ttm = None
             capex_ttm = None
             try:
-                dep_ttm = self._get_subject_financials("depreciation", "LFY")
+                dep_ttm = self._get_subject_financials("d&a_for_ebitda", "LFY")
+                if dep_ttm is None:
+                    dep_ttm = self._get_subject_financials("depreciation", "LFY")
             except:
                 dep_ttm = None
             try:
@@ -1436,6 +1441,7 @@ class DCFPage(QWidget):
             ("Net Interest Expense", False, False, False, False),
             ("EBIT", True, False, False, False),
             ("EBIT Margin", False, False, False, True),
+            ("Stock-Based Compensation", False, False, False, False),
             ("Taxes", False, False, False, False),
             ("Net Operating Profit After Tax (NOPAT)", True, False, False, False),
             ("Plus: Depreciation", False, False, True, False),
@@ -1881,6 +1887,7 @@ class DCFPage(QWidget):
         self._populate_cogs_through_ebitda()
         self._populate_dep_amort_net_int()
         self._populate_ebit_and_ebit_margin()
+        self._populate_sbc()
         self._populate_taxes(inputs)
         self._populate_nopat()
         self._populate_capex_other_nwc()
@@ -1895,7 +1902,8 @@ class DCFPage(QWidget):
         self._recalculate()
 
     def _update_ebit_row_label(self):
-        new_text = "EBT" if self._cash_flows_to == "FCFE" else "EBIT"
+        is_fcfe = (self._cash_flows_to == "FCFE")
+        new_text = "EBT" if is_fcfe else "EBIT"
         if self._ebit_grid_row is not None:
             lbl_item = self.table_grid.itemAtPosition(self._ebit_grid_row, 0)
             if lbl_item is not None and lbl_item.widget() is not None:
@@ -1904,6 +1912,13 @@ class DCFPage(QWidget):
             lbl_item = self.table_grid.itemAtPosition(self._ebit_margin_grid_row, 0)
             if lbl_item is not None and lbl_item.widget() is not None:
                 lbl_item.widget().setText(f"{new_text} Margin")
+        nopat_idx = self._row_idx.get("Net Operating Profit After Tax (NOPAT)")
+        nopat_lbl = self._row_labels.get(nopat_idx)
+        if nopat_lbl is not None:
+            nopat_lbl.setText(
+                "Net Income" if is_fcfe
+                else "Net Operating Profit After Tax (NOPAT)"
+            )
 
     def _apply_net_int_proj_visibility(self):
         """Show Net Interest row only for FCFE. Values come from populate methods."""
@@ -1997,7 +2012,7 @@ class DCFPage(QWidget):
                     continue
                 pd = self._get_projection_data()
                 self._set_currency("Depreciation", data_idx, pd.da.get(label))
-                self._set_currency("Amortization", data_idx, 0)
+                self._set_currency("Amortization", data_idx, pd.other_amort.get(label))
 
                 net_int = self._get_net_interest_value(data_idx)
                 self._set_currency("Net Interest Expense", data_idx, net_int)
@@ -2014,7 +2029,7 @@ class DCFPage(QWidget):
                 pd = self._get_projection_data()
                 ebitda = pd.ebitda.get(label)
                 dep = pd.da.get(label)
-                amort = 0
+                amort = pd.other_amort.get(label)
 
             if label == "Residual":
                 continue
@@ -2032,41 +2047,91 @@ class DCFPage(QWidget):
             self._set_currency("EBIT", data_idx, ebit_or_ebt)
             rev = self._sf_get("revenue", label)
             self._set_pct("EBIT Margin", data_idx, _safe_div(ebit_or_ebt, rev))
+    def _populate_sbc(self):
+        for data_idx, label in enumerate(self._headers):
+            if label == "Residual":
+                continue
+            if self._is_historical[data_idx]:
+                sbc = self._sf_get("stock_based_compensation", label)
+            else:
+                pd = self._get_projection_data()
+                sbc = pd.sbc.get(label)
+            self._set_currency("Stock-Based Compensation", data_idx, sbc)
+
     def _populate_taxes(self, inputs):
         tax_rate = inputs.subject_tax_rate
         ebit_idx = self._row_idx.get("EBIT")
+        sbc_idx  = self._row_idx.get("Stock-Based Compensation")
         for data_idx, label in enumerate(self._headers):
             if self._is_historical[data_idx]:
                 self._set_currency("Taxes", data_idx, self._sf_get("taxes", label))
             else:
-                ebit_lbl = self._calc_labels.get(ebit_idx, {}).get(data_idx)
-                ebit_val = _parse_label_as_float(ebit_lbl.text()) if ebit_lbl is not None else None
+                ebit_val = _read_label(self._calc_labels, ebit_idx, data_idx)
+                sbc_val  = _read_label(self._calc_labels, sbc_idx, data_idx)
                 if ebit_val is not None and tax_rate is not None:
-                    self._set_currency("Taxes", data_idx, ebit_val * tax_rate)
+                    # SBC is a pre-tax economic cost — subtract before applying
+                    # statutory rate so the tax shield is captured. FCFF NOPAT
+                    # and FCFE Net Income both bottom out from EBIT-after-SBC.
+                    base = ebit_val - (sbc_val or 0.0)
+                    self._set_currency("Taxes", data_idx, base * tax_rate)
                 else:
                     self._set("Taxes", data_idx, "-")
 
     def _populate_nopat(self):
-        ebit_idx = self._row_idx.get("EBIT")
+        ebit_idx  = self._row_idx.get("EBIT")
+        sbc_idx   = self._row_idx.get("Stock-Based Compensation")
         taxes_idx = self._row_idx.get("Taxes")
-        for data_idx in range(len(self._headers)):
-            ebit_val = _read_label(self._calc_labels, ebit_idx, data_idx)
-            tax_val = _read_label(self._calc_labels, taxes_idx, data_idx)
-            if ebit_val is not None and tax_val is not None:
-                self._set_currency("Net Operating Profit After Tax (NOPAT)", data_idx, ebit_val - tax_val)
+        is_fcfe = (self._cash_flows_to == "FCFE")
+        for data_idx, label in enumerate(self._headers):
+            if label == "Residual":
+                continue
+            if is_fcfe:
+                # FCFE: bottom-line Net Income. Analyst-wins on MS-covered
+                # projection periods (comes through Subject Financials'
+                # get_metric_value, which honors pd.net_income override).
+                # Historicals get SF's computed NI from the IS waterfall.
+                ni = self._sf_get("net_income", label)
+                self._set_currency(
+                    "Net Operating Profit After Tax (NOPAT)", data_idx, ni
+                )
             else:
-                self._set("Net Operating Profit After Tax (NOPAT)", data_idx, "-")
+                # FCFF: NOPAT = (EBIT − SBC) × (1 − t), computed as
+                # (EBIT − SBC) − Taxes since Taxes was already built on
+                # the post-SBC base in _populate_taxes.
+                ebit_val = _read_label(self._calc_labels, ebit_idx, data_idx)
+                sbc_val  = _read_label(self._calc_labels, sbc_idx, data_idx)
+                tax_val  = _read_label(self._calc_labels, taxes_idx, data_idx)
+                if ebit_val is not None and tax_val is not None:
+                    base = ebit_val - (sbc_val or 0.0)
+                    self._set_currency(
+                        "Net Operating Profit After Tax (NOPAT)",
+                        data_idx,
+                        base - tax_val,
+                    )
+                else:
+                    self._set(
+                        "Net Operating Profit After Tax (NOPAT)", data_idx, "-"
+                    )
 
     def _populate_capex_other_nwc(self):
         for data_idx, label in enumerate(self._headers):
             if self._is_historical[data_idx]:
-                plus_dep = self._sf_get("d&a_for_ebitda", label)
-                if plus_dep is None:
-                    plus_dep = self._sf_get("depreciation", label)
-                if plus_dep is None:
-                    plus_dep = self._sf_get("depreciation_amortization", label)
+                dep_val = self._sf_get("d&a_for_ebitda", label)
+                if dep_val is None:
+                    dep_val = self._sf_get("depreciation", label)
+                if dep_val is None:
+                    dep_val = self._sf_get("depreciation_amortization", label)
+                amort_val = self._sf_get("amortization", label)
+                plus_dep = None
+                if dep_val is not None or amort_val is not None:
+                    plus_dep = (dep_val or 0.0) + (amort_val or 0.0)
             else:
-                plus_dep = self._get_projection_data().da.get(label)
+                pd = self._get_projection_data()
+                da_val = pd.da.get(label)
+                oa_val = pd.other_amort.get(label)
+                plus_dep = None
+                if da_val is not None or oa_val is not None:
+                    plus_dep = (da_val or 0.0) + (oa_val or 0.0)
             self._set_currency("Plus: Depreciation", data_idx, plus_dep)
             nwc_change_val = None
             if hasattr(self, '_get_nwc_change') and self._get_nwc_change is not None:
@@ -2546,10 +2611,13 @@ class DCFPage(QWidget):
         dep_pct = self._get_dep_pct_of_capex()
         depreciation = residual_capex * dep_pct if (residual_capex is not None and dep_pct is not None) else None
         self._set_currency("Depreciation", data_idx, depreciation)
-        self._set_currency("Plus: Depreciation", data_idx, depreciation)
         amort_idx = self._row_idx.get("Amortization")
         amort_inp = self._input_fields.get(amort_idx, {}).get(data_idx)
         amortization = _parse_label_as_float(amort_inp.text()) if amort_inp is not None else None
+        total_da_addback = None
+        if depreciation is not None or amortization is not None:
+            total_da_addback = (depreciation or 0.0) + (amortization or 0.0)
+        self._set_currency("Plus: Depreciation", data_idx, total_da_addback)
         net_interest = None
         if is_fcfe:
             net_interest = grow(final("Net Interest Expense"))
@@ -2564,9 +2632,24 @@ class DCFPage(QWidget):
             ebit_or_ebt = ebitda - depreciation - (amortization or 0.0)
         self._set_currency("EBIT", data_idx, ebit_or_ebt)
         self._set_pct("EBIT Margin", data_idx, _safe_div(ebit_or_ebt, revenue))
-        taxes = ebit_or_ebt * tax_rate if (ebit_or_ebt is not None and tax_rate is not None) else None
+        # Residual SBC — grow with revenue, same convention as D&A/CapEx
+        residual_sbc = grow(final("Stock-Based Compensation"))
+        self._set_currency("Stock-Based Compensation", data_idx, residual_sbc)
+
+        # Taxes on EBIT-after-SBC (or EBT-after-SBC for FCFE)
+        base_for_tax = None
+        if ebit_or_ebt is not None:
+            base_for_tax = ebit_or_ebt - (residual_sbc or 0.0)
+        taxes = base_for_tax * tax_rate if (base_for_tax is not None and tax_rate is not None) else None
         self._set_currency("Taxes", data_idx, taxes)
-        nopat = (ebit_or_ebt - (taxes or 0.0)) if ebit_or_ebt is not None else None
+
+        if is_fcfe:
+            # Grow last explicit NI with LTGR — matches how Revenue/EBITDA
+            # residualize, keeps FCFE bottom line reader-consistent with
+            # the analyst-anchored NFY/NFY+1/NFY+2 values that seeded it.
+            nopat = grow(final("Net Operating Profit After Tax (NOPAT)"))
+        else:
+            nopat = (base_for_tax - (taxes or 0.0)) if base_for_tax is not None else None
         self._set_currency("Net Operating Profit After Tax (NOPAT)", data_idx, nopat)
         dfcfnwc = self._get_nwc_change("Residual")
         self._set_currency("Less: Increase/(Decrease) in DFCFNWC", data_idx, dfcfnwc)
@@ -2578,7 +2661,7 @@ class DCFPage(QWidget):
             other_adj = _parse_label_as_float(raw) if raw else 0.0
         fcf = None
         if nopat is not None and dfcfnwc is not None:
-            fcf = nopat + (depreciation or 0.0) - dfcfnwc - (residual_capex or 0.0) - (other_adj or 0.0)
+            fcf = nopat + (total_da_addback or 0.0) - dfcfnwc - (residual_capex or 0.0) - (other_adj or 0.0)
         self._set_currency("Free Cash Flow", data_idx, fcf)
 
     def get_residual_revenue(self) -> Optional[float]:
