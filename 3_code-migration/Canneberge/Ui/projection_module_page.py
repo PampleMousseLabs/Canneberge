@@ -225,6 +225,7 @@ class ProjectionModulePage(QDialog):
 
         # Tracks which driver was last edited per projection period: "revenue" | "growth"
         self._last_edited_revenue: Dict[str, str] = {}
+        self._last_edited_ni: Dict[str, str] = {}
 
         # Widget registries
         self._inputs: Dict[str, Dict[str, QLineEdit]] = {}
@@ -921,6 +922,14 @@ class ProjectionModulePage(QDialog):
                 self._display_ni_margin(period, ni_margin)
                 self._set_label("net_income", period, _fmt_dollars(ni))
 
+                # --- +Other Adjustments (MS-covered periods: computed plug) ---
+                other_adj = None
+                if self._is_public and period in MS_COVERED_PERIODS:
+                    other_adj = self._resolve_other_adjustment(
+                        period, ebitda, da, other_amort, sbc, ni
+                    )
+                    self._set_label("other_adj", period, _fmt_dollars(other_adj))
+
                 self._resolved[period] = {
                     "revenue": rev,
                     "gross_profit": gp,
@@ -930,6 +939,7 @@ class ProjectionModulePage(QDialog):
                     "other_amort": other_amort,
                     "capex": capex,
                     "net_income": ni,
+                    "other_adj": other_adj,
                 }
 
         finally:
@@ -938,6 +948,45 @@ class ProjectionModulePage(QDialog):
     # -----------------------------------------------------------------------
     # Resolution helpers
     # -----------------------------------------------------------------------
+
+    def _resolve_other_adjustment(
+        self,
+        period: str,
+        ebitda: Optional[float],
+        da: Optional[float],
+        other_amort: Optional[float],
+        sbc: Optional[float],
+        analyst_ni: Optional[float],
+    ) -> Optional[float]:
+        """
+        MS-covered periods only: back-solve the plug that reconciles
+        (EBITDA - D&A - OtherAmort - SBC) after tax to the analyst's
+        own Net Income figure. This is the gap this whole feature exists
+        to surface — it should never be user-typed for these periods.
+
+        A blank D&A/Other Amort/SBC input is treated as zero for this
+        calc (an empty override cell means "assume none," not "unknown"),
+        matching how those drivers behave everywhere else in this grid.
+        EBITDA and the analyst NI figure are NOT defaulted — those two
+        genuinely cannot be assumed, so a missing value there still
+        blocks the plug rather than silently computing against zero.
+        """
+        if ebitda is None or analyst_ni is None:
+            return None
+
+        da = da or 0.0
+        other_amort = other_amort or 0.0
+        sbc = sbc or 0.0
+
+        inputs = self._get_project_inputs()
+        tax_rate = getattr(inputs, "subject_tax_rate", None)
+        if tax_rate is None:
+            return None
+
+        ebit = ebitda - da - other_amort - sbc
+        implied_ni_before_adj = ebit * (1 - tax_rate)
+        other_adj = analyst_ni - implied_ni_before_adj
+        return other_adj
 
     def _resolve_net_income(
         self,

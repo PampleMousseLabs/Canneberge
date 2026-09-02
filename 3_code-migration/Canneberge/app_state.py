@@ -255,6 +255,7 @@ class ProjectionData:
     capex:                 Dict[str, Optional[float]] = field(default_factory=dict)
     capex_pct:             Dict[str, Optional[float]] = field(default_factory=dict)
     last_edited_revenue:   Dict[str, Optional[str]]   = field(default_factory=dict)
+    last_edited_ni:        Dict[str, Optional[str]]   = field(default_factory=dict)
 
 
 
