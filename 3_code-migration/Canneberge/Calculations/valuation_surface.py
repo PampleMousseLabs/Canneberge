@@ -70,7 +70,7 @@ def evaluate_dcf_fv(
             gg_res = (residual_fcf / cap_rate) if residual_fcf is not None else 0.0
             h_res = (((final_fcf * h_num_years) / 2.0) * (h_short_growth - ltgr) / cap_rate) + gg_res
             pv_residual_value = h_res * pv_factor
-    elif model == "EBITDA Multiple" and ebitda_mult is not None:
+    elif model == "EBITDA Multiple" and ebitda_mult is not None and final_fcf is not None:
         pv_factor_m = 1.0 / ((1.0 + wacc) ** (final_pvp + 0.5))
         pv_residual_value = (final_fcf * ebitda_mult) * pv_factor_m
     elif model == "Revenue Multiple" and revenue_mult is not None:
