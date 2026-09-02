@@ -1,0 +1,1156 @@
+from pathlib import Path
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QTabWidget, QMenuBar, QMenu,
+    QFileDialog, QMessageBox, QProgressDialog
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QActionGroup
+
+from Canneberge.Ui.home_page import HomePage
+from Canneberge.Ui.dashboard_page import DashboardPage
+from Canneberge.Ui.source_data_page import SourceDataPage
+from Canneberge.Ui.gt_page import GTPage
+from Canneberge.Ui.gpc_page import GPCPage, MAX_COLS as GPC_MAX_COLS
+from Canneberge.Ui.subject_financials_page import SubjectFinancialsPage
+from Canneberge.Ui.wacc_page import WACCPage, BETA_COLUMN_MAP
+from Canneberge.Ui.dcf_page import DCFPage
+from Canneberge.Ui.nwc_page import NWCPage
+from Canneberge.Ui.debt_schedule_page import DebtSchedulePage
+from Canneberge.Ui.private_financials_input_page import PrivateFinancialsInputPage
+from Canneberge.Ui.projection_module_page import ProjectionModulePage
+from Canneberge.app_state import PrivateFinancials, ProjectionData, Transaction
+from Canneberge.utils.session import (
+    save_session, load_session, list_sessions, SESSION_DIR
+)
+from Canneberge.Calculations.reverse_dcf import extract_ticker_inputs
+from Canneberge.utils.sa_utils import to_float as _to_float
+from Canneberge.Ui.analytics_page import AnalyticsPage
+from typing import Optional
+from datetime import datetime
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Canneberge")
+        self.setGeometry(100, 100, 1500, 850)
+
+        # Shared state
+        self._private_financials = PrivateFinancials()
+        self._projection_data = ProjectionData()
+        self._stockanalysis_results = {}
+        self._current_session_path: Optional[Path] = None
+
+        self.tabs = QTabWidget()
+
+        # Pages
+        self.home_page = HomePage()
+        self.dashboard_page = DashboardPage()
+        self.home_page.set_private_financials_callback(
+            self._open_private_financials_dialog
+        )
+        self.home_page.set_projection_module_callback(
+            self._open_projection_module_dialog
+        )
+
+        # Projection Years is shared between Home, DCF, and NWC.
+        # Historical Years on NWC remains local/unlinked.
+        self.home_page.projection_years_spin.valueChanged.connect(
+            self._on_home_projection_years_changed
+        )
+
+        self.source_data_page = SourceDataPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs
+        )
+
+        # When Source Data finishes refreshing, NWC must recalculate
+        # before DCF, because DCF pulls Change in NWC from NWC.
+        self.source_data_page.all_sources_finished.connect(
+            self._on_source_data_refresh_finished
+        )
+
+        self.subject_financials_page = SubjectFinancialsPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_private_financials_callback=self._get_private_financials,
+            get_projection_data_callback=self._get_projection_data,
+            get_debt_interest_callback=self._get_projected_interest_expense,
+        )
+
+        self.gt_page = GTPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_private_financials_callback=self._get_private_financials,
+            get_subject_debt=self.get_subject_debt,
+            get_subject_metric_value=self._get_subject_metric_value,
+        )
+
+        self.gpc_page = GPCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_marketscreener_results_callback=self._get_marketscreener_results,
+            get_private_financials_callback=self._get_private_financials,
+            get_subject_debt=self.get_subject_debt,
+            get_subject_metric_value=self._get_subject_metric_value,
+        )
+
+        self.wacc_page = WACCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_beta_vol_results_callback=self._get_beta_vol_results,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            get_fred_results_callback=self._get_fred_results,
+        )
+
+        self.dcf_page = DCFPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_wacc_value_callback=self._get_wacc_value,
+            get_ke_value_callback=self._get_ke_value,
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_projection_data_callback=self._get_projection_data,
+            update_projection_callback=self._update_projection_controls,
+            get_nwc_change_callback=self._get_nwc_change,
+            get_reverse_dcf_inputs_callback=self._get_reverse_dcf_inputs,
+            get_gpc_tickers_callback=self._get_gpc_tickers,
+        )
+
+        self.nwc_page = NWCPage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_dcf_residual_revenue_callback=self.dcf_page.get_residual_revenue,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+            update_projection_callback=self._update_projection_controls,
+        )
+        # Home's GPC ticker fields control which rows exist in the
+        # NWC GPC section. Refresh NWC whenever a user finishes editing
+        # one of those ticker fields (Enter or clicking away).
+        for ticker_edit in self.home_page.gpc_ticker_edits:
+            ticker_edit.editingFinished.connect(
+                self.nwc_page.refresh_gpc_section
+            )    
+        # NWC now exists, so let NWC refresh DCF after NWC inputs change.
+        self.nwc_page.set_nwc_changed_callback(self.dcf_page.refresh)
+
+        # Debt Schedule — feeds projected interest_expense into
+        # SubjectFinancialsPage (and from there into DCF FCFE).
+        # Created after SubjectFinancialsPage; callback resolves at call time.
+        self.debt_schedule_page = DebtSchedulePage(
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+        )
+
+        self.analytics_page = AnalyticsPage(
+            get_dcf_page=lambda: self.dcf_page,
+            get_wacc_page=lambda: self.wacc_page,
+            get_subject_financials_callback=self.subject_financials_page.get_metric_value,
+            get_project_inputs_callback=self.home_page.get_project_inputs,
+            get_stockanalysis_results_callback=self._get_stockanalysis_results,
+        )
+
+        # Initial page calculation order matters:
+        # NWC calculates first, then DCF reads NWC's Change in NWC.
+        self._refresh_nwc_then_dcf()
+        # Dashboard mirrors WACC/DCF inputs, so it can only be bound
+        # once both of those pages exist.
+        self.dashboard_page.bind_pages(
+            wacc_page=self.wacc_page,
+            dcf_page=self.dcf_page,
+            gpc_page=self.gpc_page,
+            gt_page=self.gt_page,
+            nwc_page=self.nwc_page,
+            get_project_inputs=self.home_page.get_project_inputs,
+            get_stockanalysis_results=self._get_stockanalysis_results,
+            get_subject_debt=self.get_subject_debt,
+            get_subject_metric_value=self._get_subject_metric_value,
+        )
+        
+        self.tabs.addTab(self.home_page, "Home")
+        self.tabs.addTab(self.dashboard_page, "Dashboard")
+        self.tabs.addTab(self.wacc_page, "WACC")
+        self.tabs.addTab(self.dcf_page, "DCF")
+        self.tabs.addTab(self.nwc_page, "NWC")
+        self.tabs.addTab(self.debt_schedule_page, "Debt Schedule")
+        self.tabs.addTab(self.gt_page, "GT")
+        self.tabs.addTab(self.gpc_page, "GPC")
+        self.tabs.addTab(self.subject_financials_page, "Subject Financials")
+        self.tabs.addTab(self.source_data_page, "Source Data")
+        self.tabs.addTab(self.analytics_page, "Analytics")
+
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.setCentralWidget(self.tabs)
+
+        from Canneberge.Ui.theme import theme_manager
+        self.tabs.setStyleSheet(theme_manager.current.tab_bar_style())
+        theme_manager.theme_changed.connect(
+            lambda theme: self.tabs.setStyleSheet(theme.tab_bar_style())
+        )
+
+        # Sync GPC and DCF modes with Home Page Basis of Value
+        self.home_page.basis_value_combo.currentTextChanged.connect(
+            self._on_basis_of_value_changed
+        )
+
+        self._build_menu()
+
+    def _get_nwc_change(self, period: str) -> Optional[float]:
+        """
+        Safe bridge between DCFPage and NWCPage.
+
+        DCFPage is created before NWCPage, so during DCFPage's first
+        constructor recalc self.nwc_page does not exist yet. getattr()
+        safely returns None at that stage. Once NWCPage exists, this
+        returns its calculated raw Change in NWC for the requested
+        period.
+        """
+        nwc_page = getattr(self, "nwc_page", None)
+        if nwc_page is None:
+            return None
+        return nwc_page.get_changes_in_nwc(period)
+
+    def _get_projected_interest_expense(self, period: str) -> Optional[float]:
+        if hasattr(self, "debt_schedule_page"):
+            return self.debt_schedule_page.get_projected_interest_expense(period)
+        return None
+
+    def _get_gpc_tickers(self) -> list:
+        """
+        Returns the active GPC ticker list for the Reverse-DCF loop
+        (up to 15 GPCs feeding comparison charts). Backed by Home
+        page's ProjectInputs, same source every other page reads
+        active_public_tickers from — no separate ticker list is
+        maintained for Reverse-DCF specifically.
+        """
+        inputs = self.home_page.get_project_inputs()
+        return list(getattr(inputs, "active_public_tickers", []) or [])
+
+    def _get_reverse_dcf_inputs(self, ticker: str) -> Optional[dict]:
+        """
+        Bridge between DCFPage's Reverse-DCF dialog and existing
+        source data — mirrors debug_reverse_dcf.py's extraction
+        exactly, just reading from the app's already-cached/refreshed
+        results (SourceDataPage.all_results / WACCPage's live combo
+        selections) instead of firing fresh network calls per ticker.
+
+        Per Ted's Reverse-DCF beta rule (see reverse_dcf debug module
+        docstring): uses the ticker's OWN observed (currently levered)
+        equity beta, selected via WACCPage's live Beta Type / Beta
+        Frequency combo choice — NOT WACCPage's Re-Levered Beta column,
+        which normalizes GPC betas to the SUBJECT's target structure
+        for the Subject's own Ke/WACC calc. Reverse-DCF needs each
+        ticker's own beta, consistent with its own market price and
+        capital structure — same reasoning that drove BETA_COLUMN_MAP
+        being the only WACC page piece the debug script imported.
+
+        Returns None if inputs can't be assembled (e.g. ticker not
+        yet present in cached source data) — caller falls back to
+        DCF page's own grid-derived inputs.
+        """
+        if not ticker:
+            return None
+
+        try:
+            sa_results = self._get_stockanalysis_results()
+            ms_rows = self._get_marketscreener_results()
+            fred_rows = self._get_fred_results()
+            beta_vol_rows = self._get_beta_vol_results()
+
+            beta_type = self.wacc_page.beta_type_combo.currentText()
+            beta_frequency = self.wacc_page.beta_frequency_combo.currentText()
+            beta_col = BETA_COLUMN_MAP.get((beta_type, beta_frequency))
+
+            observed_beta = None
+            if beta_col is not None:
+                beta_lookup = {}
+                for row in beta_vol_rows:
+                    t = str(row.get("Ticker", "")).strip().upper()
+                    if t:
+                        beta_lookup[t] = row
+                observed_beta = _to_float(beta_lookup.get(ticker.upper(), {}).get(beta_col))
+
+            erp_text = self.wacc_page.input_equity_risk_premium.text().strip().replace("%", "")
+            erp_val = None
+            if erp_text:
+                try:
+                    erp_val = float(erp_text) / 100.0
+                except ValueError:
+                    erp_val = None
+
+            return extract_ticker_inputs(
+                ticker=ticker,
+                sa_results=sa_results,
+                ms_rows=ms_rows,
+                fred_rows=fred_rows,
+                wacc_beta_val=observed_beta,
+                erp_val=erp_val,
+                nwc_exclude_cash=True,
+            )
+        except Exception as e:
+            print(f"_get_reverse_dcf_inputs({ticker}) failed: {e}")
+            return None
+
+    def _refresh_nwc_then_dcf(self):
+        """
+        Refresh NWC first, then DCF.
+
+        DCF depends on NWC's calculated Change in Net Working Capital.
+        Therefore DCF must not be the first page recalculated after
+        source data, projection data, private financials, or projection
+        year counts change.
+        """
+        if hasattr(self, "nwc_page"):
+            # refresh_gpc_section() also recalculates the NWC page.
+            # It rebuilds the GPC ticker rows only if Home's GPC ticker
+            # list changed; otherwise it just recalculates existing rows.
+            self.nwc_page.refresh_gpc_section(force=False)
+
+        if hasattr(self, "dcf_page"):
+            self.dcf_page.refresh()
+
+    def _on_source_data_refresh_finished(self):
+        """
+        Source Data just finished refreshing. Public-company financials
+        may have changed, so recalculate dependent pages. NWC must run
+        before DCF.
+        """
+        if hasattr(self, "subject_financials_page"):
+            self.subject_financials_page.refresh()
+
+        if hasattr(self, "gt_page"):
+            self.gt_page._recalculate()
+
+        if hasattr(self, "gpc_page"):
+            self.gpc_page._recalculate()
+
+        if hasattr(self, "wacc_page"):
+            self.wacc_page._recalculate()
+
+        self._refresh_nwc_then_dcf()   
+
+    def _on_home_projection_years_changed(self, value: int):
+        """
+        Home-page Projection Years changed by the user.
+        Push the new shared projection-year count everywhere that is
+        supposed to track it. NWC Historical Years is intentionally
+        NOT touched here.
+        """
+        self._update_projection_controls(
+            self.home_page.historical_years_spin.value(),
+            value,
+        )
+
+    def _build_menu(self):
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("File")
+
+        save_action = QAction("Save Session", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self._on_save_session)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("Save Session As...", self)
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self._on_save_session_as)
+        file_menu.addAction(save_as_action)
+
+        load_action = QAction("Load Session...", self)
+        load_action.setShortcut("Ctrl+O")
+        load_action.triggered.connect(self._on_load_session)
+        file_menu.addAction(load_action)
+
+        file_menu.addSeparator()
+
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        self._build_view_menu(menubar)
+
+    def _build_view_menu(self, menubar):
+        """
+        Theme switcher. Reads/writes Canneberge/Ui/theme.py's theme_manager
+        singleton. Selecting a theme fires theme_changed, which every
+        theme-aware page listens for to restyle itself live (no restart).
+        """
+        from Canneberge.Ui.theme import theme_manager
+
+        view_menu = menubar.addMenu("View")
+        theme_menu = view_menu.addMenu("Theme")
+
+        action_group = QActionGroup(self)
+        action_group.setExclusive(True)
+
+        for name in theme_manager.theme_names():
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(theme_manager.current.name == name)
+            action.triggered.connect(
+                lambda checked, n=name: theme_manager.set_theme(n)
+            )
+            action_group.addAction(action)
+            theme_menu.addAction(action)
+
+        self._build_font_size_menu(view_menu)
+
+    def _build_font_size_menu(self, view_menu):
+        """
+        Font-size control. Reads/writes Canneberge/Ui/font_scale.py's
+        font_scale singleton - deliberately separate from the theme
+        switcher above, since text size is a readability preference
+        independent of color theme.
+        """
+        from Canneberge.Ui.font_scale import font_scale
+
+        font_menu = view_menu.addMenu("Font Size")
+
+        increase_action = QAction("Increase", self)
+        increase_action.setShortcut("Ctrl+=")
+        increase_action.triggered.connect(font_scale.increase)
+        font_menu.addAction(increase_action)
+
+        decrease_action = QAction("Decrease", self)
+        decrease_action.setShortcut("Ctrl+-")
+        decrease_action.triggered.connect(font_scale.decrease)
+        font_menu.addAction(decrease_action)
+
+        font_menu.addSeparator()
+
+        reset_action = QAction("Reset to Default", self)
+        reset_action.setShortcut("Ctrl+0")
+        reset_action.triggered.connect(font_scale.reset)
+        font_menu.addAction(reset_action)
+
+    def _on_tab_changed(self, index: int):
+        if self.tabs.widget(index) is self.subject_financials_page:
+            self.subject_financials_page.refresh()
+        if self.tabs.widget(index) is self.gt_page:
+            self.gt_page._recalculate()
+        if self.tabs.widget(index) is self.gpc_page:
+            self.gpc_page._recalculate()
+        if self.tabs.widget(index) is self.wacc_page:
+            self.wacc_page._recalculate()
+        if self.tabs.widget(index) is self.dcf_page:
+            self._refresh_nwc_then_dcf()
+        if self.tabs.widget(index) is self.nwc_page:
+            self.nwc_page._recalculate()
+        if self.tabs.widget(index) is self.debt_schedule_page:
+            self.debt_schedule_page._recalculate()
+        if self.tabs.widget(index) is self.dashboard_page:
+            self.dashboard_page.refresh_from_pages()
+        if self.tabs.widget(index) is self.analytics_page:
+            self.analytics_page.refresh()   
+
+    def _open_private_financials_dialog(self):
+        inputs = self.home_page.get_project_inputs()
+        dialog = PrivateFinancialsInputPage(
+            private_financials=self._private_financials,
+            hist_years=inputs.historical_years,
+            last_fiscal_quarter=inputs.last_fiscal_quarter,
+            parent=self,
+        )
+        if dialog.exec():
+            self.subject_financials_page.refresh()
+            self.gt_page._recalculate()
+            self.gpc_page._recalculate()
+            self._refresh_nwc_then_dcf()
+    def _open_projection_module_dialog(self):
+        dialog = ProjectionModulePage(
+            projection_data=self._projection_data,
+            get_project_inputs=self.home_page.get_project_inputs,
+            get_marketscreener_results=self._get_marketscreener_results,
+            get_subject_historical_line=self._get_subject_historical_line,
+            parent=self,
+        )
+
+        def _on_saved():
+            self.subject_financials_page.refresh()
+            self.gt_page._recalculate()
+            self.gpc_page._recalculate()
+            self._refresh_nwc_then_dcf()
+
+        dialog.accepted.connect(_on_saved)
+        # .show() instead of .exec() - non-modal, so the rest of the
+        # app stays usable while this is open (matches the football
+        # field / GPC / GT chart popups). NOTE: this does NOT make
+        # edits flow through live as you type - that's still a
+        # Save/Cancel-gated commit, same as before, just no longer
+        # blocking the rest of the app while it's open. True
+        # live-flow-through (recalculating DCF/GT/GPC on every
+        # keystroke, no Save button) is a separate, larger change -
+        # not done here.
+        dialog.show()
+
+    def _get_stockanalysis_results(self) -> dict:
+        return self.source_data_page.all_results.get("stockanalysis", {})
+
+    def _get_marketscreener_results(self) -> list:
+        return self.source_data_page.all_results.get("marketscreener", [])
+
+    def _get_beta_vol_results(self) -> list:
+        return self.source_data_page.all_results.get("beta_vol", [])
+
+    def _get_fred_results(self) -> list:
+        return self.source_data_page.all_results.get("fred", [])
+
+    def _get_private_financials(self) -> PrivateFinancials:
+        return self._private_financials
+
+    def _get_projection_data(self) -> ProjectionData:
+        return self._projection_data
+
+    def _update_projection_controls(self, hist_years: int, proj_years: int):
+        """
+        Shared sync point for projection years.
+
+        - Home Projection Years is the shared source that ProjectInputs
+          exposes to the rest of the app.
+        - DCF can change it via its dialog.
+        - NWC can change it via its own Projection Years spinbox.
+        - NWC Historical Years remains local/unlinked and is NOT synced.
+        """
+        # Keep existing DCF/Home historical-years behavior untouched.
+        home_hist_blocked = self.home_page.historical_years_spin.blockSignals(True)
+        self.home_page.historical_years_spin.setValue(hist_years)
+        self.home_page.historical_years_spin.blockSignals(home_hist_blocked)
+
+        # Shared Projection Years -> Home
+        home_proj_blocked = self.home_page.projection_years_spin.blockSignals(True)
+        self.home_page.projection_years_spin.setValue(proj_years)
+        self.home_page.projection_years_spin.blockSignals(home_proj_blocked)
+
+        # Shared Projection Years -> NWC visible spinbox
+        if hasattr(self, "nwc_page"):
+            nwc_proj_blocked = self.nwc_page.proj_years_spin.blockSignals(True)
+            self.nwc_page.proj_years_spin.setValue(proj_years)
+            self.nwc_page.proj_years_spin.blockSignals(nwc_proj_blocked)
+
+        # Rebuild/recalculate any pages whose structure depends on
+        # projection-year count.
+        if hasattr(self, "subject_financials_page"):
+            self.subject_financials_page.refresh()
+
+        if hasattr(self, "dcf_page"):
+            self.dcf_page._recalculate()
+
+        if hasattr(self, "nwc_page"):
+            self._refresh_nwc_then_dcf()
+
+    def get_subject_debt(self) -> float:
+        return self.subject_financials_page.get_subject_debt()
+
+    def _get_subject_historical_line(self, key: str) -> dict:
+        return self.subject_financials_page.get_historical_line_values(key)
+
+    def _get_subject_metric_value(self, key: str, period: str):
+        return self.subject_financials_page.get_metric_value(key, period)
+
+    def _get_wacc_value(self) -> Optional[float]:
+        if hasattr(self, 'wacc_page'):
+            self.wacc_page._recalculate()
+            return self.wacc_page.wacc_value
+        return None
+
+    def _get_ke_value(self) -> Optional[float]:
+        if hasattr(self, 'wacc_page'):
+            self.wacc_page._recalculate()
+            return self.wacc_page.ke_value
+        return None
+
+    def _on_basis_of_value_changed(self, basis_text: str):
+        """
+        Auto-syncs DCF and GPC pages when Home Page Basis of Value changes.
+        - "Equity Value" -> DCF FCFE, GPC Equity mode (P/S, P/E, P/B)
+        - "Business Enterprise Value" -> DCF FCFF, GPC BEV mode (EV/Sales, EV/EBITDA)
+        """
+        if hasattr(self, "dcf_page"):
+            self.dcf_page._cash_flows_to = "FCFE" if basis_text == "Equity Value" else "FCFF"
+            self.dcf_page.refresh()
+        if hasattr(self, "gpc_page"):
+            self.gpc_page._recalculate()
+
+
+    # ------------------------------------------------------------------
+    # SAVE / LOAD
+    # ------------------------------------------------------------------
+
+    def _collect_wacc_page_state(self) -> dict:
+        return {
+            "beta_type": self.wacc_page.beta_type_combo.currentText(),
+            "beta_frequency": self.wacc_page.beta_frequency_combo.currentText(),
+            "capital_structure": self.wacc_page.capital_structure_combo.currentText(),
+            "selected_debt_tic": self.wacc_page.selected_debt_tic_input.text(),
+            "selected_relevered_beta": self.wacc_page.selected_relevered_beta_input.text(),
+            "equity_risk_premium": self.wacc_page.input_equity_risk_premium.text(),
+            "size_premium": self.wacc_page.input_size_premium.text(),
+            "csrp": self.wacc_page.input_csrp.text(),
+            "pretax_debt_series": self.wacc_page.pretax_debt_combo.currentText(),
+            "excluded_rows": [
+                chk.isChecked() for chk in self.wacc_page.tick_exclude_checks
+            ],
+        }
+
+    def _apply_wacc_page_state(self, state: dict):
+        if not state:
+            return
+        wp = self.wacc_page
+
+        def _set_combo(combo, text):
+            if text:
+                idx = combo.findText(text)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+
+        _set_combo(wp.beta_type_combo, state.get("beta_type"))
+        _set_combo(wp.beta_frequency_combo, state.get("beta_frequency"))
+        _set_combo(wp.capital_structure_combo, state.get("capital_structure"))
+        _set_combo(wp.pretax_debt_combo, state.get("pretax_debt_series"))
+
+        if state.get("selected_debt_tic"):
+            wp.selected_debt_tic_input.setText(state["selected_debt_tic"])
+        if state.get("selected_relevered_beta"):
+            wp.selected_relevered_beta_input.setText(state["selected_relevered_beta"])
+        if state.get("equity_risk_premium"):
+            wp.input_equity_risk_premium.setText(state["equity_risk_premium"])
+        if state.get("size_premium"):
+            wp.input_size_premium.setText(state["size_premium"])
+        if state.get("csrp"):
+            wp.input_csrp.setText(state["csrp"])
+
+        for i, checked in enumerate(state.get("excluded_rows", [])):
+            if i < len(wp.tick_exclude_checks):
+                wp.tick_exclude_checks[i].setChecked(checked)
+
+        wp._recalculate()
+
+
+    def _collect_gt_page_state(self) -> dict:
+        return {
+            "num_multiples": self.gt_page.num_multiples_spin.value(),
+            "dloc": self.gt_page.dloc_input.text(),
+            "metric_selections": [
+                combo.currentText()
+                for combo in self.gt_page.metric_combos
+            ],
+            "selected_low": [
+                inp.text()
+                for inp in self.gt_page.selected_low_inputs
+            ],
+            "selected_high": [
+                inp.text()
+                for inp in self.gt_page.selected_high_inputs
+            ],
+            "weights": [
+                inp.text()
+                for inp in self.gt_page.weight_inputs
+            ],
+            "excluded_rows": [
+                chk.isChecked()
+                for chk in self.gt_page.tx_exclude_checks
+            ],
+        }
+
+    def _apply_gt_page_state(self, state: dict):
+        if not state:
+            return
+
+        n = state.get("num_multiples", 3)
+        self.gt_page.num_multiples_spin.setValue(n)
+
+        dloc = state.get("dloc", "")
+        if dloc:
+            self.gt_page.dloc_input.setText(dloc)
+
+        for i, text in enumerate(state.get("metric_selections", [])):
+            if i < len(self.gt_page.metric_combos):
+                idx = self.gt_page.metric_combos[i].findText(text)
+                if idx >= 0:
+                    self.gt_page.metric_combos[i].setCurrentIndex(idx)
+
+        for i, text in enumerate(state.get("selected_low", [])):
+            if i < len(self.gt_page.selected_low_inputs):
+                self.gt_page.selected_low_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("selected_high", [])):
+            if i < len(self.gt_page.selected_high_inputs):
+                self.gt_page.selected_high_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("weights", [])):
+            if i < len(self.gt_page.weight_inputs):
+                self.gt_page.weight_inputs[i].setText(text)
+
+        for i, checked in enumerate(state.get("excluded_rows", [])):
+            if i < len(self.gt_page.tx_exclude_checks):
+                self.gt_page.tx_exclude_checks[i].setChecked(checked)
+
+    def _collect_gpc_page_state(self) -> dict:
+        # Flush active basis into memory before serializing so the
+        # on-disk session has both BEV and EQUITY snapshots current.
+        if self.gpc_page._last_basis_mode is not None:
+            self.gpc_page._save_basis_state(self.gpc_page._last_basis_mode)
+
+        return {
+            "num_multiples": self.gpc_page.num_multiples_spin.value(),
+            "dloc": self.gpc_page.dloc_input.text(),
+            "control_premium": self.gpc_page.control_premium_input.text(),
+            # Legacy single-basis fields (still written for backward
+            # compat with older sessions).
+            "metric_selections": [
+                combo.currentText()
+                for combo in self.gpc_page.metric_combos
+            ],
+            "selected_low": [
+                inp.text()
+                for inp in self.gpc_page.selected_low_inputs
+            ],
+            "selected_high": [
+                inp.text()
+                for inp in self.gpc_page.selected_high_inputs
+            ],
+            "weights": [
+                inp.text()
+                for inp in self.gpc_page.weight_inputs
+            ],
+            "excluded_rows": [
+                chk.isChecked()
+                for chk in self.gpc_page.tick_exclude_checks
+            ],
+            # Dual-basis memory
+            "per_basis_state": self.gpc_page._per_basis_state,
+            "last_basis_mode": self.gpc_page._last_basis_mode,
+        }
+
+    def _apply_gpc_page_state(self, state: dict):
+        if not state:
+            return
+
+        n = state.get("num_multiples", GPC_MAX_COLS)
+        self.gpc_page.num_multiples_spin.setValue(n)
+
+        dloc = state.get("dloc", "")
+        if dloc:
+            self.gpc_page.dloc_input.setText(dloc)
+
+        control_premium = state.get("control_premium", "")
+        if control_premium:
+            self.gpc_page.control_premium_input.setText(control_premium)
+
+        # Restore dual-basis memory when present (new sessions).
+        per_basis = state.get("per_basis_state")
+        if isinstance(per_basis, dict):
+            for basis_key in ("BEV", "EQUITY"):
+                if basis_key in per_basis:
+                    self.gpc_page._per_basis_state[basis_key] = per_basis[basis_key]
+
+        # Apply the active (or legacy single-basis) UI values.
+        for i, text in enumerate(state.get("metric_selections", [])):
+            if i < len(self.gpc_page.metric_combos):
+                idx = self.gpc_page.metric_combos[i].findText(text)
+                if idx >= 0:
+                    self.gpc_page.metric_combos[i].setCurrentIndex(idx)
+
+        for i, text in enumerate(state.get("selected_low", [])):
+            if i < len(self.gpc_page.selected_low_inputs):
+                self.gpc_page.selected_low_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("selected_high", [])):
+            if i < len(self.gpc_page.selected_high_inputs):
+                self.gpc_page.selected_high_inputs[i].setText(text)
+
+        for i, text in enumerate(state.get("weights", [])):
+            if i < len(self.gpc_page.weight_inputs):
+                self.gpc_page.weight_inputs[i].setText(text)
+
+        for i, checked in enumerate(state.get("excluded_rows", [])):
+            if i < len(self.gpc_page.tick_exclude_checks):
+                self.gpc_page.tick_exclude_checks[i].setChecked(checked)
+
+        # If session recorded a last basis, mark it so the next
+        # toggle saves/restores correctly. Actual dropdown options
+        # still get installed by _recalculate from Home basis.
+        if state.get("last_basis_mode") in ("BEV", "EQUITY"):
+            self.gpc_page._last_basis_mode = state["last_basis_mode"]
+            self.gpc_page._save_basis_state(state["last_basis_mode"])
+
+    def _collect_projection_page_state(self) -> dict:
+        pd = self._projection_data
+        return {
+            "revenue":             dict(pd.revenue),
+            "revenue_growth":      dict(pd.revenue_growth),
+            "gross_profit":        dict(pd.gross_profit),
+            "gp_improvement":      dict(pd.gp_improvement),
+            "ebitda":              dict(pd.ebitda),
+            "ebitda_improvement":  dict(pd.ebitda_improvement),
+            "da":                  dict(pd.da),
+            "da_pct":              dict(pd.da_pct),
+            "sbc":                 dict(pd.sbc),
+            "sbc_pct":             dict(pd.sbc_pct),
+            "other_amort":         dict(pd.other_amort),
+            "other_amort_pct":     dict(pd.other_amort_pct),
+            "net_income":          dict(pd.net_income),
+            "net_income_margin":   dict(pd.net_income_margin),
+            "capex":               dict(pd.capex),
+            "capex_pct":           dict(pd.capex_pct),
+            "last_edited_revenue": dict(pd.last_edited_revenue),
+            "last_edited_ni":      dict(pd.last_edited_ni),
+        }
+
+    def _apply_projection_page_state(self, state: dict):
+        if not state:
+            return
+        pd = self._projection_data
+        pd.revenue             = {k: v for k, v in state.get("revenue", {}).items()}
+        pd.revenue_growth      = {k: v for k, v in state.get("revenue_growth", {}).items()}
+        pd.gross_profit        = {k: v for k, v in state.get("gross_profit", {}).items()}
+        pd.gp_improvement      = {k: v for k, v in state.get("gp_improvement", {}).items()}
+        pd.ebitda              = {k: v for k, v in state.get("ebitda", {}).items()}
+        pd.ebitda_improvement  = {k: v for k, v in state.get("ebitda_improvement", {}).items()}
+        pd.da                  = {k: v for k, v in state.get("da", {}).items()}
+        pd.da_pct              = {k: v for k, v in state.get("da_pct", {}).items()}
+        pd.sbc                 = {k: v for k, v in state.get("sbc", {}).items()}
+        pd.sbc_pct             = {k: v for k, v in state.get("sbc_pct", {}).items()}
+        pd.other_amort         = {k: v for k, v in state.get("other_amort", {}).items()}
+        pd.other_amort_pct     = {k: v for k, v in state.get("other_amort_pct", {}).items()}
+        pd.net_income          = {k: v for k, v in state.get("net_income", {}).items()}
+        pd.net_income_margin   = {k: v for k, v in state.get("net_income_margin", {}).items()}
+        pd.capex                = {k: v for k, v in state.get("capex", {}).items()}
+        pd.capex_pct           = {k: v for k, v in state.get("capex_pct", {}).items()}
+        pd.last_edited_revenue = {k: v for k, v in state.get("last_edited_revenue", {}).items()}
+        pd.last_edited_ni      = {k: v for k, v in state.get("last_edited_ni", {}).items()}
+
+    def _apply_project_inputs_to_home(self, pi: dict):
+        hp = self.home_page
+
+        def _set(widget, value):
+            if value is None:
+                return
+            from PyQt6.QtWidgets import QLineEdit, QComboBox, QSpinBox
+            if isinstance(widget, QLineEdit):
+                widget.setText(str(value))
+            elif isinstance(widget, QComboBox):
+                idx = widget.findText(str(value))
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+            elif isinstance(widget, QSpinBox):
+                widget.setValue(int(value))
+
+        _set(hp.client_input,          pi.get("client"))
+        _set(hp.subject_name_input,    pi.get("subject_company_name"))
+        _set(hp.main_title_input,      pi.get("main_title"))
+        _set(hp.valuation_date_input,  pi.get("valuation_date"))
+        _set(hp.numeric_scale_combo,   pi.get("numeric_scale"))
+        _set(hp.draft_final_combo,     pi.get("draft_final"))
+        _set(hp.standard_value_combo,  pi.get("standard_of_value"))
+        _set(hp.taxable_combo,         pi.get("taxable_nontaxable"))
+        _set(hp.basis_value_combo,     pi.get("basis_of_value"))
+        _set(hp.company_status_combo,  pi.get("company_status"))
+        _set(hp.subject_ticker_input,  pi.get("subject_ticker"))
+        _set(hp.lfy_input,             pi.get("last_fiscal_year"))
+        _set(hp.fq_input,              pi.get("last_fiscal_quarter"))
+        _set(hp.nfy_input,             pi.get("next_fiscal_year"))
+        _set(hp.nfy_1_input,           pi.get("nfy_1"))
+        _set(hp.nfy_2_input,           pi.get("nfy_2"))
+        _set(hp.historical_years_spin, pi.get("historical_years"))
+        _set(hp.projection_years_spin, pi.get("projection_years"))
+
+        tax = pi.get("subject_tax_rate")
+        if tax is not None:
+            pct = tax * 100 if tax <= 1 else tax
+            hp.tax_rate_input.setText(f"{pct:.0f}%")
+
+        tickers = pi.get("gpc_tickers", [])
+        for i, edit in enumerate(hp.gpc_ticker_edits):
+            if i < len(tickers):
+                edit.setText(tickers[i])
+                hp.gpc_name_edits[i].setText(
+                    hp._resolve_company_name(tickers[i])
+                )
+            else:
+                edit.clear()
+                hp.gpc_name_edits[i].clear()
+
+        transactions = pi.get("gt_transactions", [])
+        for i, row_widgets in enumerate(hp.gt_rows):
+            if i < len(transactions):
+                t = transactions[i]
+                row_widgets["closing_date"].setText(t.get("closing_date", ""))
+                row_widgets["target"].setText(t.get("target", ""))
+                row_widgets["acquirer"].setText(t.get("acquirer", ""))
+                row_widgets["bev"].setText(
+                    str(t["bev"]) if t.get("bev") is not None else ""
+                )
+                row_widgets["ttm_revenue"].setText(
+                    str(t["ttm_revenue"])
+                    if t.get("ttm_revenue") is not None else ""
+                )
+                row_widgets["ttm_ebitda"].setText(
+                    str(t["ttm_ebitda"])
+                    if t.get("ttm_ebitda") is not None else ""
+                )
+                row_widgets["ttm_ebit"].setText(
+                    str(t["ttm_ebit"])
+                    if t.get("ttm_ebit") is not None else ""
+                )
+            else:
+                for widget in row_widgets.values():
+                    widget.clear()
+
+        hp._on_company_status_changed(pi.get("company_status", ""))
+
+    def _collect_dcf_page_state(self) -> dict:
+        return self.dcf_page.collect_state()
+
+    def _apply_dcf_page_state(self, state: dict):
+        self.dcf_page.apply_state(state)
+
+    def _collect_nwc_page_state(self) -> dict:
+        return self.nwc_page.collect_state()
+
+    def _apply_nwc_page_state(self, state: dict):
+        self.nwc_page.apply_state(state)
+
+    def _collect_debt_schedule_state(self) -> dict:
+        return self.debt_schedule_page.collect_state()
+
+    def _apply_debt_schedule_state(self, state: dict):
+        self.debt_schedule_page.apply_state(state)
+
+    def _collect_dashboard_page_state(self) -> dict:
+        dp = self.dashboard_page
+        return {
+            "gpc_weights": [w.text() for w in dp.gpc_weight_inputs],
+            "gt_weights": [w.text() for w in dp.gt_weight_inputs],
+            "recon_weights": {
+                name: widget.text()
+                for name, widget in dp.recon_weight_inputs.items()
+            },
+            "control_premium": dp.control_premium_input.text(),
+            "display_basis": dp.display_combo.currentText(),
+        }
+
+    def _apply_dashboard_page_state(self, state: dict):
+        if not state:
+            return
+        dp = self.dashboard_page
+
+        gpc_weights = state.get("gpc_weights", [])
+        for widget, text in zip(dp.gpc_weight_inputs, gpc_weights):
+            if text:
+                widget.setText(text)
+
+        gt_weights = state.get("gt_weights", [])
+        for widget, text in zip(dp.gt_weight_inputs, gt_weights):
+            if text:
+                widget.setText(text)
+
+        recon_weights = state.get("recon_weights", {})
+        for name, text in recon_weights.items():
+            widget = dp.recon_weight_inputs.get(name)
+            if widget is not None and text:
+                widget.setText(text)
+
+        if state.get("control_premium"):
+            dp.control_premium_input.setText(state["control_premium"])
+
+        if state.get("display_basis"):
+            idx = dp.display_combo.findText(state["display_basis"])
+            if idx >= 0:
+                dp.display_combo.setCurrentIndex(idx)
+
+    def _on_save_session(self):
+        inputs = self.home_page.get_project_inputs()
+        gt_state   = self._collect_gt_page_state()
+        gpc_state  = self._collect_gpc_page_state()
+        proj_state = self._collect_projection_page_state()
+        wacc_state = self._collect_wacc_page_state()
+        dcf_state = self._collect_dcf_page_state()
+        nwc_state = self._collect_nwc_page_state()
+        debt_state = self._collect_debt_schedule_state()
+        dashboard_state = self._collect_dashboard_page_state()
+        source_data_results = getattr(self.source_data_page, "all_results", {})
+
+        try:
+            path = save_session(
+                project_inputs=inputs,
+                private_financials=self._private_financials,
+                gt_page_state=gt_state,
+                gpc_page_state=gpc_state,
+                projection_page_state=proj_state,
+                wacc_page_state=wacc_state,
+                dcf_page_state=dcf_state,
+                nwc_page_state=nwc_state,
+                debt_page_state=debt_state,
+                dashboard_page_state=dashboard_state,
+                source_data_results=source_data_results,
+                filepath=self._current_session_path,
+            )
+            self._current_session_path = path
+            self.setWindowTitle(f"Canneberge — {path.stem}")
+            QMessageBox.information(
+                self, "Session Saved",
+                f"Session saved to:\n{path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Save Failed", f"Could not save session:\n{e}"
+            )
+
+    def _on_save_session_as(self):
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Save Session As", str(SESSION_DIR), "JSON files (*.json)"
+        )
+        if not path_str:
+            return
+
+        path = Path(path_str)
+        if path.suffix.lower() != ".json":
+            path = path.with_suffix(".json")
+
+        inputs = self.home_page.get_project_inputs()
+        gt_state   = self._collect_gt_page_state()
+        gpc_state  = self._collect_gpc_page_state()
+        proj_state = self._collect_projection_page_state()
+        wacc_state = self._collect_wacc_page_state()
+        dcf_state = self._collect_dcf_page_state()
+        debt_state = self._collect_debt_schedule_state()
+        nwc_state = self._collect_nwc_page_state()
+        dashboard_state = self._collect_dashboard_page_state()
+        source_data_results = getattr(self.source_data_page, "all_results", {})
+
+        try:
+            saved_path = save_session(
+                project_inputs=inputs,
+                private_financials=self._private_financials,
+                gt_page_state=gt_state,
+                gpc_page_state=gpc_state,
+                projection_page_state=proj_state,
+                wacc_page_state=wacc_state,
+                dcf_page_state=dcf_state,
+                nwc_page_state=nwc_state,
+                debt_page_state=debt_state,
+                dashboard_page_state=dashboard_state,
+                source_data_results=source_data_results,
+                filepath=path,
+            )
+            self._current_session_path = saved_path
+            self.setWindowTitle(f"Canneberge — {saved_path.stem}")
+            QMessageBox.information(
+                self, "Session Saved",
+                f"Session saved to:\n{saved_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Save Failed", f"Could not save session:\n{e}"
+            )
+
+    def _on_load_session(self):
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Load Session",
+            str(SESSION_DIR),
+            "JSON files (*.json)"
+        )
+        if not path_str:
+            return
+        filepath = Path(path_str)
+
+        try:
+            data = load_session(filepath)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Load Failed", f"Could not load session:\n{e}"
+            )
+            return
+
+        # 1. Restore UI and Page States instantly
+        self._apply_project_inputs_to_home(data["project_inputs_raw"])
+        self._private_financials = data["private_financials"]
+        self._apply_gt_page_state(data["gt_page_state"])
+        self._apply_gpc_page_state(data["gpc_page_state"])
+        self._apply_projection_page_state(data.get("projection_page_state", {}))
+        self._apply_wacc_page_state(data.get("wacc_page_state", {}))
+        self._apply_dcf_page_state(data.get("dcf_page_state", {}))
+        self._apply_nwc_page_state(data.get("nwc_page_state", {}))
+        self._apply_debt_schedule_state(data.get("debt_page_state", {}))
+        self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
+
+        # 2. Restore cached web results
+        cached_sources = data.get("source_data_results", {})
+        if cached_sources and hasattr(self.source_data_page, "all_results"):
+            self.source_data_page.all_results = cached_sources
+
+        # 3. Recalculate model in memory (0.05s)
+        self._on_source_data_refresh_finished()
+
+        self._current_session_path = filepath
+        self.setWindowTitle(f"Canneberge — {filepath.stem}")
+
+        # 4. Smart Boot Prompt
+        saved_at_str = data.get("saved_at", "Unknown")
+        if saved_at_str != "Unknown":
+            try:
+                dt = datetime.fromisoformat(saved_at_str)
+                saved_at_str = dt.strftime("%B %d, %Y at %I:%M %p")
+            except Exception:
+                pass
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Session Loaded")
+        msg_box.setText(f"Session '{filepath.stem}' loaded instantly.\nCached Data Saved: {saved_at_str}")
+        msg_box.setInformativeText("Choose how to update market data for this session:")
+
+        btn_live = msg_box.addButton("⚡ Update Live Marks (2s)", QMessageBox.ButtonRole.AcceptRole)
+        btn_full = msg_box.addButton("🌐 Full Web Refresh (40s)", QMessageBox.ButtonRole.ActionRole)
+        btn_skip = msg_box.addButton("📁 Use Cached Data Only (0s)", QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(btn_live)
+
+        msg_box.exec()
+
+        if msg_box.clickedButton() == btn_live:
+            self.source_data_page._on_refresh_live_marks_clicked()
+        elif msg_box.clickedButton() == btn_full:
+            self._trigger_web_refresh_with_progress()
+
+    def _trigger_web_refresh_with_progress(self):
+        """Runs the web scraping refresh with a modal progress dialog."""
+        from PyQt6.QtCore import QTimer
+
+        progress_dialog = QProgressDialog(
+            "Refreshing all sources...", None, 0, len(self.source_data_page.SOURCES), self
+        )
+        progress_dialog.setWindowTitle("Refreshing Market Data")
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setValue(0)
+
+        def _update_progress(completed: int, total: int, message: str):
+            progress_dialog.setValue(completed)
+            pct = int((completed / total) * 100) if total else 0
+            progress_dialog.setLabelText(
+                f"{message}\n\n{completed}/{total} sources complete ({pct}%)"
+            )
+
+        def _on_all_done():
+            try:
+                self.source_data_page.source_progress.disconnect(_update_progress)
+                self.source_data_page.all_sources_finished.disconnect(_on_all_done)
+            except TypeError:
+                pass
+
+            progress_dialog.setValue(len(self.source_data_page.SOURCES))
+            progress_dialog.close()
+
+            # Defer so the progress dialog fully tears down first;
+            # otherwise the confirmation can flash behind the main window.
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.information(
+                    self,
+                    "Full Refresh Complete",
+                    "All sources finished refreshing.\n\n"
+                    "StockAnalysis, MarketScreener, FRED, and Beta/Vol are up to date.",
+                ),
+            )
+
+        self.source_data_page.source_progress.connect(_update_progress)
+        self.source_data_page.all_sources_finished.connect(_on_all_done)
+
+        self.source_data_page._on_refresh_all_clicked()
+        progress_dialog.exec()

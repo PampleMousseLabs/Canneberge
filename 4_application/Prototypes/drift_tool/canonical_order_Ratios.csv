@@ -1,0 +1,39 @@
+Line Item,Avg Position,Confidence,Observations
+Market Capitalization,0.0,1.0,500
+Market Cap Growth,0.031,1.0,500
+Enterprise Value,0.06,1.0,472
+Last Close Price,0.089,1.0,447
+PE Ratio,0.122,1.0,500
+Price/FFO Ratio,0.144,1.0,23
+Forward PE,0.144,1.0,388
+PS Ratio,0.175,1.0,500
+Price/AFFO Ratio,0.18,1.0,23
+PB Ratio,0.207,1.0,500
+P/TBV Ratio,0.229,1.0,248
+P/FCF Ratio,0.248,1.0,438
+P/OCF Ratio,0.278,1.0,500
+PEG Ratio,0.307,1.0,386
+EV/Sales Ratio,0.329,1.0,472
+EV/EBITDA Ratio,0.359,1.0,471
+EV/EBIT Ratio,0.389,1.0,471
+EV/FCF Ratio,0.419,1.0,417
+Debt / Equity Ratio,0.44,1.0,501
+Debt / EBITDA Ratio,0.474,1.0,473
+Debt / FCF Ratio,0.501,1.0,439
+Net Debt / Equity Ratio,0.527,1.0,501
+Net Debt / EBITDA Ratio,0.56,1.0,472
+Net Debt / FCF Ratio,0.586,1.0,459
+Asset Turnover,0.623,1.0,483
+Inventory Turnover,0.646,1.0,312
+Quick Ratio,0.66,1.0,483
+Current Ratio,0.691,1.0,483
+Return on Equity (ROE),0.72,1.0,485
+Return on Assets (ROA),0.751,1.0,501
+Return on Invested Capital (ROIC),0.787,1.0,444
+Return on Capital Employed (ROCE),0.814,1.0,424
+Earnings Yield,0.833,1.0,500
+FCF Yield,0.867,1.0,458
+Dividend Yield,0.875,1.0,405
+Payout Ratio,0.906,1.0,410
+Buyback Yield / Dilution,0.943,1.0,500
+Total Shareholder Return,0.969,1.0,409

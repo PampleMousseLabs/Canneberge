@@ -1,0 +1,90 @@
+Line Item,Example Ticker,Seen Count
+Net Income,mmm,501
+Depreciation & Amortization,mmm,491
+Loss (Gain) From Sale of Assets,mmm,253
+Asset Writedown & Restructuring Costs,mmm,259
+Stock-Based Compensation,mmm,411
+Other Operating Activities,mmm,496
+Change in Accounts Receivable,mmm,447
+Change in Inventory,mmm,316
+Change in Accounts Payable,mmm,439
+Change in Income Taxes,mmm,218
+Change in Other Net Operating Assets,mmm,483
+Operating Cash Flow,mmm,501
+Operating Cash Flow Growth,mmm,492
+Capital Expenditures,mmm,456
+"Sale of Property, Plant & Equipment",mmm,235
+Divestitures,mmm,205
+Investment in Securities,mmm,376
+Other Investing Activities,mmm,433
+Investing Cash Flow,mmm,501
+Short-Term Debt Issued,mmm,256
+Long-Term Debt Issued,mmm,459
+Total Debt Issued,mmm,314
+Short-Term Debt Repaid,mmm,246
+Long-Term Debt Repaid,mmm,459
+Total Debt Repaid,mmm,318
+Net Debt Issued (Repaid),mmm,488
+Issuance of Common Stock,mmm,372
+Repurchase of Common Stock,mmm,446
+Common Dividends Paid,mmm,392
+Other Financing Activities,mmm,481
+Financing Cash Flow,mmm,473
+Foreign Exchange Rate Adjustments,mmm,372
+Miscellaneous Cash Flow Adjustments,mmm,53
+Net Cash Flow,mmm,501
+Free Cash Flow,mmm,459
+Free Cash Flow Growth,mmm,459
+Free Cash Flow Margin,mmm,459
+Free Cash Flow Per Share,mmm,458
+Levered Free Cash Flow,mmm,473
+Unlevered Free Cash Flow,mmm,473
+Cash Interest Paid,mmm,468
+Cash Income Tax Paid,mmm,491
+Change in Working Capital,mmm,473
+Cash Acquisitions,aos,380
+Other Amortization,acn,206
+Change in Unearned Revenue,acn,151
+Loss (Gain) From Sale of Investments,adbe,193
+Loss (Gain) on Equity Investments,amd,123
+Loss (Gain) on Sale of Assets,aes,19
+Loss (Gain) on Sale of Investments,aes,13
+Asset Writedown,aes,34
+Gain (Loss) on Sale of Investments,afl,46
+Change in Insurance Reserves / Liabilities,afl,21
+Repurchases of Common Stock,afl,21
+Sale (Purchase) of Intangibles,akam,87
+Preferred Dividends Paid,alb,56
+Dividends Paid,alb,54
+Gain (Loss) on Sale of Assets,are,41
+Income (Loss) on Equity Investments,are,20
+Acquisition of Real Estate Assets,are,27
+Sale of Real Estate Assets,are,25
+Net Sale / Acq. of Real Estate Assets,are,27
+Investment in Marketable & Equity Securities,are,24
+Total Dividends Paid,are,45
+Reinsurance Recoverable,all,8
+Issuance of Preferred Stock,all,3
+Repurchases of Preferred Stock,all,5
+Nuclear Fuel Expenditures,aee,4
+Contributions to Nuclear Demissioning Trust,aee,23
+Provision for Credit Losses,axp,19
+Net Decrease (Increase) in Loans Originated / Sold - Operating,axp,10
+Net Decrease (Increase) in Loans Originated / Sold - Investing,axp,19
+Preferred Share Repurchases,axp,22
+Restructuring Activities,amt,5
+Net Cash from Discontinued Operations,amt,13
+Cash Acquisition,amt,17
+"Depreciation & Amortization, Total",apo,9
+Gain (Loss) On Sale of Investments,apo,6
+Change in Deferred Taxes,acgl,2
+Provision & Write-off of Bad Debts,t,81
+Preferred Stock Issued,bac,17
+Net Increase (Decrease) in Deposit Accounts,bac,18
+Total Asset Writedown,bny,6
+Change in Trading Asset Securities,bny,10
+"Sale of Property, Plant and Equipment",bny,4
+Accrued Interest Receivable,cof,6
+Sale (Purchase) of Real Estate,cbre,9
+Common & Preferred Dividends Paid,dlr,6
+Purchase / Sale of Intangibles,fitb,4

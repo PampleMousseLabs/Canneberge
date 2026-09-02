@@ -1,0 +1,39 @@
+Line Item,Example Ticker,Seen Count
+Market Capitalization,mmm,500
+Market Cap Growth,mmm,500
+Enterprise Value,mmm,472
+Last Close Price,mmm,447
+PE Ratio,mmm,500
+Forward PE,mmm,388
+PS Ratio,mmm,500
+PB Ratio,mmm,500
+P/FCF Ratio,mmm,438
+P/OCF Ratio,mmm,500
+PEG Ratio,mmm,386
+EV/Sales Ratio,mmm,472
+EV/EBITDA Ratio,mmm,471
+EV/EBIT Ratio,mmm,471
+EV/FCF Ratio,mmm,417
+Debt / Equity Ratio,mmm,501
+Debt / EBITDA Ratio,mmm,473
+Debt / FCF Ratio,mmm,439
+Net Debt / Equity Ratio,mmm,501
+Net Debt / EBITDA Ratio,mmm,472
+Net Debt / FCF Ratio,mmm,459
+Asset Turnover,mmm,483
+Inventory Turnover,mmm,312
+Quick Ratio,mmm,483
+Current Ratio,mmm,483
+Return on Equity (ROE),mmm,485
+Return on Assets (ROA),mmm,501
+Return on Invested Capital (ROIC),mmm,444
+Return on Capital Employed (ROCE),mmm,424
+Earnings Yield,mmm,500
+FCF Yield,mmm,458
+Dividend Yield,mmm,405
+Payout Ratio,mmm,410
+Buyback Yield / Dilution,mmm,500
+Total Shareholder Return,mmm,409
+P/TBV Ratio,aos,248
+Price/FFO Ratio,are,23
+Price/AFFO Ratio,are,23

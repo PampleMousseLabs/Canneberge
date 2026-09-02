@@ -1,0 +1,76 @@
+Line Item,Zone Start,Zone End,Avg Position,Confidence,Observations
+Free Cash Flow,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.103,1.0,459
+Free Cash Flow Growth,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.206,1.0,459
+Free Cash Flow Margin,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.309,1.0,459
+Free Cash Flow Per Share,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.411,1.0,458
+Levered Free Cash Flow,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.48,1.0,473
+Unlevered Free Cash Flow,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.586,1.0,473
+Cash Interest Paid,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.682,1.0,468
+Cash Income Tax Paid,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.791,1.0,491
+Change in Working Capital,Net Cash Flow,__BOTTOM_OF_STATEMENT__,0.894,1.0,473
+Short-Term Debt Issued,__FINANCING_START__,Financing Cash Flow,0.087,1.0,200
+Long-Term Debt Issued,__FINANCING_START__,Financing Cash Flow,0.15,1.0,363
+Total Debt Issued,__FINANCING_START__,Financing Cash Flow,0.245,1.0,250
+Short-Term Debt Repaid,__FINANCING_START__,Financing Cash Flow,0.336,1.0,202
+Long-Term Debt Repaid,__FINANCING_START__,Financing Cash Flow,0.353,1.0,377
+Issuance of Preferred Stock,__FINANCING_START__,Financing Cash Flow,0.455,1.0,1
+Total Debt Repaid,__FINANCING_START__,Financing Cash Flow,0.484,1.0,251
+Net Debt Issued (Repaid),__FINANCING_START__,Financing Cash Flow,0.514,1.0,390
+Repurchases of Common Stock,__FINANCING_START__,Financing Cash Flow,0.539,1.0,5
+Repurchases of Preferred Stock,__FINANCING_START__,Financing Cash Flow,0.551,1.0,2
+Preferred Stock Issued,__FINANCING_START__,Financing Cash Flow,0.56,1.0,12
+Issuance of Common Stock,__FINANCING_START__,Financing Cash Flow,0.598,1.0,305
+Preferred Share Repurchases,__FINANCING_START__,Financing Cash Flow,0.627,1.0,10
+Repurchase of Common Stock,__FINANCING_START__,Financing Cash Flow,0.691,1.0,376
+Preferred Dividends Paid,__FINANCING_START__,Financing Cash Flow,0.739,1.0,20
+Common Dividends Paid,__FINANCING_START__,Financing Cash Flow,0.789,1.0,309
+Dividends Paid,__FINANCING_START__,Financing Cash Flow,0.815,1.0,9
+Total Dividends Paid,__FINANCING_START__,Financing Cash Flow,0.82,1.0,16
+Net Increase (Decrease) in Deposit Accounts,__FINANCING_START__,Financing Cash Flow,0.875,1.0,13
+Other Financing Activities,__FINANCING_START__,Financing Cash Flow,0.889,1.0,384
+Operating Cash Flow Growth,__INVESTING_START__,Investing Cash Flow,0.153,1.0,433
+Capital Expenditures,__INVESTING_START__,Investing Cash Flow,0.304,1.0,425
+"Sale of Property, Plant and Equipment",__INVESTING_START__,Investing Cash Flow,0.335,1.0,4
+"Sale of Property, Plant & Equipment",__INVESTING_START__,Investing Cash Flow,0.428,1.0,221
+Cash Acquisitions,__INVESTING_START__,Investing Cash Flow,0.504,1.0,353
+Nuclear Fuel Expenditures,__INVESTING_START__,Investing Cash Flow,0.604,1.0,4
+Divestitures,__INVESTING_START__,Investing Cash Flow,0.613,1.0,198
+Sale (Purchase) of Intangibles,__INVESTING_START__,Investing Cash Flow,0.627,1.0,82
+Purchase / Sale of Intangibles,__INVESTING_START__,Investing Cash Flow,0.627,1.0,4
+Sale (Purchase) of Real Estate,__INVESTING_START__,Investing Cash Flow,0.64,1.0,9
+Contributions to Nuclear Demissioning Trust,__INVESTING_START__,Investing Cash Flow,0.706,1.0,23
+Investment in Securities,__INVESTING_START__,Investing Cash Flow,0.714,1.0,343
+Net Decrease (Increase) in Loans Originated / Sold - Investing,__INVESTING_START__,Investing Cash Flow,0.718,1.0,19
+Other Investing Activities,__INVESTING_START__,Investing Cash Flow,0.85,1.0,375
+Foreign Exchange Rate Adjustments,__NET_START__,Net Cash Flow,0.476,1.0,358
+Miscellaneous Cash Flow Adjustments,__NET_START__,Net Cash Flow,0.66,1.0,53
+Net Income,__OPERATING_START__,Operating Cash Flow,0.086,1.0,392
+Depreciation & Amortization,__OPERATING_START__,Operating Cash Flow,0.171,1.0,388
+"Depreciation & Amortization, Total",__OPERATING_START__,Operating Cash Flow,0.238,1.0,4
+Other Amortization,__OPERATING_START__,Operating Cash Flow,0.242,1.0,160
+Loss (Gain) From Sale of Assets,__OPERATING_START__,Operating Cash Flow,0.274,1.0,227
+Loss (Gain) on Sale of Assets,__OPERATING_START__,Operating Cash Flow,0.307,1.0,14
+Gain (Loss) on Sale of Assets,__OPERATING_START__,Operating Cash Flow,0.317,1.0,5
+Asset Writedown & Restructuring Costs,__OPERATING_START__,Operating Cash Flow,0.329,1.0,230
+Gain (Loss) On Sale of Investments,__OPERATING_START__,Operating Cash Flow,0.357,1.0,4
+Loss (Gain) From Sale of Investments,__OPERATING_START__,Operating Cash Flow,0.372,1.0,168
+Loss (Gain) on Sale of Investments,__OPERATING_START__,Operating Cash Flow,0.376,1.0,9
+Gain (Loss) on Sale of Investments,__OPERATING_START__,Operating Cash Flow,0.379,1.0,7
+Asset Writedown,__OPERATING_START__,Operating Cash Flow,0.381,1.0,11
+Restructuring Activities,__OPERATING_START__,Operating Cash Flow,0.39,1.0,2
+Loss (Gain) on Equity Investments,__OPERATING_START__,Operating Cash Flow,0.424,1.0,102
+Total Asset Writedown,__OPERATING_START__,Operating Cash Flow,0.438,1.0,4
+Stock-Based Compensation,__OPERATING_START__,Operating Cash Flow,0.444,1.0,333
+Provision for Credit Losses,__OPERATING_START__,Operating Cash Flow,0.489,1.0,11
+Provision & Write-off of Bad Debts,__OPERATING_START__,Operating Cash Flow,0.501,1.0,77
+Net Decrease (Increase) in Loans Originated / Sold - Operating,__OPERATING_START__,Operating Cash Flow,0.563,1.0,4
+Other Operating Activities,__OPERATING_START__,Operating Cash Flow,0.575,1.0,390
+Change in Accounts Receivable,__OPERATING_START__,Operating Cash Flow,0.616,1.0,366
+Change in Trading Asset Securities,__OPERATING_START__,Operating Cash Flow,0.619,1.0,9
+Accrued Interest Receivable,__OPERATING_START__,Operating Cash Flow,0.648,1.0,4
+Change in Inventory,__OPERATING_START__,Operating Cash Flow,0.683,1.0,280
+Change in Accounts Payable,__OPERATING_START__,Operating Cash Flow,0.759,1.0,367
+Change in Unearned Revenue,__OPERATING_START__,Operating Cash Flow,0.803,1.0,131
+Change in Income Taxes,__OPERATING_START__,Operating Cash Flow,0.829,1.0,185
+Change in Other Net Operating Assets,__OPERATING_START__,Operating Cash Flow,0.903,1.0,384
+Net Cash from Discontinued Operations,__OPERATING_START__,Operating Cash Flow,0.918,1.0,10
