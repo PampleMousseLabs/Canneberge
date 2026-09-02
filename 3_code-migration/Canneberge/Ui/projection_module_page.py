@@ -913,17 +913,24 @@ class ProjectionModulePage(QDialog):
                 self._set_label("sbc", period, _fmt_dollars(sbc))
                 self._set_label("other_amort", period, _fmt_dollars(other_amort))
 
-                # --- EBITDA → NI bridge ---
-                # pretax_before_adj = EBITDA − D&A − Other Amort − SBC
-                # +Other Adjustments (sign: + lifts NI)
-                # Taxes = subject_tax_rate × (pretax_before_adj + OtherAdj)
-                # NI = pretax_before_adj + OtherAdj − Taxes
-                #
-                # MS-covered: NI locked to analyst; OtherAdj is the plug.
-                # Later years: OtherAdj user-typed (default 0); NI computed.
-                
-                tax_rate = getattr(
-                    self._get_project_inputs(), "subject_tax_rate", None
+                # --- Net Income ---
+                # Analyst-wins for MS-covered periods; user $ or margin %
+                # (two-way bound, same pattern as Revenue) beyond that.
+                ni = self._resolve_net_income(period, resolved_revenue)
+                ni_margin = _div(ni, rev)
+                self._display_ni_margin(period, ni_margin)
+                self._set_label("net_income", period, _fmt_dollars(ni))
+
+                self._resolved[period] = {
+                    "revenue": rev,
+                    "gross_profit": gp,
+                    "ebitda": ebitda,
+                    "da": da,
+                    "sbc": sbc,
+                    "other_amort": other_amort,
+                    "capex": capex,
+                    "net_income": ni,
+                }
 
         finally:
             self._recalc_guard = False
