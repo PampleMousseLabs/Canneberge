@@ -1,6 +1,6 @@
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, Input, Output, State, callback, dash_table, ALL
+from dash import html, dcc, Input, Output, State, callback, dash_table, ALL, no_update, ctx
 import yfinance as yf
 
 dash.register_page(__name__, path="/", name="Home & Inputs")
@@ -80,29 +80,29 @@ layout = dbc.Container([
                 dbc.CardHeader(html.H5("GENERAL", className="text-light mb-0")),
                 dbc.CardBody([
                     dbc.Label("Client"),
-                    dbc.Input(id="input-client", value="Ted & Co.", className="mb-2", debounce=True, persistence=True, persistence_type="session"),
+                    dbc.Input(id="input-client", value="Ted & Co.", className="mb-2", debounce=True),
 
                     dbc.Label("Subject Company Name"),
-                    dbc.Input(id="input-subject-name", value="COMPANY NAME", className="mb-2", debounce=True, persistence=True, persistence_type="session"),
+                    dbc.Input(id="input-subject-name", value="COMPANY NAME", className="mb-2", debounce=True),
 
                     dbc.Label("Main Title"),
-                    dbc.Input(id="input-main-title", value="Sensitivity Analysis of COMPANY NAME", className="mb-2", debounce=True, persistence=True, persistence_type="session"),
+                    dbc.Input(id="input-main-title", value="Sensitivity Analysis of COMPANY NAME", className="mb-2", debounce=True),
 
                     dbc.Label("Valuation Date"),
-                    dbc.Input(id="input-val-date", value="7/21/2026", className="mb-2", debounce=True, persistence=True, persistence_type="session"),
+                    dbc.Input(id="input-val-date", value="7/21/2026", className="mb-2", debounce=True),
 
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Numeric Scale"),
                             dbc.Select(id="select-numeric-scale",
                                        options=["Millions", "Thousands", "Actual"],
-                                       value="Millions", persistence=True, persistence_type="session")
+                                       value="Millions")
                         ], md=6),
                         dbc.Col([
                             dbc.Label("Draft/Final"),
                             dbc.Select(id="select-draft-final",
                                        options=["Draft", "Final"],
-                                       value="Draft", persistence=True, persistence_type="session")
+                                       value="Draft")
                         ], md=6),
                     ], className="mb-2"),
 
@@ -111,19 +111,19 @@ layout = dbc.Container([
                             dbc.Label("Standard of Value"),
                             dbc.Select(id="select-standard-val",
                                        options=["Fair Market Value", "Investment Value", "Intrinsic Value"],
-                                       value="Fair Market Value", persistence=True, persistence_type="session")
+                                       value="Fair Market Value")
                         ], md=4),
                         dbc.Col([
                             dbc.Label("Taxable Status"),
                             dbc.Select(id="select-taxable",
                                        options=["Taxable/Nontaxable", "Taxable", "Nontaxable"],
-                                       value="Taxable/Nontaxable", persistence=True, persistence_type="session")
+                                       value="Taxable/Nontaxable")
                         ], md=4),
                         dbc.Col([
                             dbc.Label("Basis of Value"),
                             dbc.Select(id="select-basis-val",
                                        options=["BEV / Equity Value", "Business Enterprise Value", "Equity Value"],
-                                       value="BEV / Equity Value", persistence=True, persistence_type="session")
+                                       value="BEV / Equity Value")
                         ], md=4),
                     ])
                 ])
@@ -139,31 +139,30 @@ layout = dbc.Container([
                         id="select-company-status",
                         options=["Private Company", "Publicly Traded"],
                         value="Private Company",
-                        className="mb-2",
-                        persistence=True, persistence_type="session"
+                        className="mb-2"
                     ),
 
                     html.Div(id="div-subject-ticker", children=[
                         dbc.Label("Subject Ticker"),
-                        dbc.Input(id="input-subject-ticker", value="SPCX", className="mb-2", debounce=True, persistence=True, persistence_type="session")
+                        dbc.Input(id="input-subject-ticker", value="SPCX", className="mb-2", debounce=True)
                     ], style={"display": "none"}),
 
                     dbc.Label("Tax Rate"),
-                    dbc.Input(id="input-tax-rate", value="21%", className="mb-2", debounce=True, persistence=True, persistence_type="session"),
+                    dbc.Input(id="input-tax-rate", value="21%", className="mb-2", debounce=True),
 
                     dbc.Row([
                         dbc.Col([dbc.Label("Last Fiscal Year"),
-                                 dbc.Input(id="input-lfy", value="12/31/2025", className="mb-2", debounce=True, persistence=True, persistence_type="session")], md=6),
+                                 dbc.Input(id="input-lfy", value="12/31/2025", className="mb-2", debounce=True)], md=6),
                         dbc.Col([dbc.Label("Last Fiscal Quarter"),
-                                 dbc.Input(id="input-fq", value="3/31/2026", className="mb-2", debounce=True, persistence=True, persistence_type="session")], md=6),
+                                 dbc.Input(id="input-fq", value="3/31/2026", className="mb-2", debounce=True)], md=6),
                     ]),
                     dbc.Row([
                         dbc.Col([dbc.Label("Next FY End"),
-                                 dbc.Input(id="input-nfy", value="12/31/2026", className="mb-2", debounce=True, persistence=True, persistence_type="session")], md=4),
+                                 dbc.Input(id="input-nfy", value="12/31/2026", className="mb-2", debounce=True)], md=4),
                         dbc.Col([dbc.Label("Next FY End + 1"),
-                                 dbc.Input(id="input-nfy1", value="12/31/2027", className="mb-2", debounce=True, persistence=True, persistence_type="session")], md=4),
+                                 dbc.Input(id="input-nfy1", value="12/31/2027", className="mb-2", debounce=True)], md=4),
                         dbc.Col([dbc.Label("Next FY End + 2"),
-                                 dbc.Input(id="input-nfy2", value="12/31/2028", className="mb-2", debounce=True, persistence=True, persistence_type="session")], md=4),
+                                 dbc.Input(id="input-nfy2", value="12/31/2028", className="mb-2", debounce=True)], md=4),
                     ]),
                 ])
             ], color="secondary", outline=True, className="mb-4")
@@ -191,7 +190,6 @@ layout = dbc.Container([
                                     placeholder="Ticker...",
                                     size="sm",
                                     debounce=True,
-                                    persistence=True, persistence_type="session",
                                     style={"width": "110px"}
                                 )),
                                 html.Td(dbc.Input(
@@ -199,8 +197,7 @@ layout = dbc.Container([
                                     value="",
                                     placeholder="Company Name",
                                     readonly=True,
-                                    size="sm",
-                                    persistence=True, persistence_type="session"
+                                    size="sm"
                                 ))
                             ]) for i in range(15)
                         ])
@@ -226,7 +223,6 @@ layout = dbc.Container([
                         ],
                         data=DEFAULT_GT,
                         editable=True,
-                        persistence=True, persistence_type="session",
                         style_header={"backgroundColor": "#2b3e50", "color": "white", "fontWeight": "bold"},
                         style_cell={"backgroundColor": "#1e1e1e", "color": "white", "fontSize": "12px"},
                         style_table={"overflowX": "auto"},
@@ -247,11 +243,11 @@ layout = dbc.Container([
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Historical Years (0-5)"),
-                            dbc.Input(id="input-hist-years", type="number", min=0, max=5, value=5, debounce=True, persistence=True, persistence_type="session")
+                            dbc.Input(id="input-hist-years", type="number", min=0, max=5, value=5, debounce=True)
                         ], md=6),
                         dbc.Col([
                             dbc.Label("Projection Years (1-20)"),
-                            dbc.Input(id="input-proj-years", type="number", min=1, max=20, value=5, debounce=True, persistence=True, persistence_type="session")
+                            dbc.Input(id="input-proj-years", type="number", min=1, max=20, value=5, debounce=True)
                         ], md=6),
                     ])
                 ])
@@ -276,19 +272,26 @@ def toggle_subject_ticker(status):
 @callback(
     Output({"type": "gpc-name-input", "index": ALL}, "value"),
     Input({"type": "gpc-ticker-input", "index": ALL}, "value"),
+    State("session-store", "data")
 )
-def update_gpc_company_names(tickers):
+def update_gpc_company_names(tickers, session_data):
+    session_data = session_data or {}
+    saved_names = session_data.get("gpc_company_names", {})
     names = []
     for ticker in tickers:
         t = (ticker or "").strip().upper()
         if not t:
             names.append("")
             continue
-        try:
-            info = yf.Ticker(t).info
-            names.append(info.get("longName") or info.get("shortName") or t)
-        except Exception:
-            names.append("")
+        # Use cache first to prevent yfinance rate-limiting / load delays
+        if t in saved_names and saved_names[t]:
+            names.append(saved_names[t])
+        else:
+            try:
+                info = yf.Ticker(t).info
+                names.append(info.get("longName") or info.get("shortName") or t)
+            except Exception:
+                names.append("")
     return names
 
 
@@ -333,3 +336,90 @@ def autosync_session(
     n = len(data["gpc_tickers"])
     status_text = f"Live session updated • {data['subject_company_name']} • {n} GPC tickers"
     return data, status_text
+
+
+# DECOUPLED LOAD HYDRATION: Runs ONLY when a session is loaded or started fresh,
+# preventing active typing feedback loops or cursor jumps.
+@callback(
+    Output("input-client", "value"),
+    Output("input-subject-name", "value"),
+    Output("input-main-title", "value"),
+    Output("input-val-date", "value"),
+    Output("select-numeric-scale", "value"),
+    Output("select-draft-final", "value"),
+    Output("select-standard-val", "value"),
+    Output("select-taxable", "value"),
+    Output("select-basis-val", "value"),
+    Output("select-company-status", "value"),
+    Output("input-subject-ticker", "value"),
+    Output("input-tax-rate", "value"),
+    Output("input-lfy", "value"),
+    Output("input-fq", "value"),
+    Output("input-nfy", "value"),
+    Output("input-nfy1", "value"),
+    Output("input-nfy2", "value"),
+    Output({"type": "gpc-ticker-input", "index": ALL}, "value"),
+    Output("gt-transactions-table", "data"),
+    Output("input-hist-years", "value"),
+    Output("input-proj-years", "value"),
+    Input("session-load-timestamp", "data"),
+    State("session-store", "data"),
+)
+def hydrate_home_page_from_load(load_timestamp, session_data):
+    # If the user refreshes their browser and there's a cached session, we want
+    # it to populate. If there's no data, let layout defaults stand.
+    # Note: 21 items returned here to match the 21 outputs exactly.
+    if not session_data:
+        return [no_update] * 21
+
+    try:
+        # Map scalar values safely
+        client = session_data.get("client", "Ted & Co.")
+        subj_name = session_data.get("subject_company_name", "COMPANY NAME")
+        main_title = session_data.get("main_title", "")
+        val_date = session_data.get("valuation_date", "7/21/2026")
+        scale = session_data.get("numeric_scale", "Millions")
+        draft = session_data.get("draft_final", "Draft")
+        standard_val = session_data.get("standard_of_value", "Fair Market Value")
+        taxable = session_data.get("taxable_nontaxable", "Taxable/Nontaxable")
+        basis_val = session_data.get("basis_of_value", "BEV / Equity Value")
+        status = session_data.get("company_status", "Private Company")
+        subj_ticker = session_data.get("subject_ticker", "SPCX")
+        
+        # Render Tax Rate safely
+        tax_rate = session_data.get("subject_tax_rate", 0.21)
+        if isinstance(tax_rate, float):
+            tax_rate = f"{tax_rate * 100:.1f}%" if tax_rate <= 1.0 else f"{tax_rate}%"
+
+        lfy = session_data.get("last_fiscal_year", "12/31/2025")
+        fq = session_data.get("last_fiscal_quarter", "3/31/2026")
+        nfy = session_data.get("next_fiscal_year", "12/31/2026")
+        nfy1 = session_data.get("nfy_1", "12/31/2027")
+        nfy2 = session_data.get("nfy_2", "12/31/2028")
+
+        # Map tickers (skips yfinance re-scraping)
+        saved_tickers = session_data.get("gpc_tickers", [])
+        
+        gpc_tickers_out = []
+        for i in range(15):
+            if i < len(saved_tickers):
+                gpc_tickers_out.append(saved_tickers[i])
+            else:
+                gpc_tickers_out.append("")
+
+        # Map GT Transactions table
+        gt_transactions = session_data.get("gt_transactions", DEFAULT_GT)
+
+        hist_yrs = session_data.get("historical_years", 5)
+        proj_yrs = session_data.get("projection_years", 5)
+
+        return (
+            client, subj_name, main_title, val_date, scale, draft, standard_val, taxable, basis_val,
+            status, subj_ticker, tax_rate, lfy, fq, nfy, nfy1, nfy2,
+            gpc_tickers_out, gt_transactions, hist_yrs, proj_yrs
+        )
+    except Exception as e:
+        import traceback
+        print("❌ Error during Home Page Hydration Callback:")
+        traceback.print_exc()
+        return [no_update] * 21

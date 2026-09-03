@@ -6,6 +6,14 @@ import json
 
 from Canneberge.Services.source_data_service import SourceDataService
 from Canneberge.app_state import ProjectInputs, Transaction
+from web.lib.ui_layout import (
+    grid_table_style,
+    grid_header_style,
+    grid_cell_style,
+    grid_filter_style,
+    grid_data_style,
+)
+from web.lib.ui_layout import grid_table_style
 
 dash.register_page(__name__, path="/source-data", name="Source Data")
 
@@ -62,9 +70,7 @@ def dict_to_project_inputs(data: dict) -> ProjectInputs:
 # PAGE LAYOUT
 # -------------------------------------------------------------
 layout = dbc.Container([
-    # Store for fetched source data results
-    dcc.Store(id="source-results-store", storage_type="session"),
-
+    
     # 1. TOOLBAR: REFRESH BUTTONS
     dbc.Card([
         dbc.CardBody([
@@ -158,12 +164,20 @@ layout = dbc.Container([
         ])
     ], color="secondary", outline=True, className="mb-3"),
 
-    # Status / Progress Notification Bar
-    dcc.Loading(
-        id="loading-source-execution",
-        type="circle",
-        children=html.Div(id="source-status-bar", className="mb-3")
-    ),
+    # Progress and Status notification bar
+    html.Div([
+        dbc.Collapse(
+            id="progress-collapse",
+            is_open=False,
+            children=dbc.Card([
+                dbc.CardBody([
+                    html.Div(id="progress-label", className="fw-bold text-info mb-1", children="Initializing harvest..."),
+                    dbc.Progress(id="source-progress-bar", value=0, max=100, striped=True, animated=True, color="info", style={"height": "18px"}),
+                ])
+            ], color="dark", outline=True, className="mb-3 border-info")
+        ),
+        html.Div(id="source-status-bar", className="mb-3")
+    ]),
 
     # 3. RESULTS TABLE DISPLAY
     dbc.Card([
@@ -191,7 +205,7 @@ def toggle_view_controls(selected_source):
     return show_sa, show_bv
 
 
-# Callback 2: Execute Source Harvests & Store Results
+# Callback 2: Execute Source Harvests in the Background with Real-Time Progress Bar
 @callback(
     Output("source-results-store", "data"),
     Output("source-status-bar", "children"),
@@ -204,9 +218,26 @@ def toggle_view_controls(selected_source):
     State("session-store", "data"),
     State("source-results-store", "data"),
     State("input-vol-term", "value"),
+    background=True,
+    # This disables refresh controls and shows the progress collapse while running
+    running=[
+        (Output("btn-refresh-all", "disabled"), True, False),
+        (Output("btn-refresh-live-marks", "disabled"), True, False),
+        (Output("btn-ref-sa", "disabled"), True, False),
+        (Output("btn-ref-ms", "disabled"), True, False),
+        (Output("btn-ref-fred", "disabled"), True, False),
+        (Output("btn-ref-bv", "disabled"), True, False),
+        (Output("progress-collapse", "is_open"), True, False),
+    ],
+    # Maps background progress updates directly into the layout's progress elements
+    progress=[
+        Output("source-progress-bar", "value"),
+        Output("source-progress-bar", "max"),
+        Output("progress-label", "children"),
+    ],
     prevent_initial_call=True
 )
-def execute_source_refresh(btn_all, btn_live, btn_sa, btn_ms, btn_fred, btn_bv,
+def execute_source_refresh(set_progress, btn_all, btn_live, btn_sa, btn_ms, btn_fred, btn_bv,
                            session_data, existing_results, vol_term):
     triggered_id = ctx.triggered_id
     if not triggered_id or not session_data:
@@ -217,41 +248,75 @@ def execute_source_refresh(btn_all, btn_live, btn_sa, btn_ms, btn_fred, btn_bv,
         return dash.no_update, dbc.Alert("No public tickers configured. Add tickers on the Home page first.", color="warning")
 
     results_acc = existing_results or {}
-    progress_logs = []
-
-    def log_progress(msg):
-        progress_logs.append(msg)
-
-    service = SourceDataService(project_inputs=project_inputs, progress_callback=log_progress)
+    
+    # Establish a dynamic sub-progress logger
+    def create_progress_logger(step_index, total_steps, base_msg):
+        def log_progress(msg):
+            # Formulate progress as percentage matching current execution block
+            pct = int((step_index / total_steps) * 100)
+            set_progress((pct, 100, f"{base_msg} • {msg}"))
+        return log_progress
 
     try:
         if triggered_id == "btn-refresh-all":
+            steps = 4
+            
+            # Step 1: StockAnalysis
+            logger = create_progress_logger(0, steps, "1/4: Scraping StockAnalysis financials")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["stockanalysis"] = service.refresh_stockanalysis()
+            
+            # Step 2: MarketScreener
+            logger = create_progress_logger(1, steps, "2/4: Scraping MarketScreener consensus")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["marketscreener"] = service.refresh_marketscreener()
+            
+            # Step 3: FRED
+            logger = create_progress_logger(2, steps, "3/4: Fetching macro rates from FRED")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["fred"] = service.refresh_fred()
+            
+            # Step 4: Beta/Vol
+            logger = create_progress_logger(3, steps, "4/4: Computing historical beta/volatility")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["beta_vol"] = service.refresh_beta_vol(vol_term=float(vol_term or 3.0))
+            
+            set_progress((100, 100, "✅ All sources harvested!"))
             status_alert = dbc.Alert("✅ All sources refreshed successfully!", color="success", dismissable=True)
 
         elif triggered_id == "btn-refresh-live-marks":
+            set_progress((10, 100, "Updating live market marks via yfinance..."))
             existing_sa = results_acc.get("stockanalysis", {})
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=lambda m: set_progress((40, 100, f"Live marks: {m}")))
             live_out = service.refresh_live_marks(existing_sa_results=existing_sa)
+            
             results_acc["stockanalysis"] = live_out.get("stockanalysis", existing_sa)
             results_acc["fred"] = live_out.get("fred", results_acc.get("fred", []))
+            
+            set_progress((100, 100, "⚡ Marks & FRED rates updated!"))
             status_alert = dbc.Alert("⚡ Live Market Marks & FRED rates updated successfully!", color="success", dismissable=True)
 
         elif triggered_id == "btn-ref-sa":
+            logger = create_progress_logger(0, 1, "Scraping StockAnalysis")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["stockanalysis"] = service.refresh_stockanalysis()
             status_alert = dbc.Alert("✅ StockAnalysis financials refreshed!", color="success", dismissable=True)
 
         elif triggered_id == "btn-ref-ms":
+            logger = create_progress_logger(0, 1, "Scraping MarketScreener")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["marketscreener"] = service.refresh_marketscreener()
             status_alert = dbc.Alert("✅ MarketScreener estimates refreshed!", color="success", dismissable=True)
 
         elif triggered_id == "btn-ref-fred":
+            logger = create_progress_logger(0, 1, "Fetching FRED")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["fred"] = service.refresh_fred()
             status_alert = dbc.Alert("✅ FRED macroeconomic rates refreshed!", color="success", dismissable=True)
 
         elif triggered_id == "btn-ref-bv":
+            logger = create_progress_logger(0, 1, "Computing Beta/Vol")
+            service = SourceDataService(project_inputs=project_inputs, progress_callback=logger)
             results_acc["beta_vol"] = service.refresh_beta_vol(vol_term=float(vol_term or 3.0))
             status_alert = dbc.Alert("✅ Beta & Volatility metrics computed!", color="success", dismissable=True)
 
@@ -261,6 +326,8 @@ def execute_source_refresh(btn_all, btn_live, btn_sa, btn_ms, btn_fred, btn_bv,
         return results_acc, status_alert
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         err_alert = dbc.Alert(f"❌ Error during harvest execution: {str(e)}", color="danger", dismissable=True)
         return dash.no_update, err_alert
 
@@ -333,51 +400,24 @@ def render_results_table(results_data, source_view, statement_view, session_data
     table = dash_table.DataTable(
         columns=[{"name": c, "id": c} for c in cols],
         data=df.to_dict("records"),
-        
-        # Keep useful table tools
         filter_action="native",
         sort_action="native",
-        
-        # VIRTUALIZATION: Enables infinite scroll with ZERO RAM bloat
         virtualization=True,
         page_action="none",
-        
         fixed_rows={"headers": True},
-        style_table={
-            "height": "65vh",
-            "overflowY": "auto",
-            "overflowX": "auto",
-            "border": "1px solid #444",
-        },
-        style_header={
-            "backgroundColor": "#2b3e50",
-            "color": "white",
-            "fontWeight": "bold",
-            "border": "1px solid #555",
-            "position": "sticky",
-            "top": 0,
-            "zIndex": 2,
-        },
+        style_table=grid_table_style("two"),
+        style_header=grid_header_style(),
         style_cell={
-            "backgroundColor": "#1e1e1e",
-            "color": "white",
-            "fontSize": "12px",
-            "textAlign": "left",
-            "padding": "4px 8px",
-            "minWidth": "90px",
-            "width": "120px",
+            **grid_cell_style(
+                text_align="left",
+                padding="4px 8px",
+                width="120px",
+            ),
             "maxWidth": "220px",
             "whiteSpace": "normal",
-            "border": "1px solid #333",
         },
-        style_data={
-            "backgroundColor": "#1e1e1e",
-            "color": "white",
-        },
-        style_filter={
-            "backgroundColor": "#111",
-            "color": "white",
-        },
+        style_data=grid_data_style(),
+        style_filter=grid_filter_style(),
     )
 
     return table, title
