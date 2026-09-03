@@ -1,6 +1,6 @@
 # Phase 4: Canneberge Multi-Surface Application (Desktop & Web/PWA)
 
-> **Current Status:** 4.3: Page Migration (PyQt -> Dash) - Step 6  
+> **Current Status:** Step 7 — Wiring Real Source Data Engine  
 > **Active Branch:** `main`  
 > **Active Directory:** `4_application/`  
 > **Last Updated:** August 31, 2026  
@@ -69,39 +69,51 @@
 ## 4. Execution Roadmap (Step-by-Step)
 
 ### Phase 4.1: Foundation & Scaffolding
-- [ ] **Step 1: Dependencies & Environment Setup**
+- [X] **Step 1: Dependencies & Environment Setup**
   - Verify Python 3.11+ / 3.13 venv.
   - Install dependencies: `pip install dash dash-bootstrap-components pandas plotly`.
   - Update `4_application/requirements.txt`.
-- [ ] **Step 2: Scaffolding Directory Structure**
+- [X] **Step 2: Scaffolding Directory Structure**
   - Move current `Canneberge/Ui/` into `desktop/Ui/` (or create wrappers so desktop still runs).
   - Verify desktop app runs with `python -m Canneberge.main`.
   - Create `4_application/web/` folder structure (`pages/`, `components/`, `assets/`).
 
 ### Phase 4.2: Web Skeleton & Tablet PWA Setup
-- [ ] **Step 3: Core Dash Shell (`web/app.py`)**
+- [X] **Step 3: Core Dash Shell (`web/app.py`)**
   - Initialize Dash with multi-page support (`use_pages=True`).
   - Configure top/side navigation bar for tablet touch friendliness.
   - Set host to `0.0.0.0` and port to `8050`.
-- [ ] **Step 4: Android PWA Configuration (`assets/manifest.json`)**
+- [X] **Step 4: Android PWA Configuration (`assets/manifest.json`)**
   - Add `manifest.json` with `"display": "standalone"` (removes Chrome address bar on Android).
   - Add standard application icons.
   - Test "Add to Home Screen" on Android Chrome -> opens like a native app.
-- [ ] **Step 5: LAN Connectivity Test**
+- [X] **Step 5: LAN Connectivity Test**
   - Obtain Chromebook/PC LAN IP (`ip addr` or `hostname -I`).
   - Access `http://<LAPTOP_LAN_IP>:8050` from Android tablet connected to same Wi-Fi.
 
 ### Phase 4.3: Page Migration (PyQt -> Dash)
-- [ ] **Step 6: Page 1 — Home & Status (`web/pages/home.py`)**
-  - Replicate `home_page.py` inputs (Ticker symbols, subject inputs).
-  - Wire up source fetch triggers (StockAnalysis / FRED).
-- [ ] **Step 7: Page 2 — GPC Metrics (`web/pages/gpc.py`)**
-  - Import calculation functions from `Canneberge.Calculations.gpc_metrics`.
-  - Render interactive data table (`dash_table.DataTable` or `ag-grid`).
-- [ ] **Step 8: Page 3 — DCF & Valuation Surface (`web/pages/dcf.py`)**
-  - Render valuation output cards and interactive Plotly sensitivity charts.
-- [ ] **Step 9: Page 4 — Debt Schedule (`web/pages/debt.py`)**
-  - Port debt amortization tables and waterfall calculations.
+- [x] **Step 6: Home Page Conversion (`web/pages/home.py`)**
+  - 1-to-1 conversion of PyQt `home_page.py`.
+  - Includes **GENERAL**, **SUBJECT COMPANY**, **GPC Tickers (15 rows with yfinance name lookup)**, **GT Transactions DataTable**, and **PROJECTION CONTROLS**.
+  - All input fields configured with `persistence=True` and `persistence_type="session"`.
+  - Auto-sync callback updates `session-store` memory without requiring a manual save button.
+- [ ] **Step 7 — Real Source Data Pipeline Integration**
+
+**Current Problem to Solve:**
+The initial prototype of `web/pages/source_data.py` was a simple `yfinance` placeholder. It **must be replaced** with Canneberge's real multi-source data architecture.
+
+**Target Data Plumbing:**
+1. **Core Service:** Must hook into `Canneberge.Services.source_data_service` and `Canneberge.Workers.source_data_worker`.
+2. **Data Scrapers/APIs to Expose in Dash:**
+   * `MarketScreener` (`Canneberge/Sources/marketscreener.py`)
+   * `StockAnalysis` (`Canneberge/Sources/stockanalysis.py`)
+   * `FRED` API (`Canneberge/Sources/fred.py`)
+   * `Yahoo Finance Live` (`Canneberge/Sources/yfinance_live.py`)
+   * `Beta / Volatility` (`Canneberge/Sources/beta_vol.py`)
+3. **Execution Flow:**
+   * Read `gpc_tickers`, `subject_ticker`, and configuration settings directly from `session-store`.
+   * Execute the multi-threaded harvest pipeline.
+   * Render real harvest progress, status tables, and metrics per source on the web UI.
 
 ### Phase 4.4: Hardening & Parity Check
 - [ ] **Step 10: State Synchronization & Session Handling**
