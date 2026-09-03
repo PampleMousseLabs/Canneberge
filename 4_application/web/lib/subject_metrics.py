@@ -81,9 +81,11 @@ def dict_to_projection_data(session_data: dict) -> ProjectionData:
     pd.net_income_margin = _load("net_income_margin")
     pd.capex = _load("capex")
     pd.capex_pct = _load("capex_pct")
+    if hasattr(pd, "other_adj"):
+        pd.other_adj = _load("other_adj")
     # These two are non-numeric strings ("revenue" / "growth"), don't _parse_val them
-    pd.last_edited_revenue = dict(state.get("last_edited_revenue", {}))
-    pd.last_edited_ni = dict(state.get("last_edited_ni", {}))
+    pd.last_edited_revenue = dict(state.get("last_edited_revenue", {}) or {})
+    pd.last_edited_ni = dict(state.get("last_edited_ni", {}) or {})
     return pd
 
 

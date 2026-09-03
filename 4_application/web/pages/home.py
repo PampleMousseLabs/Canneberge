@@ -3,6 +3,10 @@ import dash_bootstrap_components as dbc
 from dash import html, dcc, Input, Output, State, callback, dash_table, ALL, no_update, ctx
 import yfinance as yf
 
+from Canneberge.app_state import IS_LINES, BS_LINES
+from web.lib.session_io import _clean_float
+from web.components import projection_modal
+
 dash.register_page(__name__, path="/", name="Home & Inputs")
 
 DEFAULT_GPC = ["RKLB", "AMZN", "FLY", "ASTS", "GOOG", "IRDM", "PLTR", "SOUN", "NBIS"]
@@ -59,6 +63,18 @@ def _build_project_inputs(
         "historical_years": hist_yrs,
         "projection_years": proj_yrs,
         "status": "live",
+        # Preserve blobs owned by other surfaces (modals / future pages).
+        # Without this, any Home autosync wipes private financials & projections.
+        "private_is_data": existing.get("private_is_data", {}) or {},
+        "private_bs_data": existing.get("private_bs_data", {}) or {},
+        "projection_page_state": existing.get("projection_page_state", {}) or {},
+        "gt_page_state": existing.get("gt_page_state", {}) or {},
+        "gpc_page_state": existing.get("gpc_page_state", {}) or {},
+        "wacc_page_state": existing.get("wacc_page_state", {}) or {},
+        "dcf_page_state": existing.get("dcf_page_state", {}) or {},
+        "nwc_page_state": existing.get("nwc_page_state", {}) or {},
+        "debt_page_state": existing.get("debt_page_state", {}) or {},
+        "dashboard_page_state": existing.get("dashboard_page_state", {}) or {},
     }
 
 
@@ -146,6 +162,24 @@ layout = dbc.Container([
                         dbc.Label("Subject Ticker"),
                         dbc.Input(id="input-subject-ticker", value="SPCX", className="mb-2", debounce=True)
                     ], style={"display": "none"}),
+
+                    # Popout launchers (mirror desktop hyperlinks under Subject Company)
+                    html.Div([
+                        html.Div(id="div-enter-fin-link", children=[
+                            html.A("Enter Financial Data →",
+                                   id="link-open-private-fin",
+                                   href="#",
+                                   className="fw-bold",
+                                   style={"color": "#f0ad4e", "textDecoration": "underline"}),
+                        ], style={"display": "none"}, className="mb-1"),
+                        html.Div([
+                            html.A("Projection Module →",
+                                   id="link-open-projection",
+                                   href="#",
+                                   className="fw-bold",
+                                   style={"color": "#f0ad4e", "textDecoration": "underline"}),
+                        ], className="mb-2"),
+                    ]),
 
                     dbc.Label("Tax Rate"),
                     dbc.Input(id="input-tax-rate", value="21%", className="mb-2", debounce=True),
@@ -253,7 +287,63 @@ layout = dbc.Container([
                 ])
             ], color="secondary", outline=True, className="mb-4")
         ], width=12)
-    ])
+    ]),
+
+    # -------------------------------------------------------------
+    # POPOUT MODALS
+    # -------------------------------------------------------------
+    dcc.Store(id="private-fin-periods-store", storage_type="memory"),
+
+    # Private Financials Modal — layout + callbacks live in this file
+    dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Enter Private Financial Data"), close_button=False),
+            dbc.ModalBody([
+                dbc.Alert(
+                    id="private-fin-status",
+                    color="secondary",
+                    className="py-2",
+                    children="Edit values below. Save commits to the live session.",
+                ),
+                dbc.RadioItems(
+                    id="private-fin-stmt-toggle",
+                    options=[
+                        {"label": "Income Statement (IS)", "value": "IS"},
+                        {"label": "Balance Sheet (BS)", "value": "BS"},
+                    ],
+                    value="IS",
+                    inline=True,
+                    inputClassName="btn-check",
+                    labelClassName="btn btn-outline-info size-sm",
+                    labelCheckedClassName="active",
+                    className="mb-2",
+                ),
+                html.Div(
+                    id="private-fin-grid-container",
+                    style={
+                        "maxHeight": "60vh",
+                        "overflowY": "auto",
+                        "overflowX": "auto",
+                        "border": "1px solid #444",
+                        "borderRadius": "4px",
+                    },
+                ),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="btn-private-fin-cancel", color="secondary", n_clicks=0),
+                dbc.Button("Save", id="btn-private-fin-save", color="primary", n_clicks=0),
+            ]),
+        ],
+        id="modal-private-fin",
+        is_open=False,
+        size="xl",
+        backdrop="static",
+        keyboard=False,
+        scrollable=True,
+    ),
+
+    # Projection Module Modal — layout + callbacks live in web/components/projection_modal.py
+    projection_modal.layout,
 ], fluid=True)
 
 
@@ -263,10 +353,15 @@ layout = dbc.Container([
 
 @callback(
     Output("div-subject-ticker", "style"),
+    Output("div-enter-fin-link", "style"),
     Input("select-company-status", "value")
 )
 def toggle_subject_ticker(status):
-    return {"display": "block"} if status == "Publicly Traded" else {"display": "none"}
+    is_public = (status == "Publicly Traded")
+    return (
+        {"display": "block"} if is_public else {"display": "none"},
+        {"display": "none"} if is_public else {"display": "block"},
+    )
 
 
 @callback(
@@ -373,7 +468,6 @@ def hydrate_home_page_from_load(load_timestamp, session_data):
         return [no_update] * 21
 
     try:
-        # Map scalar values safely
         client = session_data.get("client", "Ted & Co.")
         subj_name = session_data.get("subject_company_name", "COMPANY NAME")
         main_title = session_data.get("main_title", "")
@@ -385,8 +479,7 @@ def hydrate_home_page_from_load(load_timestamp, session_data):
         basis_val = session_data.get("basis_of_value", "BEV / Equity Value")
         status = session_data.get("company_status", "Private Company")
         subj_ticker = session_data.get("subject_ticker", "SPCX")
-        
-        # Render Tax Rate safely
+
         tax_rate = session_data.get("subject_tax_rate", 0.21)
         if isinstance(tax_rate, float):
             tax_rate = f"{tax_rate * 100:.1f}%" if tax_rate <= 1.0 else f"{tax_rate}%"
@@ -397,9 +490,8 @@ def hydrate_home_page_from_load(load_timestamp, session_data):
         nfy1 = session_data.get("nfy_1", "12/31/2027")
         nfy2 = session_data.get("nfy_2", "12/31/2028")
 
-        # Map tickers (skips yfinance re-scraping)
         saved_tickers = session_data.get("gpc_tickers", [])
-        
+
         gpc_tickers_out = []
         for i in range(15):
             if i < len(saved_tickers):
@@ -407,7 +499,6 @@ def hydrate_home_page_from_load(load_timestamp, session_data):
             else:
                 gpc_tickers_out.append("")
 
-        # Map GT Transactions table
         gt_transactions = session_data.get("gt_transactions", DEFAULT_GT)
 
         hist_yrs = session_data.get("historical_years", 5)
@@ -423,3 +514,210 @@ def hydrate_home_page_from_load(load_timestamp, session_data):
         print("❌ Error during Home Page Hydration Callback:")
         traceback.print_exc()
         return [no_update] * 21
+
+
+# ============================================================
+# PRIVATE FINANCIALS MODAL — native inputs
+# ============================================================
+
+_PERIOD_FALLBACK = ["LFY-4", "LFY-3", "LFY-2", "LFY-1", "LFY", "TTM"]
+
+# Readable inputs on dark modal (Bootstrap dark inputs are too low-contrast)
+_PRIV_INPUT_STYLE = {
+    "backgroundColor": "#2a2a2a",
+    "color": "#f5f5f5",
+    "border": "1px solid #666",
+    "textAlign": "right",
+    "fontSize": "12px",
+    "minWidth": "88px",
+}
+
+
+def _private_periods_from_session(session_data: dict) -> list:
+    from web.lib.session_io import dict_to_project_inputs
+    inputs = dict_to_project_inputs(session_data or {})
+    cols = list(inputs.historical_period_columns) + ["TTM"]
+    return cols if cols else list(_PERIOD_FALLBACK)
+
+
+def _private_raw_lines(statement: str):
+    lines = IS_LINES if statement == "IS" else BS_LINES
+    return [(k, label) for k, label, is_calc, _bold in lines if not is_calc]
+
+
+def _build_private_fin_table(statement: str, blob: dict, periods: list):
+    """html.Table of native inputs — backspace/arrows work like normal forms."""
+    blob = blob or {}
+    header = html.Tr(
+        [html.Th("Line Item", style={"position": "sticky", "top": 0, "left": 0, "zIndex": 3,
+                                      "backgroundColor": "#2b3e50", "color": "white",
+                                      "padding": "6px 10px", "minWidth": "220px"})]
+        + [
+            html.Th(
+                p,
+                style={
+                    "position": "sticky",
+                    "top": 0,
+                    "zIndex": 2,
+                    "backgroundColor": "#2b3e50",
+                    "color": "white",
+                    "padding": "6px 8px",
+                    "textAlign": "center",
+                    "minWidth": "96px",
+                },
+            )
+            for p in periods
+        ]
+    )
+
+    body_rows = []
+    for key, label in _private_raw_lines(statement):
+        per = blob.get(key, {}) or {}
+        cells = [
+            html.Td(
+                label,
+                style={
+                    "position": "sticky",
+                    "left": 0,
+                    "zIndex": 1,
+                    "backgroundColor": "#1e1e1e",
+                    "color": "#eee",
+                    "padding": "4px 10px",
+                    "whiteSpace": "nowrap",
+                    "fontSize": "12px",
+                    "border": "1px solid #333",
+                },
+            )
+        ]
+        for p in periods:
+            raw = per.get(p)
+            val = "" if raw is None else str(raw)
+            cells.append(
+                html.Td(
+                    dbc.Input(
+                        id={"type": "priv-fin-cell", "key": key, "period": p},
+                        type="text",
+                        value=val,
+                        debounce=False,
+                        style=_PRIV_INPUT_STYLE,
+                        size="sm",
+                        className="border-0",
+                    ),
+                    style={"padding": "2px", "border": "1px solid #333", "backgroundColor": "#1e1e1e"},
+                )
+            )
+        body_rows.append(html.Tr(cells))
+
+    return html.Table(
+        [html.Thead(header), html.Tbody(body_rows)],
+        className="table table-sm mb-0",
+        style={"width": "100%", "borderCollapse": "separate", "borderSpacing": 0},
+    )
+
+
+def _harvest_private_cells(ids: list, values: list) -> dict:
+    """Build {line_key: {period: float}} from pattern-matching inputs."""
+    out = {}
+    for id_dict, raw in zip(ids or [], values or []):
+        if not id_dict:
+            continue
+        key = id_dict.get("key")
+        period = id_dict.get("period")
+        if not key or not period:
+            continue
+        if raw is None or str(raw).strip() == "":
+            continue
+        val = _clean_float(raw)
+        if val is None:
+            continue
+        out.setdefault(key, {})[period] = val
+    return out
+
+
+# Open modal + paint grid from committed session (single atomic path)
+@callback(
+    Output("modal-private-fin", "is_open", allow_duplicate=True),
+    Output("private-fin-grid-container", "children"),
+    Output("private-fin-periods-store", "data"),
+    Output("private-fin-status", "children"),
+    Output("private-fin-stmt-toggle", "value"),
+    Input("link-open-private-fin", "n_clicks"),
+    State("session-store", "data"),
+    prevent_initial_call=True,
+)
+def open_private_fin_modal(n_clicks, session_data):
+    if not n_clicks:
+        return no_update, no_update, no_update, no_update, no_update
+    session_data = session_data or {}
+    periods = _private_periods_from_session(session_data)
+    blob = session_data.get("private_is_data", {}) or {}
+    table = _build_private_fin_table("IS", blob, periods)
+    n_filled = sum(1 for k, per in blob.items() for _ in (per or {}))
+    status = f"Loaded IS from session · {n_filled} cells · edit freely, then Save or Cancel."
+    return True, table, periods, status, "IS"
+
+
+# IS/BS toggle: re-read session for the other statement
+# (edits on the hidden statement are only kept if user Saved; switching without Save
+#  reloads that statement from last committed session)
+@callback(
+    Output("private-fin-grid-container", "children", allow_duplicate=True),
+    Output("private-fin-status", "children", allow_duplicate=True),
+    Input("private-fin-stmt-toggle", "value"),
+    State("session-store", "data"),
+    State("private-fin-periods-store", "data"),
+    State("modal-private-fin", "is_open"),
+    prevent_initial_call=True,
+)
+def switch_private_fin_statement(stmt, session_data, periods, is_open):
+    if not is_open:
+        return no_update, no_update
+    stmt = stmt or "IS"
+    session_data = session_data or {}
+    periods = periods or _PERIOD_FALLBACK
+    blob_key = "private_is_data" if stmt == "IS" else "private_bs_data"
+    blob = session_data.get(blob_key, {}) or {}
+    table = _build_private_fin_table(stmt, blob, periods)
+    n_filled = sum(len(per or {}) for per in blob.values())
+    status = (
+        f"Showing {stmt} from last Save · {n_filled} cells. "
+        f"Unsaved edits on the other statement were not kept — Save before switching if needed."
+    )
+    return table, status
+
+
+# Save: harvest visible cells into the active statement blob; preserve the other
+@callback(
+    Output("session-store", "data", allow_duplicate=True),
+    Output("modal-private-fin", "is_open", allow_duplicate=True),
+    Output("private-fin-status", "children", allow_duplicate=True),
+    Input("btn-private-fin-save", "n_clicks"),
+    State({"type": "priv-fin-cell", "key": ALL, "period": ALL}, "id"),
+    State({"type": "priv-fin-cell", "key": ALL, "period": ALL}, "value"),
+    State("private-fin-stmt-toggle", "value"),
+    State("session-store", "data"),
+    prevent_initial_call=True,
+)
+def save_private_fin(n_clicks, cell_ids, cell_values, stmt, session_data):
+    if not n_clicks:
+        return no_update, no_update, no_update
+    session_data = dict(session_data or {})
+    stmt = stmt or "IS"
+    blob = _harvest_private_cells(cell_ids, cell_values)
+    if stmt == "IS":
+        session_data["private_is_data"] = blob
+    else:
+        session_data["private_bs_data"] = blob
+    n_keys = sum(1 for per in blob.values() if per)
+    return session_data, False, f"Saved {stmt} ({n_keys} lines)."
+
+
+@callback(
+    Output("modal-private-fin", "is_open", allow_duplicate=True),
+    Input("btn-private-fin-cancel", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancel_private_fin(n_clicks):
+    if not n_clicks:
+        return no_update
+    return False

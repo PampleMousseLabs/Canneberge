@@ -77,16 +77,16 @@ layout = dbc.Container([
             dbc.Row([
                 dbc.Col([
                     dbc.ButtonGroup([
-                        dbc.Button("🔄 Refresh All Sources", id="btn-refresh-all", color="primary", size="sm"),
-                        dbc.Button("⚡ Update Live Marks (2s)", id="btn-refresh-live-marks", color="warning", size="sm"),
+                        dbc.Button("🔄 Refresh All Sources", id="btn-refresh-all", color="primary", size="sm", n_clicks=0),
+                        dbc.Button("⚡ Update Live Marks (2s)", id="btn-refresh-live-marks", color="warning", size="sm", n_clicks=0),
                     ], className="me-2 mb-2 mb-md-0")
                 ], xs=12, md="auto"),
                 dbc.Col([
                     dbc.ButtonGroup([
-                        dbc.Button("StockAnalysis", id="btn-ref-sa", color="secondary", size="sm", outline=True),
-                        dbc.Button("MarketScreener", id="btn-ref-ms", color="secondary", size="sm", outline=True),
-                        dbc.Button("FRED", id="btn-ref-fred", color="secondary", size="sm", outline=True),
-                        dbc.Button("Beta/Vol (Yahoo)", id="btn-ref-bv", color="secondary", size="sm", outline=True),
+                        dbc.Button("StockAnalysis", id="btn-ref-sa", color="secondary", size="sm", outline=True, n_clicks=0),
+                        dbc.Button("MarketScreener", id="btn-ref-ms", color="secondary", size="sm", outline=True, n_clicks=0),
+                        dbc.Button("FRED", id="btn-ref-fred", color="secondary", size="sm", outline=True, n_clicks=0),
+                        dbc.Button("Beta/Vol (Yahoo)", id="btn-ref-bv", color="secondary", size="sm", outline=True, n_clicks=0),
                     ], className="w-100")
                 ], xs=12, md=True),
             ], className="align-items-center")
@@ -240,7 +240,20 @@ def toggle_view_controls(selected_source):
 def execute_source_refresh(set_progress, btn_all, btn_live, btn_sa, btn_ms, btn_fred, btn_bv,
                            session_data, existing_results, vol_term):
     triggered_id = ctx.triggered_id
-    if not triggered_id or not session_data:
+    # Page remount (navigate away + back) re-creates buttons; prevent_initial_call
+    # does NOT block that. Only run when the triggering button has a real click count.
+    click_map = {
+        "btn-refresh-all": btn_all,
+        "btn-refresh-live-marks": btn_live,
+        "btn-ref-sa": btn_sa,
+        "btn-ref-ms": btn_ms,
+        "btn-ref-fred": btn_fred,
+        "btn-ref-bv": btn_bv,
+    }
+    if not triggered_id or not click_map.get(triggered_id):
+        return dash.no_update, dash.no_update
+
+    if not session_data:
         return dash.no_update, dbc.Alert("No active session memory found.", color="warning")
 
     project_inputs = dict_to_project_inputs(session_data)
