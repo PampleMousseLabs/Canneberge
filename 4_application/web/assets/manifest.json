@@ -1,0 +1,22 @@
+{
+  "name": "Project Canneberge",
+  "short_name": "Canneberge",
+  "description": "Financial Valuation Workstation",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#222222",
+  "theme_color": "#375a7f",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
