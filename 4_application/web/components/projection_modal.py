@@ -83,6 +83,13 @@ layout = html.Div([
                         "overflowX": "auto",
                         "border": "1px solid #444",
                         "borderRadius": "4px",
+                        # Without this, Bootstrap's .modal-content flex
+                        # layout lets this element (and everything above
+                        # it) grow to fit the wide table instead of
+                        # containing it — the whole modal balloons past
+                        # the viewport rather than scrolling internally.
+                        "minWidth": 0,
+                        "width": "100%",
                     },
                 ),
                 html.Small(
@@ -488,7 +495,11 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
     table = html.Table(
         [html.Thead(rows[0]), html.Tbody(rows[1:])],
         className="table table-sm mb-0",
-        style={"width": "100%", "borderCollapse": "separate", "borderSpacing": 0},
+        # No fixed width — let the table size to its natural content
+        # width (respecting each cell's 88px minWidth) so the parent
+        # container's overflowX:auto actually has something to scroll,
+        # instead of forcing every column to compress to fit.
+        style={"width": "max-content", "minWidth": "100%", "borderCollapse": "separate", "borderSpacing": 0},
     )
     status = (
         f"{inputs.subject_company_name} ({inputs.subject_ticker or 'private'}) · "
