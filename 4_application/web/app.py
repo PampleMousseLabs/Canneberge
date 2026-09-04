@@ -21,7 +21,7 @@ background_callback_manager = DiskcacheManager(cache)
 app = dash.Dash(
     __name__,
     use_pages=True,
-    external_stylesheets=[dbc.themes.DARKLY],
+    external_stylesheets=[dbc.themes.DARKLY, "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates/dbc.min.css"],
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     background_callback_manager=background_callback_manager,
 )
