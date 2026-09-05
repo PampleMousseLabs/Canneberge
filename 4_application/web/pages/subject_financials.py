@@ -139,6 +139,41 @@ def render_subject_statement(stmt_type, session_data, source_results):
 
         rows_data.append(row_dict)
 
+    # -------------------------------------------------------------
+    # Adjusted EBITDA (SBC added back) — derived row, IS only.
+    # Historical statements above stay as-reported so they tie to the
+    # 10-K. This row is the single EBITDA definition consumers
+    # (GPC / DCF) should read when comparing against MarketScreener-
+    # style (adjusted) estimates.
+    #   hist/TTM : reported EBITDA + SBC (computed here, nothing persisted)
+    #   proj     : ProjectionData.ebitda (already adjusted in the modal)
+    # -------------------------------------------------------------
+    if stmt_type == "IS":
+        adj_row = {"Line Item": "Adjusted EBITDA (incl. SBC add-back)"}
+        any_adj = False
+        for p in periods:
+            if p in check_periods:
+                e = get_subject_metric_value(session_data, source_results, "ebitda", p)
+
+                da = get_subject_metric_value(session_data, source_results, "d&a_for_ebitda", p)
+                if da is None:
+                    da = get_subject_metric_value(session_data, source_results, "depreciation", p)
+                if da is None:
+                    da = get_subject_metric_value(session_data, source_results, "depreciation_amortization", p)
+
+                oa = get_subject_metric_value(session_data, source_results, "other_amortization", p)
+                s = get_subject_metric_value(session_data, source_results, "stock_based_compensation", p)
+
+                v = None if e is None else e + (da or 0.0) + (oa or 0.0) + (s or 0.0)
+            else:
+                # Projection Module stores projected EBITDA on the adjusted basis.
+                v = get_subject_metric_value(session_data, source_results, "ebitda", p)
+            adj_row[p] = f"{v:,.0f}" if v is not None else "-"
+            any_adj = any_adj or v is not None
+        if any_adj:
+            bold_indices.append(len(rows_data))
+            rows_data.append(adj_row)
+
     if not rows_data:
         placeholder = html.P("No statement data available. Refresh Source Data or enter private financials.",
                              className="text-muted p-3")

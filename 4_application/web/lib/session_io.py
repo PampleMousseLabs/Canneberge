@@ -184,8 +184,9 @@ def load_session_to_stores(filepath: Path) -> tuple[dict, dict, str]:
     session_dict = dict(pi_raw)  # already in dict form from core loader
     session_dict["private_is_data"] = pf.is_data
     session_dict["private_bs_data"] = pf.bs_data
-    session_dict["gt_page_state"] = payload["gt_page_state"]
-    session_dict["gpc_page_state"] = payload["gpc_page_state"]
+    session_dict["gt_page_state"] = payload.get("gt_page_state") or {}
+    # Always a dict — GPC page restore/persist assume mapping, not None
+    session_dict["gpc_page_state"] = payload.get("gpc_page_state") or {}
     session_dict["projection_page_state"] = payload["projection_page_state"]
     session_dict["wacc_page_state"] = payload["wacc_page_state"]
     session_dict["dcf_page_state"] = payload["dcf_page_state"]

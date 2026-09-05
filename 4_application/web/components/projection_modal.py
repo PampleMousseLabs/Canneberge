@@ -158,6 +158,66 @@ def _div(a, b):
     return a / b
 
 
+def _mul(a, b):
+    if a is None or b is None:
+        return None
+    return a * b
+
+
+def _hist_ebitda_adjusted(session_data, source_results):
+    """Return (source_ebit_like, adjusted EBITDA) historical values.
+
+    Important: our current StockAnalysis/Subject Financials "ebitda" line is
+    effectively EBIT / operating income, not true EBITDA. To make historicals
+    comparable to MarketScreener forward EBITDA estimates, the adjusted EBITDA
+    anchor must add back D&A, other amortization, and SBC.
+
+        Adjusted EBITDA = EBIT + D&A + Other Amortization + SBC
+
+    Subject Financials can still show the as-reported/source line separately;
+    this helper is only for the Projection Module's comparable projection base.
+    """
+    source_ebit_like = get_historical_line_values(session_data, source_results, "ebitda", "IS")
+
+    da = get_historical_line_values(session_data, source_results, "d&a_for_ebitda", "IS")
+    if not any(v is not None for v in da.values()):
+        da = get_historical_line_values(session_data, source_results, "depreciation", "IS")
+    if not any(v is not None for v in da.values()):
+        da = get_historical_line_values(session_data, source_results, "depreciation_amortization", "IS")
+
+    other_amort = get_historical_line_values(session_data, source_results, "other_amortization", "IS")
+    sbc = get_historical_line_values(session_data, source_results, "stock_based_compensation", "IS")
+
+    adj = {}
+    for p, base in source_ebit_like.items():
+        if base is None:
+            adj[p] = None
+        else:
+            adj[p] = (
+                base
+                + (da.get(p) or 0.0)
+                + (other_amort.get(p) or 0.0)
+                + (sbc.get(p) or 0.0)
+            )
+
+    return source_ebit_like, adj
+
+
+def _tax_rate(session_data) -> Optional[float]:
+    inputs = dict_to_project_inputs(session_data or {})
+    r = getattr(inputs, "subject_tax_rate", None)
+    try:
+        if r is None:
+            return None
+        r = float(r)
+        if math.isnan(r) or math.isinf(r):
+            return None
+        # stored as 0.21 or 21
+        return r / 100.0 if r > 1.0 else r
+    except (TypeError, ValueError):
+        return None
+
+
 def _growth(cur, prior):
     r = _div(cur, prior)
     return None if r is None else r - 1.0
@@ -293,7 +353,7 @@ def _resolve(session_data, source_results, pd: ProjectionData) -> dict:
     is_public = inputs.is_publicly_traded
     h_rev = get_historical_line_values(session_data, source_results, "revenue", "IS")
     h_gp = get_historical_line_values(session_data, source_results, "gross_profit", "IS")
-    h_ebitda = get_historical_line_values(session_data, source_results, "ebitda", "IS")
+    _h_ebitda_rep, h_ebitda = _hist_ebitda_adjusted(session_data, source_results)
     ms = _load_ms_via_sakey(source_results, inputs.subject_ticker) if is_public else {
         "revenue": {}, "ebitda": {}, "net_income": {}
     }
@@ -311,11 +371,18 @@ def _resolve(session_data, source_results, pd: ProjectionData) -> dict:
 
 
 def _apply_resolved(pd: ProjectionData, resolved: dict, proj_periods: list) -> None:
+    if not hasattr(pd, "other_adj") or pd.other_adj is None:
+        pd.other_adj = {}
     for p in proj_periods:
         r = resolved.get(p, {}) or {}
-        for k in ("revenue", "gross_profit", "ebitda", "da", "capex"):
+        for k in ("revenue", "gross_profit", "ebitda", "da", "capex",
+                  "sbc", "other_amort", "net_income"):
             if r.get(k) is not None:
-                getattr(pd, k)[p] = r[k]
+                bucket = getattr(pd, k, None)
+                if isinstance(bucket, dict):
+                    bucket[p] = r[k]
+        if r.get("other_adj") is not None:
+            pd.other_adj[p] = r["other_adj"]
 
 
 def _sync_growth_display(pd, session_data, source_results, proj_periods):
@@ -368,13 +435,20 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
 
     h_rev = get_historical_line_values(session_data, source_results, "revenue", "IS")
     h_gp = get_historical_line_values(session_data, source_results, "gross_profit", "IS")
-    h_ebitda = get_historical_line_values(session_data, source_results, "ebitda", "IS")
+    h_ebitda_rep, h_ebitda = _hist_ebitda_adjusted(session_data, source_results)
     h_da = get_historical_line_values(session_data, source_results, "d&a_for_ebitda", "IS")
     if not any(v is not None for v in h_da.values()):
         h_da = get_historical_line_values(session_data, source_results, "depreciation", "IS")
+    if not any(v is not None for v in h_da.values()):
+        h_da = get_historical_line_values(session_data, source_results, "depreciation_amortization", "IS")
     h_sbc = get_historical_line_values(session_data, source_results, "stock_based_compensation", "IS")
     h_oa = get_historical_line_values(session_data, source_results, "other_amortization", "IS")
+    h_ni = get_historical_line_values(session_data, source_results, "net_income", "IS")
     h_capex = get_historical_line_values(session_data, source_results, "capex", "IS")
+    tax_rate = _tax_rate(session_data)
+    ms = _load_ms_via_sakey(source_results, inputs.subject_ticker) if is_public else {
+        "revenue": {}, "ebitda": {}, "net_income": {}
+    }
 
     resolved = _resolve(session_data, source_results, pd)
     _apply_resolved(pd, resolved, proj_periods)
@@ -395,12 +469,70 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
     disp_ebitda = {p: h_ebitda.get(p) for p in hist_periods}
     disp_da = {p: h_da.get(p) for p in hist_periods}
     disp_capex = {p: h_capex.get(p) for p in hist_periods}
+    disp_sbc = {p: h_sbc.get(p) for p in hist_periods}
+    disp_oa = {p: h_oa.get(p) for p in hist_periods}
+    disp_ni = {p: h_ni.get(p) for p in hist_periods}
+    disp_other_adj = {p: None for p in hist_periods}
+    disp_taxes = {}
+
     for p in proj_periods:
         r = resolved.get(p, {}) or {}
         disp_gp[p] = r.get("gross_profit")
         disp_ebitda[p] = r.get("ebitda")
         disp_da[p] = r.get("da")
         disp_capex[p] = r.get("capex")
+        rev_p = r.get("revenue")
+        disp_sbc[p] = _mul(rev_p, pd.sbc_pct.get(p))
+        disp_oa[p] = _mul(rev_p, pd.other_amort_pct.get(p))
+
+        ebitda_p = disp_ebitda.get(p)
+        da_p = disp_da.get(p) or 0.0
+        oa_p = disp_oa.get(p) or 0.0
+        sbc_p = disp_sbc.get(p) or 0.0
+        ebit = (ebitda_p - da_p - oa_p - sbc_p) if ebitda_p is not None else None
+
+        # +Other Adjustments is PRE-tax (net interest, other non-op,
+        # one-timers). Sitting above the Taxes row, it must be solved
+        # pre-tax or the column doesn't foot top-to-bottom — and the
+        # residual the user reads off NFY+2 to hand-enter in NFY+3
+        # wouldn't be an interpretable number.
+        if is_public and p in MS_COVERED_PERIODS:
+            analyst_ni = ms.get("net_income", {}).get(p)
+            adj = None
+            if ebit is not None and analyst_ni is not None \
+                    and tax_rate is not None and tax_rate != 1.0:
+                adj = (analyst_ni / (1.0 - tax_rate)) - ebit
+            disp_other_adj[p] = adj
+            if adj is not None:
+                pd.other_adj[p] = adj
+            pretax = (ebit + adj) if (ebit is not None and adj is not None) else None
+            disp_taxes[p] = _mul(pretax, tax_rate)
+            disp_ni[p] = analyst_ni
+        else:
+            adj = pd.other_adj.get(p)
+            disp_other_adj[p] = adj
+            pretax = (ebit + (adj or 0.0)) if ebit is not None else None
+            disp_taxes[p] = _mul(pretax, tax_rate)
+            disp_ni[p] = _mul(pretax, (1.0 - tax_rate) if tax_rate is not None else None)
+
+        if disp_sbc[p] is not None:
+            pd.sbc[p] = disp_sbc[p]
+        if disp_oa[p] is not None:
+            pd.other_amort[p] = disp_oa[p]
+        if disp_ni[p] is not None:
+            pd.net_income[p] = disp_ni[p]
+
+    disp_ebitda_rep = {p: h_ebitda_rep.get(p) for p in hist_periods}
+    for p in proj_periods:
+        disp_ebitda_rep[p] = None
+    for p in hist_periods:
+        ebitda_p = h_ebitda.get(p)
+        ebit = None
+        if ebitda_p is not None:
+            ebit = ebitda_p - (h_da.get(p) or 0.0) - (h_oa.get(p) or 0.0) - (h_sbc.get(p) or 0.0)
+        disp_taxes[p] = _mul(ebit, tax_rate)
+
+    ni_m = {p: _div(disp_ni.get(p), disp_rev.get(p)) for p in all_periods}
 
     gp_m = {p: _div(disp_gp.get(p), disp_rev.get(p)) for p in all_periods}
     ebitda_m = {p: _div(disp_ebitda.get(p), disp_rev.get(p)) for p in all_periods}
@@ -467,27 +599,35 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
     locked_row("    Margin (%)", gp_m, pct=True)
     pct_driver("    Improvement (%)", "gp_improvement", gp_imp_h)
 
-    locked_row("EBITDA", disp_ebitda, bold=True)
+    locked_row("EBIT / Operating Income (source)", disp_ebitda_rep)
+    locked_row("Adjusted EBITDA (D&A/OA/SBC add-back)", disp_ebitda, bold=True)
     locked_row("    Margin (%)", ebitda_m, pct=True)
     pct_driver("    Improvement (%)", "ebitda_improvement", ebitda_imp_h, lock_ms=True)
 
     locked_row("D&A", disp_da, bold=True)
     pct_driver("    as % of Revenue", "da_pct", {p: _div(h_da.get(p), h_rev.get(p)) for p in hist_periods})
 
-    locked_row("Other Amortization", h_oa, bold=True)
+    locked_row("Other Amortization", disp_oa, bold=True)
     pct_driver("    as % of Revenue", "other_amort_pct", {p: _div(h_oa.get(p), h_rev.get(p)) for p in hist_periods})
 
-    locked_row("Stock-Based Compensation", h_sbc, bold=True)
+    locked_row("Stock-Based Compensation", disp_sbc, bold=True)
     pct_driver("    as % of Revenue", "sbc_pct", {p: _div(h_sbc.get(p), h_rev.get(p)) for p in hist_periods})
 
     c = [html.Td("+Other Adjustments", style=_LABEL_BOLD)]
     for p in all_periods:
-        if p in hist_periods or ms_lock(p):
+        if p in hist_periods:
             c.append(_locked("-"))
+        elif ms_lock(p):
+            c.append(_locked(_fmt_dollars(disp_other_adj.get(p))))
         else:
             v = pd.other_adj.get(p)
             c.append(_inp("other_adj", p, "" if v is None else f"{v:,.0f}"))
     rows.append(html.Tr(c))
+
+    locked_row("Taxes", disp_taxes, bold=True)
+
+    locked_row("Net Income", disp_ni, bold=True)
+    locked_row("    Margin (%)", ni_m, pct=True)
 
     locked_row("CapEx", disp_capex, bold=True)
     pct_driver("    as % of Revenue", "capex_pct", {p: _div(h_capex.get(p), h_rev.get(p)) for p in hist_periods})

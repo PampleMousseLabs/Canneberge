@@ -53,6 +53,7 @@ IS_LINES = [
     ("operating_expense_adj",      "Adjustment to Operating Expense",  False, False),
     ("operating_expenses",         "Operating Expenses",               True,  True),
     ("ebitda",                     "EBITDA",                           True,  True),
+    ("adj_ebitda",                 "Adjusted EBITDA (incl. SBC add-back)", True, True),
     ("d&a_for_ebitda",             "Depreciation Expense",             False, False),
     ("amortization",               "Amortization Expense",             False, False),
     ("ebit",                       "EBIT",                             True,  True),

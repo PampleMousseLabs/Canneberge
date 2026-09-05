@@ -212,7 +212,12 @@ def get_historical_line_values(
         if is_calc and statement == "BS" and key in BS_DIRECT_PULL_KEYS:
             result[period] = raw_by_period[period].get(key)
         elif is_calc:
-            result[period] = compute_fn(raw_by_period[period]).get(key)
+            if key == "adj_ebitda" and statement == "IS":
+                ebitda_raw = raw_by_period[period].get("ebitda")
+                sbc_raw = raw_by_period[period].get("stock_based_compensation")
+                result[period] = None if ebitda_raw is None else ebitda_raw + (sbc_raw or 0.0)
+            else:
+                result[period] = compute_fn(raw_by_period[period]).get(key)
         else:
             result[period] = raw_by_period[period].get(key)
 
@@ -317,6 +322,10 @@ def get_subject_metric_value(
 
     # ---- Projection branch (NFY, NFY+1, ...) ----
     if period in inputs.projection_period_columns:
+        # Adjusted EBITDA is the projection module's already-SBC-added-back figure.
+        if key == "adj_ebitda":
+            return dict_to_projection_data(session_data).ebitda.get(period)
+
         pd = dict_to_projection_data(session_data)
 
         rev = pd.revenue.get(period)
