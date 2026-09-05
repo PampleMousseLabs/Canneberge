@@ -26,6 +26,92 @@ def _mul(a: Optional[float], b: Optional[float]) -> Optional[float]:
     return a * b
 
 
+def resolve_projection_waterfall(
+    adjusted_ebitda: Optional[float],
+    da: Optional[float],
+    other_amort: Optional[float],
+    sbc: Optional[float],
+    net_interest: Optional[float],
+    other_adj: Optional[float],
+    tax_rate: Optional[float],
+    analyst_net_income: Optional[float] = None,
+    solve_other_adjustment: bool = False,
+) -> Dict[str, Optional[float]]:
+    """Resolve the projected income-statement waterfall.
+
+    Net interest is signed:
+        positive = net interest income
+        negative = net interest expense
+
+    D&A, other amortization, and SBC are positive cost amounts.
+
+    For public MS-covered periods, solve_other_adjustment=True makes
+    Other Adjustments a pre-tax plug to analyst Net Income.
+    """
+    if adjusted_ebitda is None:
+        ebit = None
+    else:
+        ebit = (
+            adjusted_ebitda
+            - (da or 0.0)
+            - (other_amort or 0.0)
+            - (sbc or 0.0)
+        )
+
+    ebt_before_adj = (
+        ebit + (net_interest or 0.0)
+        if ebit is not None
+        else None
+    )
+
+    if solve_other_adjustment:
+        resolved_other_adj = None
+        if (
+            ebt_before_adj is not None
+            and analyst_net_income is not None
+            and tax_rate is not None
+            and tax_rate != 1.0
+        ):
+            resolved_other_adj = (
+                analyst_net_income / (1.0 - tax_rate)
+            ) - ebt_before_adj
+
+        pretax_income = (
+            ebt_before_adj + resolved_other_adj
+            if ebt_before_adj is not None and resolved_other_adj is not None
+            else None
+        )
+    else:
+        resolved_other_adj = other_adj
+        pretax_income = (
+            ebt_before_adj + (resolved_other_adj or 0.0)
+            if ebt_before_adj is not None
+            else None
+        )
+
+    taxes = _mul(pretax_income, tax_rate)
+
+    if solve_other_adjustment and analyst_net_income is not None:
+        net_income = analyst_net_income
+    elif pretax_income is not None and taxes is not None:
+        net_income = pretax_income - taxes
+    else:
+        net_income = None
+
+    return {
+        "adjusted_ebitda": adjusted_ebitda,
+        "da": da,
+        "other_amort": other_amort,
+        "sbc": sbc,
+        "ebit": ebit,
+        "net_interest": net_interest,
+        "other_adj": resolved_other_adj,
+        "pretax_income": pretax_income,
+        "taxes": taxes,
+        "net_income": net_income,
+    }
+
+
 def resolve_projection_dollars(
     historical_periods: List[str],
     projection_periods: List[str],
@@ -36,7 +122,13 @@ def resolve_projection_dollars(
     ms_revenue: Dict[str, Optional[float]],
     ms_ebitda: Dict[str, Optional[float]],
     projection_data,
-) -> Dict[str, Dict[str, Optional[float]]]:
+    ms_net_income: Optional[Dict[str, Optional[float]]] = None,
+    tax_rate: Optional[float] = None,
+    net_interest_by_period: Optional[Dict[str, Optional[float]]] = None,
+) -> Dict[str, Dict[str, Optional[float]]]:    
+    ms_net_income = ms_net_income or {}
+    net_interest_by_period = net_interest_by_period or {}
+    other_adj_map = getattr(projection_data, "other_adj", {}) or {}
     """
     Returns {period: {"revenue", "gross_profit", "ebitda", "da", "capex"}}
     for every period in projection_periods.
@@ -106,16 +198,44 @@ def resolve_projection_dollars(
             ebitda = _mul(rev, ebitda_margin)
         resolved_ebitda_margin[period] = ebitda_margin
 
-        # --- D&A / CapEx ---
+        # --- D&A / Other Amortization / SBC / CapEx ---
         da = _mul(rev, projection_data.da_pct.get(period))
+        other_amort = _mul(
+            rev, projection_data.other_amort_pct.get(period)
+        )
+        sbc = _mul(rev, projection_data.sbc_pct.get(period))
         capex = _mul(rev, projection_data.capex_pct.get(period))
+
+        is_ms_period = is_public and period in MS_COVERED_PERIODS
+
+        waterfall = resolve_projection_waterfall(
+            adjusted_ebitda=ebitda,
+            da=da,
+            other_amort=other_amort,
+            sbc=sbc,
+            net_interest=net_interest_by_period.get(period),
+            other_adj=other_adj_map.get(period),
+            tax_rate=tax_rate,
+            analyst_net_income=(
+                ms_net_income.get(period) if is_ms_period else None
+            ),
+            solve_other_adjustment=is_ms_period,
+        )
 
         result[period] = {
             "revenue": rev,
             "gross_profit": gp,
             "ebitda": ebitda,
             "da": da,
+            "other_amort": other_amort,
+            "sbc": sbc,
             "capex": capex,
+            "ebit": waterfall["ebit"],
+            "net_interest": waterfall["net_interest"],
+            "other_adj": waterfall["other_adj"],
+            "pretax_income": waterfall["pretax_income"],
+            "taxes": waterfall["taxes"],
+            "net_income": waterfall["net_income"],
         }
 
     return result

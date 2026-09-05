@@ -52,14 +52,14 @@ IS_LINES = [
     ("other_operating",            "Other Operating Expense",          False, False),
     ("operating_expense_adj",      "Adjustment to Operating Expense",  False, False),
     ("operating_expenses",         "Operating Expenses",               True,  True),
-    ("ebitda",                     "EBITDA",                           True,  True),
-    ("adj_ebitda",                 "Adjusted EBITDA (incl. SBC add-back)", True, True),
+    ("ebitda",                     "EBITDA (before SBC add-back)",     True,  True),
     ("d&a_for_ebitda",             "Depreciation Expense",             False, False),
     ("amortization",               "Amortization Expense",             False, False),
     ("ebit",                       "EBIT",                             True,  True),
     # --- Below operating income / above pretax (canonical_order_IS zone) ---
     ("interest_expense",           "Interest Expense",                 False, False),
     ("interest_income",            "Interest Income",                  False, False),
+    ("net_interest",               "Net Interest Income / (Expense)",  True,  True),
     ("currency_exchange_gain_loss","Currency Exchange Gain/(Loss)",    False, False),
     ("earnings_from_equity_investments", "Earnings from Equity Investments", False, False),
     ("income_loss_on_equity_investments", "Income (Loss) on Equity Investments", False, False),
@@ -82,6 +82,7 @@ IS_LINES = [
     ("debt_free_net_income",       "Debt-free Net Income",             True,  True),
     ("capex",                      "Capital Expenditures",             False, False),
     ("acquisitions",               "Acquisitions",                     False, False),
+    ("adj_ebitda",                 "Adjusted EBITDA (incl. SBC add-back)", True, True),
 ]
 
 BS_LINES = [

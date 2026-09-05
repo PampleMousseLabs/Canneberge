@@ -21,7 +21,7 @@ exactly, so their value columns start at the same x-position.
 import statistics
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, Input, Output, State, callback, ALL, no_update
+from dash import html, dcc, Input, Output, State, callback, ALL, no_update, ctx
 
 from web.lib.session_io import dict_to_project_inputs
 from web.lib.subject_metrics import get_subject_metric_value
@@ -85,10 +85,68 @@ def _compute_stats(values):
     }
 
 
-def _default_metric_for_col(idx: int) -> str:
-    if idx < len(GPC_METRICS):
-        return GPC_METRICS[idx].display_name
-    return GPC_METRICS[0].display_name
+_BASIS_SLICE_KEYS = ("metric_cols", "selected_high", "selected_low", "weights")
+
+
+def _basis_key(basis_mode) -> str:
+    return "EQUITY" if str(basis_mode or "").upper() == "EQUITY" else "BEV"
+
+
+def _default_metric_for_col(idx: int, basis_mode: str = "BEV") -> str:
+    options = [
+        o for o in dropdown_options(_basis_key(basis_mode))
+        if o != CUSTOM_MULTIPLE_LABEL
+    ]
+    if not options:
+        return CUSTOM_MULTIPLE_LABEL
+    return options[idx % len(options)]
+
+
+def _basis_bucket(gpc_state: dict, basis_mode: str) -> dict:
+    """Return the saved BEV/EQUITY-specific GPC substate.
+
+    Backward compatible with old sessions that stored metric_cols,
+    selected_high, selected_low, and weights directly at gpc_page_state top level.
+    """
+    gpc_state = gpc_state or {}
+    basis = _basis_key(basis_mode)
+
+    basis_state = gpc_state.get("basis_state") or {}
+    bucket = dict(basis_state.get(basis) or {})
+
+    # Legacy fallback only if the old top-level basis matches requested basis.
+    legacy_basis = _basis_key(gpc_state.get("basis_mode", "BEV"))
+    if legacy_basis == basis:
+        for k in _BASIS_SLICE_KEYS:
+            if not bucket.get(k) and gpc_state.get(k):
+                bucket[k] = dict(gpc_state.get(k) or {})
+
+    for k in _BASIS_SLICE_KEYS:
+        bucket[k] = dict(bucket.get(k) or {})
+
+    return bucket
+
+
+def _migrate_gpc_basis_state(prev: dict, legacy_basis: str) -> dict:
+    """Build normalized basis_state and migrate old top-level fields once."""
+    prev = prev or {}
+    raw_basis_state = prev.get("basis_state") or {}
+
+    basis_state = {}
+    for b in ("BEV", "EQUITY"):
+        old_bucket = dict(raw_basis_state.get(b) or {})
+        basis_state[b] = {
+            k: dict(old_bucket.get(k) or {})
+            for k in _BASIS_SLICE_KEYS
+        }
+
+    legacy_basis = _basis_key(legacy_basis)
+    for k in _BASIS_SLICE_KEYS:
+        legacy_val = prev.get(k)
+        if legacy_val and not basis_state[legacy_basis].get(k):
+            basis_state[legacy_basis][k] = dict(legacy_val or {})
+
+    return basis_state
 
 
 # -------------------------------------------------------------
@@ -221,20 +279,22 @@ def _fixed_header_cells():
     State("session-store", "data"),
 )
 def render_header(num_multiples, basis_mode, session_data):
-    basis_mode = basis_mode or "BEV"
+    basis_mode = _basis_key(basis_mode)
     try:
         num_cols = max(1, min(MAX_COLS_CAP, int(num_multiples or MAX_COLS_CAP)))
     except (TypeError, ValueError):
         num_cols = MAX_COLS_CAP
 
     options = dropdown_options(basis_mode)
-    saved_metric_cols = ((session_data or {}).get("gpc_page_state", {}) or {}).get("metric_cols", {})
+    gpc_state = ((session_data or {}).get("gpc_page_state", {}) or {})
+    basis_bucket = _basis_bucket(gpc_state, basis_mode)
+    saved_metric_cols = basis_bucket.get("metric_cols", {})
 
     def _seeded_value(i):
         saved = saved_metric_cols.get(str(i))
         if saved in options:
             return saved
-        default = _default_metric_for_col(i)
+        default = _default_metric_for_col(i, basis_mode)
         return default if default in options else options[0]
 
     header_cells = _fixed_header_cells() + [
@@ -290,11 +350,12 @@ def persist_exclude_state(values, ids, existing):
     Output("gpc-stats-container", "children"),
     Output("gpc-selected-multiples-container", "children"),
     Input({"type": "gpc-metric-col", "index": ALL}, "value"),
+    Input("gpc-basis-toggle", "value"),
     Input("gpc-exclude-store", "data"),
     Input("session-store", "data"),
     Input("source-results-store", "data"),
 )
-def render_body(metric_col_values, exclude_map, session_data, source_results):
+def render_body(metric_col_values, basis_mode, exclude_map, session_data, source_results):
     inputs = dict_to_project_inputs(session_data or {})
     tickers = inputs.gpc_tickers or []
     exclude_map = exclude_map or {}
@@ -321,11 +382,7 @@ def render_body(metric_col_values, exclude_map, session_data, source_results):
             colSpan=span)])
         return [empty_row], "", ""
 
-    # basis_mode isn't a direct Input here (it drives the header
-    # callback); infer it from whether the chosen metrics belong to
-    # the BEV or EQUITY option set, defaulting to BEV.
-    basis_mode = "EQUITY" if any(m in dropdown_options("EQUITY") and m not in dropdown_options("BEV")
-                                  for m in metric_col_values) else "BEV"
+    basis_mode = _basis_key(basis_mode)
 
     all_multiples = compute_all_gpc_multiples(is_rows, ms_rows, ratio_rows, bs_rows, tickers, basis_mode=basis_mode)
     included_tickers = [t for t in tickers if not exclude_map.get(t, False)]
@@ -371,8 +428,10 @@ def render_body(metric_col_values, exclude_map, session_data, source_results):
     )
 
     # --- Selected Multiples: same 4 leading cols ---
-    saved_selected_high = ((session_data or {}).get("gpc_page_state", {}) or {}).get("selected_high", {})
-    saved_selected_low = ((session_data or {}).get("gpc_page_state", {}) or {}).get("selected_low", {})
+    gpc_state = ((session_data or {}).get("gpc_page_state", {}) or {})
+    basis_bucket = _basis_bucket(gpc_state, basis_mode)
+    saved_selected_high = basis_bucket.get("selected_high", {})
+    saved_selected_low = basis_bucket.get("selected_low", {})
     high_cells = _leading_cells("Selected Multiple — High")
     low_cells = _leading_cells("Selected Multiple — Low")
     for i, col_metric in enumerate(metric_col_values):
@@ -413,6 +472,7 @@ def render_body(metric_col_values, exclude_map, session_data, source_results):
     Output("gpc-weighting-container", "children"),
     Output("gpc-bridge-container", "children"),
     Input({"type": "gpc-metric-col", "index": ALL}, "value"),
+    Input("gpc-basis-toggle", "value"),
     Input({"type": "gpc-selected-high", "metric": ALL}, "value"),
     Input({"type": "gpc-selected-low", "metric": ALL}, "value"),
     Input({"type": "gpc-weight", "index": ALL}, "value"),
@@ -423,7 +483,7 @@ def render_body(metric_col_values, exclude_map, session_data, source_results):
     Input("session-store", "data"),
     Input("source-results-store", "data"),
 )
-def render_subject_weighting_bridge(metric_col_values, selected_highs, selected_lows,
+def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_highs, selected_lows,
                                      weight_values_live,
                                      dloc_pct_str, cp_pct_str, nwc_str, non_op_str,
                                      session_data, source_results):
@@ -458,8 +518,15 @@ def render_subject_weighting_bridge(metric_col_values, selected_highs, selected_
         if metric is None:
             subject_vals.append(None)
             continue
+        subject_line_key = metric.line_key
+        if metric.line_key == "ebitda" and metric.period in {"NFY", "NFY+1", "NFY+2"}:
+            # Comparable forward EBITDA comes from MarketScreener (adjusted basis);
+            # match it with the subject's Adjusted EBITDA. TTM stays conventional
+            # on both sides (StockAnalysis comps vs. compute_is_calculated subject).
+            subject_line_key = "adj_ebitda"
+
         val = get_subject_metric_value(session_data or {}, source_results or {},
-                                        metric.line_key, metric.period)
+                                        subject_line_key, metric.period)
         subject_vals.append(val)
 
     subject_row = _leading_cells("Subject Financial Data")
@@ -490,7 +557,7 @@ def render_subject_weighting_bridge(metric_col_values, selected_highs, selected_
 
     # --- Weighting ---
     saved_gpc_state = (session_data or {}).get("gpc_page_state", {}) or {}
-    saved_weights = saved_gpc_state.get("weights", {})
+    saved_weights = _basis_bucket(saved_gpc_state, basis_mode).get("weights", {})
     equal_weight_str = f"{100.0 / n_cols:.1f}"
     weight_row = _leading_cells("Weighting")
     weight_input_ids = []
@@ -675,41 +742,68 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
     session_data = dict(session_data or {})
     prev = dict(session_data.get("gpc_page_state") or {})
 
-    # Merge: only overwrite slices when that control family is actually mounted
-    metric_cols = dict(prev.get("metric_cols") or {})
-    if metric_col_ids:
-        metric_cols = {
+    triggered = ctx.triggered_id
+    trigger_type = triggered.get("type") if isinstance(triggered, dict) else triggered
+
+    prev_basis = _basis_key(prev.get("basis_mode", basis_mode or "BEV"))
+    current_basis = _basis_key(basis_mode or prev.get("basis_mode", "BEV"))
+
+    # Preserve old sessions and separate BEV / EQUITY dynamic table state.
+    basis_state = _migrate_gpc_basis_state(prev, prev_basis)
+    bucket = dict(basis_state.get(current_basis) or {})
+    for k in _BASIS_SLICE_KEYS:
+        bucket[k] = dict(bucket.get(k) or {})
+
+    # Only update the dynamic family that actually triggered this callback.
+    # This prevents a basis-toggle event from overwriting the destination
+    # basis with the old basis's still-mounted dropdown/input values.
+    if trigger_type == "gpc-metric-col" and metric_col_ids:
+        valid_options = set(dropdown_options(current_basis))
+        bucket["metric_cols"] = {
             str(id_dict["index"]): val
             for val, id_dict in zip(metric_col_values or [], metric_col_ids or [])
-            if id_dict is not None
+            if id_dict is not None and val in valid_options
         }
 
-    selected_high = dict(prev.get("selected_high") or {})
-    selected_low = dict(prev.get("selected_low") or {})
-    if selected_highs is not None and len(selected_highs) > 0:
-        selected_high = {str(i): v for i, v in enumerate(selected_highs)}
-    if selected_lows is not None and len(selected_lows) > 0:
-        selected_low = {str(i): v for i, v in enumerate(selected_lows)}
+    if trigger_type in ("gpc-selected-high", "gpc-selected-low"):
+        if selected_highs is not None and len(selected_highs) > 0:
+            bucket["selected_high"] = {str(i): v for i, v in enumerate(selected_highs)}
+        if selected_lows is not None and len(selected_lows) > 0:
+            bucket["selected_low"] = {str(i): v for i, v in enumerate(selected_lows)}
 
-    weights = dict(prev.get("weights") or {})
-    if weight_ids:
-        weights = {
+    if trigger_type == "gpc-weight" and weight_ids:
+        bucket["weights"] = {
             str(id_dict["index"]): val
             for val, id_dict in zip(weight_values or [], weight_ids or [])
             if id_dict is not None
         }
 
+    basis_state[current_basis] = bucket
+
+    # Exclusions are shared across BEV / Equity.
+    saved_exclude_map = (
+        exclude_map
+        if trigger_type == "gpc-exclude-store" and exclude_map is not None
+        else (prev.get("exclude_map") or {})
+    )
+
     session_data["gpc_page_state"] = {
         "num_multiples": num_multiples if num_multiples is not None else prev.get("num_multiples", MAX_COLS_CAP),
-        "basis_mode": basis_mode or prev.get("basis_mode", "BEV"),
+        "basis_mode": current_basis,
         "dloc": dloc if dloc is not None else prev.get("dloc", "0%"),
         "control_premium": control_premium if control_premium is not None else prev.get("control_premium", "0%"),
         "nwc": nwc if nwc is not None else prev.get("nwc", "0"),
         "non_op": non_op if non_op is not None else prev.get("non_op", "0"),
-        "metric_cols": metric_cols,
-        "selected_high": selected_high,
-        "selected_low": selected_low,
-        "weights": weights,
-        "exclude_map": exclude_map if exclude_map is not None else (prev.get("exclude_map") or {}),
+
+        # New canonical per-basis state.
+        "basis_state": basis_state,
+
+        # Backward-compatible mirror of the currently active basis.
+        "metric_cols": bucket.get("metric_cols", {}),
+        "selected_high": bucket.get("selected_high", {}),
+        "selected_low": bucket.get("selected_low", {}),
+        "weights": bucket.get("weights", {}),
+
+        "exclude_map": saved_exclude_map,
     }
     return session_data

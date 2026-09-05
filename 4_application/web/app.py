@@ -68,6 +68,7 @@ navbar = dbc.Navbar(
                     dbc.NavItem(dbc.NavLink("Home", href="/", active="exact")),
                     dbc.NavItem(dbc.NavLink("Subject Financials", href="/subject-financials", active="exact")),
                     dbc.NavItem(dbc.NavLink("Source Data", href="/source-data", active="exact")),
+                    dbc.NavItem(dbc.NavLink("Debt Schedule", href="/debt-schedule", active="exact")),
                     dbc.NavItem(dbc.NavLink("GPC", href="/gpc", active="exact")),
                     dbc.NavItem(dbc.NavLink("DCF", href="/dcf", active="exact")),
                 ],

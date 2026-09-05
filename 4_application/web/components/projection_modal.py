@@ -165,42 +165,19 @@ def _mul(a, b):
 
 
 def _hist_ebitda_adjusted(session_data, source_results):
-    """Return (source_ebit_like, adjusted EBITDA) historical values.
+    """Return (historical EBIT, historical Adjusted EBITDA).
 
-    Important: our current StockAnalysis/Subject Financials "ebitda" line is
-    effectively EBIT / operating income, not true EBITDA. To make historicals
-    comparable to MarketScreener forward EBITDA estimates, the adjusted EBITDA
-    anchor must add back D&A, other amortization, and SBC.
+    Both come from the shared resolver (compute_is_calculated via
+    get_historical_line_values), so the modal, Subject Financials, GPC
+    and DCF all use the same definitions:
 
-        Adjusted EBITDA = EBIT + D&A + Other Amortization + SBC
-
-    Subject Financials can still show the as-reported/source line separately;
-    this helper is only for the Projection Module's comparable projection base.
+        EBIT            = Gross Profit - Operating Expenses
+        EBITDA          = EBIT + D&A + Other Amortization
+        Adjusted EBITDA = EBITDA + SBC
     """
-    source_ebit_like = get_historical_line_values(session_data, source_results, "ebitda", "IS")
-
-    da = get_historical_line_values(session_data, source_results, "d&a_for_ebitda", "IS")
-    if not any(v is not None for v in da.values()):
-        da = get_historical_line_values(session_data, source_results, "depreciation", "IS")
-    if not any(v is not None for v in da.values()):
-        da = get_historical_line_values(session_data, source_results, "depreciation_amortization", "IS")
-
-    other_amort = get_historical_line_values(session_data, source_results, "other_amortization", "IS")
-    sbc = get_historical_line_values(session_data, source_results, "stock_based_compensation", "IS")
-
-    adj = {}
-    for p, base in source_ebit_like.items():
-        if base is None:
-            adj[p] = None
-        else:
-            adj[p] = (
-                base
-                + (da.get(p) or 0.0)
-                + (other_amort.get(p) or 0.0)
-                + (sbc.get(p) or 0.0)
-            )
-
-    return source_ebit_like, adj
+    ebit = get_historical_line_values(session_data, source_results, "ebit", "IS")
+    adjusted = get_historical_line_values(session_data, source_results, "adj_ebitda", "IS")
+    return ebit, adjusted
 
 
 def _tax_rate(session_data) -> Optional[float]:
@@ -347,42 +324,64 @@ def _harvest(pd: ProjectionData, cell_ids, cell_values, triggered_id=None) -> Pr
 
 
 def _resolve(session_data, source_results, pd: ProjectionData) -> dict:
+    """Run the shared projection resolver with everything it now needs:
+    adjusted-EBITDA history anchor, MarketScreener estimates (incl. analyst
+    NI for the pre-tax plug), the Home tax rate, and SIGNED net interest
+    from the Debt Schedule (stored there as a positive cost → negative here).
+    """
     inputs = dict_to_project_inputs(session_data)
     hist = list(inputs.historical_period_columns) + ["TTM"]
     proj = list(inputs.projection_period_columns)
     is_public = inputs.is_publicly_traded
+
     h_rev = get_historical_line_values(session_data, source_results, "revenue", "IS")
     h_gp = get_historical_line_values(session_data, source_results, "gross_profit", "IS")
-    _h_ebitda_rep, h_ebitda = _hist_ebitda_adjusted(session_data, source_results)
+    _h_ebit, h_adj_ebitda = _hist_ebitda_adjusted(session_data, source_results)
+
     ms = _load_ms_via_sakey(source_results, inputs.subject_ticker) if is_public else {
         "revenue": {}, "ebitda": {}, "net_income": {}
     }
+
+    debt_state = (session_data or {}).get("debt_page_state", {}) or {}
+    interest_map = debt_state.get("interest_expense_by_period", {}) or {}
+    if not interest_map:
+        interest_map = debt_state.get("projected_interest", {}) or {}
+    net_interest_by_period = {}
+    for p in proj:
+        expense = _clean_float(interest_map.get(p))
+        net_interest_by_period[p] = -abs(expense) if expense is not None else None
+
     return resolve_projection_dollars(
         historical_periods=hist,
         projection_periods=proj,
         hist_revenue=h_rev,
         hist_gross_profit=h_gp,
-        hist_ebitda=h_ebitda,
+        hist_ebitda=h_adj_ebitda,
         is_public=is_public,
         ms_revenue=ms["revenue"],
         ms_ebitda=ms["ebitda"],
         projection_data=pd,
+        ms_net_income=ms["net_income"],
+        tax_rate=_tax_rate(session_data),
+        net_interest_by_period=net_interest_by_period,
     )
 
 
 def _apply_resolved(pd: ProjectionData, resolved: dict, proj_periods: list) -> None:
+    """Write every resolved dollar line back onto ProjectionData so the saved
+    blob (and therefore Subject Financials / GPC / DCF) carries the exact
+    numbers the modal displayed."""
     if not hasattr(pd, "other_adj") or pd.other_adj is None:
         pd.other_adj = {}
     for p in proj_periods:
         r = resolved.get(p, {}) or {}
-        for k in ("revenue", "gross_profit", "ebitda", "da", "capex",
-                  "sbc", "other_amort", "net_income"):
-            if r.get(k) is not None:
-                bucket = getattr(pd, k, None)
-                if isinstance(bucket, dict):
-                    bucket[p] = r[k]
-        if r.get("other_adj") is not None:
-            pd.other_adj[p] = r["other_adj"]
+        for k in ("revenue", "gross_profit", "ebitda", "da", "sbc",
+                  "other_amort", "capex", "net_income"):
+            bucket = getattr(pd, k, None)
+            if isinstance(bucket, dict):
+                bucket[p] = r.get(k)
+        pd.other_adj[p] = r.get("other_adj")
+        pd.net_income_margin[p] = _div(r.get("net_income"), r.get("revenue"))
 
 
 def _sync_growth_display(pd, session_data, source_results, proj_periods):
@@ -435,7 +434,7 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
 
     h_rev = get_historical_line_values(session_data, source_results, "revenue", "IS")
     h_gp = get_historical_line_values(session_data, source_results, "gross_profit", "IS")
-    h_ebitda_rep, h_ebitda = _hist_ebitda_adjusted(session_data, source_results)
+    h_ebit, h_ebitda = _hist_ebitda_adjusted(session_data, source_results)
     h_da = get_historical_line_values(session_data, source_results, "d&a_for_ebitda", "IS")
     if not any(v is not None for v in h_da.values()):
         h_da = get_historical_line_values(session_data, source_results, "depreciation", "IS")
@@ -444,7 +443,33 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
     h_sbc = get_historical_line_values(session_data, source_results, "stock_based_compensation", "IS")
     h_oa = get_historical_line_values(session_data, source_results, "other_amortization", "IS")
     h_ni = get_historical_line_values(session_data, source_results, "net_income", "IS")
+    h_taxes = get_historical_line_values(session_data, source_results, "taxes", "IS")
     h_capex = get_historical_line_values(session_data, source_results, "capex", "IS")
+    
+    # Historical Income Statement presentation:
+    #
+    # Net Interest Income / (Expense) = Interest Income - Interest Expense.
+    #
+    # StockAnalysis can provide interest expense with either sign depending
+    # on the company/source row, so normalize it as a positive cost before
+    # subtracting it. Interest income remains a positive income amount.
+    h_interest_expense_raw = get_historical_line_values(
+        session_data, source_results, "interest_expense", "IS"
+    )
+    h_interest_income = get_historical_line_values(
+        session_data, source_results, "interest_income", "IS"
+    )
+    h_net_interest = {}
+    for p in hist_periods:
+        expense_raw = h_interest_expense_raw.get(p)
+        income = h_interest_income.get(p)
+
+        expense_cost = abs(expense_raw) if expense_raw is not None else None
+        if expense_cost is None and income is None:
+            h_net_interest[p] = None
+        else:
+            h_net_interest[p] = (income or 0.0) - (expense_cost or 0.0)
+
     tax_rate = _tax_rate(session_data)
     ms = _load_ms_via_sakey(source_results, inputs.subject_ticker) if is_public else {
         "revenue": {}, "ebitda": {}, "net_income": {}
@@ -467,70 +492,32 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
 
     disp_gp = {p: h_gp.get(p) for p in hist_periods}
     disp_ebitda = {p: h_ebitda.get(p) for p in hist_periods}
+    disp_ebit = {p: h_ebit.get(p) for p in hist_periods}
     disp_da = {p: h_da.get(p) for p in hist_periods}
     disp_capex = {p: h_capex.get(p) for p in hist_periods}
     disp_sbc = {p: h_sbc.get(p) for p in hist_periods}
     disp_oa = {p: h_oa.get(p) for p in hist_periods}
     disp_ni = {p: h_ni.get(p) for p in hist_periods}
     disp_other_adj = {p: None for p in hist_periods}
-    disp_taxes = {}
+    disp_net_interest = {p: h_net_interest.get(p) for p in hist_periods}
+    disp_taxes = {p: h_taxes.get(p) for p in hist_periods}
 
+    # Every projected line now comes straight from the shared resolver —
+    # no second waterfall is maintained here. Historical taxes above are
+    # the ACTUAL reported figures, not pretax × Home rate.
     for p in proj_periods:
         r = resolved.get(p, {}) or {}
         disp_gp[p] = r.get("gross_profit")
         disp_ebitda[p] = r.get("ebitda")
+        disp_ebit[p] = r.get("ebit")
         disp_da[p] = r.get("da")
+        disp_oa[p] = r.get("other_amort")
+        disp_sbc[p] = r.get("sbc")
+        disp_net_interest[p] = r.get("net_interest")
+        disp_other_adj[p] = r.get("other_adj")
+        disp_taxes[p] = r.get("taxes")
+        disp_ni[p] = r.get("net_income")
         disp_capex[p] = r.get("capex")
-        rev_p = r.get("revenue")
-        disp_sbc[p] = _mul(rev_p, pd.sbc_pct.get(p))
-        disp_oa[p] = _mul(rev_p, pd.other_amort_pct.get(p))
-
-        ebitda_p = disp_ebitda.get(p)
-        da_p = disp_da.get(p) or 0.0
-        oa_p = disp_oa.get(p) or 0.0
-        sbc_p = disp_sbc.get(p) or 0.0
-        ebit = (ebitda_p - da_p - oa_p - sbc_p) if ebitda_p is not None else None
-
-        # +Other Adjustments is PRE-tax (net interest, other non-op,
-        # one-timers). Sitting above the Taxes row, it must be solved
-        # pre-tax or the column doesn't foot top-to-bottom — and the
-        # residual the user reads off NFY+2 to hand-enter in NFY+3
-        # wouldn't be an interpretable number.
-        if is_public and p in MS_COVERED_PERIODS:
-            analyst_ni = ms.get("net_income", {}).get(p)
-            adj = None
-            if ebit is not None and analyst_ni is not None \
-                    and tax_rate is not None and tax_rate != 1.0:
-                adj = (analyst_ni / (1.0 - tax_rate)) - ebit
-            disp_other_adj[p] = adj
-            if adj is not None:
-                pd.other_adj[p] = adj
-            pretax = (ebit + adj) if (ebit is not None and adj is not None) else None
-            disp_taxes[p] = _mul(pretax, tax_rate)
-            disp_ni[p] = analyst_ni
-        else:
-            adj = pd.other_adj.get(p)
-            disp_other_adj[p] = adj
-            pretax = (ebit + (adj or 0.0)) if ebit is not None else None
-            disp_taxes[p] = _mul(pretax, tax_rate)
-            disp_ni[p] = _mul(pretax, (1.0 - tax_rate) if tax_rate is not None else None)
-
-        if disp_sbc[p] is not None:
-            pd.sbc[p] = disp_sbc[p]
-        if disp_oa[p] is not None:
-            pd.other_amort[p] = disp_oa[p]
-        if disp_ni[p] is not None:
-            pd.net_income[p] = disp_ni[p]
-
-    disp_ebitda_rep = {p: h_ebitda_rep.get(p) for p in hist_periods}
-    for p in proj_periods:
-        disp_ebitda_rep[p] = None
-    for p in hist_periods:
-        ebitda_p = h_ebitda.get(p)
-        ebit = None
-        if ebitda_p is not None:
-            ebit = ebitda_p - (h_da.get(p) or 0.0) - (h_oa.get(p) or 0.0) - (h_sbc.get(p) or 0.0)
-        disp_taxes[p] = _mul(ebit, tax_rate)
 
     ni_m = {p: _div(disp_ni.get(p), disp_rev.get(p)) for p in all_periods}
 
@@ -599,19 +586,22 @@ def build_table(session_data: dict, source_results: dict, pd: ProjectionData):
     locked_row("    Margin (%)", gp_m, pct=True)
     pct_driver("    Improvement (%)", "gp_improvement", gp_imp_h)
 
-    locked_row("EBIT / Operating Income (source)", disp_ebitda_rep)
-    locked_row("Adjusted EBITDA (D&A/OA/SBC add-back)", disp_ebitda, bold=True)
+    locked_row("Adjusted EBITDA (incl. SBC add-back)", disp_ebitda, bold=True)
     locked_row("    Margin (%)", ebitda_m, pct=True)
     pct_driver("    Improvement (%)", "ebitda_improvement", ebitda_imp_h, lock_ms=True)
 
-    locked_row("D&A", disp_da, bold=True)
+    locked_row("Less: D&A", disp_da, bold=True)
     pct_driver("    as % of Revenue", "da_pct", {p: _div(h_da.get(p), h_rev.get(p)) for p in hist_periods})
 
-    locked_row("Other Amortization", disp_oa, bold=True)
+    locked_row("Less: Other Amortization", disp_oa, bold=True)
     pct_driver("    as % of Revenue", "other_amort_pct", {p: _div(h_oa.get(p), h_rev.get(p)) for p in hist_periods})
 
-    locked_row("Stock-Based Compensation", disp_sbc, bold=True)
+    locked_row("Less: Stock-Based Compensation", disp_sbc, bold=True)
     pct_driver("    as % of Revenue", "sbc_pct", {p: _div(h_sbc.get(p), h_rev.get(p)) for p in hist_periods})
+
+    locked_row("EBIT / Operating Income", disp_ebit, bold=True)
+
+    locked_row("Net Interest Income / (Expense)", disp_net_interest, bold=True)
 
     c = [html.Td("+Other Adjustments", style=_LABEL_BOLD)]
     for p in all_periods:

@@ -64,10 +64,30 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
         raw.get("operating_expense_adj"),
     )
 
-    ebitda = _sub(gross_profit, operating_expenses)
+    # Gross Profit - Operating Expenses is EBIT / operating income.
+    ebit = _sub(gross_profit, operating_expenses)
 
-    da = _add(raw.get("d&a_for_ebitda"), raw.get("amortization"))
-    ebit = _sub(ebitda, da)
+    # Reconstruct conventional EBITDA from EBIT. Prefer the dedicated
+    # CFS other-amortization value when present; otherwise fall back to
+    # the IS amortization line.
+    da = raw.get("d&a_for_ebitda")
+    other_amort = raw.get("other_amortization")
+    if other_amort is None:
+        other_amort = raw.get("amortization")
+
+    ebitda = (
+        ebit + (da or 0.0) + (other_amort or 0.0)
+        if ebit is not None
+        else None
+    )
+
+    # MarketScreener-style adjusted EBITDA adds back SBC.
+    sbc = raw.get("stock_based_compensation")
+    adj_ebitda = (
+        ebitda + (sbc or 0.0)
+        if ebitda is not None
+        else None
+    )
 
     # Interest expense: SA often publishes negative; Debt Schedule positive.
     # Always treat as a cost: income - |expense|
@@ -120,6 +140,8 @@ def compute_is_calculated(raw: Dict[str, Optional[float]]) -> Dict[str, Optional
         "operating_expenses": operating_expenses,
         "ebitda": ebitda,
         "ebit": ebit,
+        "net_interest": net_interest,
+        "adj_ebitda": adj_ebitda,
         "ebt_excluding_unusual_items": ebt_ex_unusual,
         "pretax_income": pretax_income,
         "income_before_nonrecurring": income_before_nonrecurring,

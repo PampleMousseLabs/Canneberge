@@ -25,9 +25,9 @@ GPC_METRICS: list[GPCMetric] = [
     # --- BEV Mode Only ---
     GPCMetric("TTM EBITDA",      "TTM",   "ebitda",       bev_allowed=True,  equity_allowed=False),
     GPCMetric("TTM EBIT",        "TTM",   "ebit",         bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY EBITDA",      "NFY",   "ebitda",       bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY+1 EBITDA",    "NFY+1", "ebitda",       bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY+2 EBITDA",    "NFY+2", "ebitda",       bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY Adjusted EBITDA",   "NFY",   "ebitda", bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY+1 Adjusted EBITDA", "NFY+1", "ebitda", bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY+2 Adjusted EBITDA", "NFY+2", "ebitda", bev_allowed=True,  equity_allowed=False),
 
     # --- Equity Mode Only (Market Cap / Aggregate Metric $) ---
     GPCMetric("TTM Net Income",  "TTM",   "net_income",   bev_allowed=False, equity_allowed=True),
@@ -68,17 +68,17 @@ def convert_metric_on_toggle(old_name: str, to_basis_mode: str) -> str:
         conversion_map = {
             "TTM EBITDA": "TTM Net Income",
             "TTM EBIT": "TTM Net Income",
-            "NFY EBITDA": "NFY Net Income",
-            "NFY+1 EBITDA": "NFY+1 Net Income",
-            "NFY+2 EBITDA": "NFY+2 Net Income",
+            "NFY Adjusted EBITDA": "NFY Net Income",
+            "NFY+1 Adjusted EBITDA": "NFY+1 Net Income",
+            "NFY+2 Adjusted EBITDA": "NFY+2 Net Income",
         }
         return conversion_map.get(old_name, valid_options[0])
     else:
         conversion_map = {
             "TTM Net Income": "TTM EBITDA",
             "TTM Book Equity": "TTM EBITDA",
-            "NFY Net Income": "NFY EBITDA",
-            "NFY+1 Net Income": "NFY+1 EBITDA",
-            "NFY+2 Net Income": "NFY+2 EBITDA",
+            "NFY Net Income": "NFY Adjusted EBITDA",
+            "NFY+1 Net Income": "NFY+1 Adjusted EBITDA",
+            "NFY+2 Net Income": "NFY+2 Adjusted EBITDA",
         }
         return conversion_map.get(old_name, valid_options[0])

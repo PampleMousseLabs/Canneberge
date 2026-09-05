@@ -27,10 +27,9 @@ from Canneberge.Calculations.subject_is_bs_calc import (
     compute_is_calculated,
     compute_bs_calculated,
     BS_DIRECT_PULL_KEYS,
-    _sub,
 )
+from Canneberge.Calculations.projection_resolve import resolve_projection_waterfall
 from web.lib.session_io import dict_to_project_inputs
-
 
 # =====================================================================
 # HELPERS — dict → dataclass conversion
@@ -104,18 +103,28 @@ def _parse_val(value) -> Optional[float]:
 
 
 def _get_projected_interest_expense(session_data: dict, period: str) -> Optional[float]:
-    """Retrieve projected interest expense from Debt Schedule page state.
-
-    The desktop app's DCF/Subject Financials both pull this via
-    debt_schedule_page.get_projected_interest_expense(period). Web debt page
-    doesn't exist yet, so this returns None until Step 9+ builds it.
-    When it does exist, it should write to session-store["debt_page_state"]
-    under key "projected_interest" as {period: float}.
-    """
+    """Return the Debt Schedule's POSITIVE interest-expense amount for a period."""
     debt_state = (session_data or {}).get("debt_page_state", {}) or {}
-    projected_interest = debt_state.get("projected_interest", {})
+    projected_interest = debt_state.get("interest_expense_by_period", {}) or {}
+    if not projected_interest:
+        projected_interest = debt_state.get("projected_interest", {}) or {}
     return _parse_val(projected_interest.get(period))
 
+
+def _normalise_rate(value) -> Optional[float]:
+    """Accept 0.21, 21, '21%', '0.21' → 0.21."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    has_pct = "%" in raw
+    raw = raw.replace("%", "").replace(",", "").strip()
+    try:
+        rate = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(rate) or math.isinf(rate):
+        return None
+    return rate / 100.0 if (has_pct or abs(rate) > 1.0) else rate
 
 # =====================================================================
 # StockAnalysis row lookups (public path only)
@@ -171,10 +180,15 @@ def get_historical_line_values(
     # Assemble raw-value dict per period, from either public or private source.
     raw_by_period: Dict[str, Dict[str, Optional[float]]] = {p: {} for p in periods}
 
+    # CFS add-backs that are NOT standalone rows in IS_LINES but that the
+    # calculated EBITDA / Adjusted EBITDA rows require.
+    _CFS_ADDBACK_KEYS = ("stock_based_compensation", "other_amortization")
+
     if inputs.is_publicly_traded:
         ticker = inputs.subject_ticker.lower()
         stmt_lookup = _build_stmt_lookup(source_results, statement, ticker)
-        # CFS lookup only needed for IS keys whose SA source is "CFS" (capex, acquisitions).
+        # CFS lookup needed for IS keys whose SA source is "CFS"
+        # (capex, acquisitions, SBC, other amortization).
         cfs_lookup = _build_stmt_lookup(source_results, "CFS", ticker) if statement == "IS" else {}
 
         for k2, _label, c2, _bold in lines:
@@ -194,6 +208,12 @@ def get_historical_line_values(
                 if v is not None and sign_flip:
                     v = -v
                 raw_by_period[period][k2] = v
+
+        if statement == "IS":
+            for extra_key in _CFS_ADDBACK_KEYS:
+                row_data = _resolve_sa_row(cfs_lookup, get_sa_labels(extra_key))
+                for period in periods:
+                    raw_by_period[period][extra_key] = _parse_val(row_data.get(period, ""))
     else:
         pf = dict_to_private_financials(session_data)
         for k2, _label, c2, _bold in lines:
@@ -205,6 +225,11 @@ def get_historical_line_values(
                 else:
                     raw_by_period[period][k2] = pf.get_bs(k2, period)
 
+        if statement == "IS":
+            for extra_key in _CFS_ADDBACK_KEYS:
+                for period in periods:
+                    raw_by_period[period][extra_key] = pf.get_is(extra_key, period)
+
     # Compute calc rows once per period, then resolve the requested key.
     compute_fn = compute_is_calculated if statement == "IS" else compute_bs_calculated
     result: Dict[str, Optional[float]] = {}
@@ -212,12 +237,7 @@ def get_historical_line_values(
         if is_calc and statement == "BS" and key in BS_DIRECT_PULL_KEYS:
             result[period] = raw_by_period[period].get(key)
         elif is_calc:
-            if key == "adj_ebitda" and statement == "IS":
-                ebitda_raw = raw_by_period[period].get("ebitda")
-                sbc_raw = raw_by_period[period].get("stock_based_compensation")
-                result[period] = None if ebitda_raw is None else ebitda_raw + (sbc_raw or 0.0)
-            else:
-                result[period] = compute_fn(raw_by_period[period]).get(key)
+            result[period] = compute_fn(raw_by_period[period]).get(key)
         else:
             result[period] = raw_by_period[period].get(key)
 
@@ -289,14 +309,14 @@ def get_subject_metric_value(
     key: str,
     period: str,
 ) -> Optional[float]:
-    """Single entry point: return one subject-company metric at one period.
-
-    Direct port of desktop SubjectFinancialsPage.get_metric_value(key, period).
+    """Single entry point: return one canonical subject-company metric at one period.
 
     Historical/TTM: delegates to get_historical_line_values with auto IS/BS routing.
-    Projection: builds the same raw + calc waterfall the desktop IS grid uses,
-                using ProjectionData for revenue/GP/EBITDA/D&A drivers and applying
-                subject_tax_rate to compute taxes.
+                    Every calculated row (EBIT, EBITDA, Adjusted EBITDA, Net Interest,
+                    Pretax, NI, ...) comes from compute_is_calculated.
+    Projection:     ProjectionData drivers + the SAME waterfall function the
+                    Projection Module uses (resolve_projection_waterfall), so this
+                    resolver, the modal, GPC and DCF agree on every projected line.
     """
     inputs = dict_to_project_inputs(session_data)
 
@@ -313,80 +333,110 @@ def get_subject_metric_value(
                     return val
             return None
 
-        # interest_income has multiple label aliases handled inside get_sa_labels,
-        # so a direct pass-through works. Kept as a named branch to match desktop.
-        if key == "interest_income" and statement == "IS":
-            return get_historical_line_values(session_data, source_results, "interest_income", "IS").get(period)
-
         return get_historical_line_values(session_data, source_results, key, statement).get(period)
 
     # ---- Projection branch (NFY, NFY+1, ...) ----
     if period in inputs.projection_period_columns:
-        # Adjusted EBITDA is the projection module's already-SBC-added-back figure.
-        if key == "adj_ebitda":
-            return dict_to_projection_data(session_data).ebitda.get(period)
-
         pd = dict_to_projection_data(session_data)
 
-        rev = pd.revenue.get(period)
-        gp = pd.gross_profit.get(period)
-        ebitda_mod = pd.ebitda.get(period)
+        revenue = pd.revenue.get(period)
+        gross_profit = pd.gross_profit.get(period)
+        adjusted_ebitda = pd.ebitda.get(period)   # Projection Module stores ADJUSTED EBITDA here
+        da = pd.da.get(period)
+        other_amort = pd.other_amort.get(period)
+        sbc = pd.sbc.get(period)
+        capex = pd.capex.get(period)
 
-        # Seed raw dict from ProjectionData drivers
-        raw: Dict[str, Optional[float]] = {
-            "revenue": rev,
-            "d&a_for_ebitda": pd.da.get(period),
-            "depreciation": pd.da.get(period),
-            "amortization": pd.other_amort.get(period),
-            "stock_based_compensation": pd.sbc.get(period),
-            "capex": pd.capex.get(period),
+        # Debt Schedule interest is a positive cost; the IS shows SIGNED net interest.
+        # No projected interest income is modelled yet, so net = -expense.
+        interest_expense = _get_projected_interest_expense(session_data, period)
+        net_interest = -abs(interest_expense) if interest_expense is not None else None
+
+        tax_rate = _normalise_rate(getattr(inputs, "subject_tax_rate", None))
+
+        # Public NFY..NFY+2: the modal saved analyst NI into pd.net_income and the
+        # pre-tax plug into pd.other_adj. Re-solve the plug here only when analyst
+        # NI is actually present; otherwise use the saved plug as-is.
+        is_ms_period = inputs.is_publicly_traded and period in {"NFY", "NFY+1", "NFY+2"}
+        analyst_ni = pd.net_income.get(period) if is_ms_period else None
+        solve_plug = is_ms_period and analyst_ni is not None
+
+        waterfall = resolve_projection_waterfall(
+            adjusted_ebitda=adjusted_ebitda,
+            da=da,
+            other_amort=other_amort,
+            sbc=sbc,
+            net_interest=net_interest,
+            other_adj=pd.other_adj.get(period),
+            tax_rate=tax_rate,
+            analyst_net_income=analyst_ni,
+            solve_other_adjustment=solve_plug,
+        )
+
+        conventional_ebitda = (
+            adjusted_ebitda - (sbc or 0.0) if adjusted_ebitda is not None else None
+        )
+        cogs = (
+            revenue - gross_profit
+            if revenue is not None and gross_profit is not None else None
+        )
+        operating_expenses = (
+            gross_profit - waterfall["ebit"]
+            if gross_profit is not None and waterfall["ebit"] is not None else None
+        )
+
+        net_income = waterfall["net_income"]
+
+        interest_after_tax = None
+        if interest_expense is not None:
+            interest_after_tax = (
+                interest_expense * (1.0 - tax_rate) if tax_rate is not None else interest_expense
+            )
+
+        debt_free_net_income = None
+        if net_income is not None or interest_after_tax is not None:
+            debt_free_net_income = (net_income or 0.0) + (interest_after_tax or 0.0)
+
+        projected: Dict[str, Optional[float]] = {
+            "revenue": revenue,
+            "cogs": cogs,
+            "cost_of_goods_sold": cogs,
+            "gross_profit": gross_profit,
+            "operating_expenses": operating_expenses,
+
+            # Conventional vs adjusted EBITDA are distinct keys.
+            "ebitda": conventional_ebitda,
+            "adj_ebitda": adjusted_ebitda,
+
+            "d&a_for_ebitda": da,
+            "depreciation": da,
+            "amortization": other_amort,
+            "other_amortization": other_amort,
+            "stock_based_compensation": sbc,
+
+            "ebit": waterfall["ebit"],
+
+            # Dedicated expense row shows a positive cost; net interest is signed.
+            "interest_expense": abs(interest_expense) if interest_expense is not None else None,
+            "interest_income": None,
+            "net_interest": waterfall["net_interest"],
+
+            # The Projection Module's residual (pre-tax) non-operating plug.
+            "other_income": waterfall["other_adj"],
+            "other_adj": waterfall["other_adj"],
+
+            "ebt_excluding_unusual_items": waterfall["pretax_income"],
+            "pretax_income": waterfall["pretax_income"],
+            "taxes": waterfall["taxes"],
+            "income_before_nonrecurring": net_income,
+            "nonrecurring": None,
+            "net_income": net_income,
+            "interest_expense_after_tax": interest_after_tax,
+            "debt_free_net_income": debt_free_net_income,
+
+            "capex": capex,
         }
-        # Invert GP → COGS and EBITDA → OpEx so compute_is_calculated
-        # re-derives the full waterfall correctly.
-        if rev is not None and gp is not None:
-            raw["cogs"] = rev - gp
-        if gp is not None and ebitda_mod is not None:
-            raw["other_operating"] = gp - ebitda_mod
-
-        # Debt Schedule projected interest expense (None if debt page not yet built).
-        interest_val = _get_projected_interest_expense(session_data, period)
-        if interest_val is not None:
-            raw["interest_expense"] = -abs(interest_val)
-
-        tax_rate = getattr(inputs, "subject_tax_rate", 0.21)
-        calc = compute_is_calculated(raw)
-
-        # Overlay the module's own driver values (Projection Module owns these
-        # canonically; compute_is_calculated derives them, but the module wins).
-        if gp is not None:
-            calc["gross_profit"] = gp
-        if ebitda_mod is not None:
-            calc["ebitda"] = ebitda_mod
-        if pd.net_income.get(period) is not None:
-            calc["net_income"] = pd.net_income.get(period)
-        calc["cost_of_goods_sold"] = _sub(rev, gp)
-        calc["operating_expenses"] = _sub(gp, ebitda_mod)
-
-        # Apply subject tax rate to pretax, then re-run waterfall so NI/DFNI update.
-        pretax = calc.get("pretax_income")
-        if pretax is not None and tax_rate is not None:
-            raw["taxes"] = pretax * tax_rate
-            calc = compute_is_calculated(raw)
-            if gp is not None:
-                calc["gross_profit"] = gp
-            if ebitda_mod is not None:
-                calc["ebitda"] = ebitda_mod
-            if pd.net_income.get(period) is not None:
-                calc["net_income"] = pd.net_income.get(period)
-            calc["cost_of_goods_sold"] = _sub(rev, gp)
-            calc["operating_expenses"] = _sub(gp, ebitda_mod)
-
-        # Prefer raw over calc when both present (revenue, D&A, etc. are raw drivers).
-        if key in raw and raw.get(key) is not None:
-            return raw.get(key)
-        if key in calc:
-            return calc.get(key)
-        return None
+        return projected.get(key)
 
     # Unknown period
     return None
