@@ -458,9 +458,12 @@ def autosync_session(
     Output("input-hist-years", "value"),
     Output("input-proj-years", "value"),
     Input("session-load-timestamp", "data"),
+    Input("_pages_location", "pathname"),
     State("session-store", "data"),
 )
-def hydrate_home_page_from_load(load_timestamp, session_data):
+def hydrate_home_page_from_load(load_timestamp, pathname, session_data):
+    if pathname not in ("/", None):
+        return [no_update] * 21
     # If the user refreshes their browser and there's a cached session, we want
     # it to populate. If there's no data, let layout defaults stand.
     # Note: 21 items returned here to match the 21 outputs exactly.

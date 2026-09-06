@@ -247,9 +247,11 @@ layout = dbc.Container([
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
-                    dbc.Label("NWC Surplus (Deficit) — PLACEHOLDER", className="text-muted small"),
+                    dbc.Label("NWC Surplus (Deficit) — from NWC page",
+                              className="text-muted small"),
                     dbc.Input(id="gpc-nwc-input", type="text", value="0",
-                              size="sm", style={"width": "140px"}, debounce=True),
+                              size="sm", style={"width": "140px"}, debounce=True,
+                              disabled=True),
                 ], xs=6, md="auto"),
                 dbc.Col([
                     dbc.Label("Non-Operating Assets, Net — PLACEHOLDER", className="text-muted small"),
@@ -630,8 +632,14 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
     # branch — lines ~1141-1171 — is the one to port next.) ---
     control_premium = _pct(cp_pct_str)
     dloc = _pct(dloc_pct_str)
-    nwc = _num(nwc_str)
     non_op = _num(non_op_str)
+
+    # NWC page is authoritative. Its cached surplus/(deficit) is written
+    # by persist_nwc; fall back to the (disabled) box only if the user has
+    # never opened /nwc in this session.
+    _nwc_state = (session_data or {}).get("nwc_page_state") or {}
+    _nwc_cached = _nwc_state.get("surplus_deficit")
+    nwc = _nwc_cached if _nwc_cached is not None else _num(nwc_str)
 
     if inputs.company_status and inputs.company_status.strip().lower() == "publicly traded":
         sa = (source_results or {}).get("stockanalysis", {}) if source_results else {}
@@ -666,13 +674,13 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
                  html.Th("High", style={"textAlign": "right"}), html.Th("Low", style={"textAlign": "right"})]),
         _row("FMV of Business Enterprise (marketable, noncontrolling)", bev_nctrl_low, bev_nctrl_high),
         _row("Plus: Cash", cash, cash),
-        _row("Plus: NWC Surplus (Deficit) — PLACEHOLDER", nwc, nwc),
+        _row("Plus: NWC Surplus (Deficit)", nwc, nwc),
         _row("Plus: Non-Operating Assets, Net — PLACEHOLDER", non_op, non_op),
         _row("FMV of Invested Capital (marketable, noncontrolling)", ic_nctrl_low, ic_nctrl_high),
         _row(f"Plus: Control Premium ({control_premium:.1%})", None, None),
         _row("FMV of Invested Capital (marketable, controlling)", ic_ctrl_low, ic_ctrl_high),
         _row("Less: Cash", cash, cash),
-        _row("Less: NWC Surplus (Deficit) — PLACEHOLDER", nwc, nwc),
+        _row("Less: NWC Surplus (Deficit)", nwc, nwc),
         _row("Less: Non-Operating Assets, Net — PLACEHOLDER", non_op, non_op),
         _row("FMV of Business Enterprise (marketable, controlling)", bev_ctrl_low, bev_ctrl_high),
     ]
@@ -722,7 +730,11 @@ def restore_gpc_static_state(_load_ts, pathname, session_data):
         ),
         gpc_state.get("dloc", "0%"),
         gpc_state.get("control_premium", "0%"),
-        gpc_state.get("nwc", "0"),
+        (
+            f"{(session_data or {}).get('nwc_page_state', {}).get('surplus_deficit'):,.0f}"
+            if ((session_data or {}).get("nwc_page_state") or {}).get("surplus_deficit") is not None
+            else gpc_state.get("nwc", "0")
+        ),
         gpc_state.get("non_op", "0"),
         gpc_state.get("exclude_map") or {},
     )
