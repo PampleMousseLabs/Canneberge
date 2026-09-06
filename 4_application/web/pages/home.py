@@ -463,12 +463,12 @@ def autosync_session(
 )
 def hydrate_home_page_from_load(load_timestamp, pathname, session_data):
     if pathname not in ("/", None):
-        return [no_update] * 21
+        return [no_update] * 17 + [[no_update] * 15] + [no_update] * 3
     # If the user refreshes their browser and there's a cached session, we want
     # it to populate. If there's no data, let layout defaults stand.
-    # Note: 21 items returned here to match the 21 outputs exactly.
+    
     if not session_data:
-        return [no_update] * 21
+        return [no_update] * 17 + [[no_update] * 15] + [no_update] * 3
 
     try:
         client = session_data.get("client", "Ted & Co.")
@@ -516,7 +516,7 @@ def hydrate_home_page_from_load(load_timestamp, pathname, session_data):
         import traceback
         print("❌ Error during Home Page Hydration Callback:")
         traceback.print_exc()
-        return [no_update] * 21
+        return [no_update] * 17 + [[no_update] * 15] + [no_update] * 3
 
 
 # ============================================================

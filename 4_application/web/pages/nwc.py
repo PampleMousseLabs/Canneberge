@@ -145,6 +145,10 @@ def _pad_selections(saved: list, defaults: list, count: int) -> List[str]:
 
 
 def _state_from_session(session_data: dict) -> dict:
+    return nwc_state_from_session(session_data)
+
+
+def _state_from_session_legacy(session_data: dict) -> dict:
     raw = (session_data or {}).get("nwc_page_state", {}) or {}
 
     def _int(key, default, lo, hi):
@@ -185,6 +189,10 @@ def _exclusion_map(tickers: List[str], flags: list) -> Dict[str, bool]:
 # ---------------------------------------------------------------------------
 
 def _compute(session_data: dict, source_results: dict, state: dict) -> dict:
+    return get_nwc_results(session_data, source_results, state)
+
+
+def _compute_legacy(session_data: dict, source_results: dict, state: dict) -> dict:
     inputs = dict_to_project_inputs(session_data or {})
 
     headers, is_hist = period_columns(
@@ -655,6 +663,8 @@ def hydrate_nwc_controls(pathname, _load_ts, session_data):
 # Render table + GPC section
 # ---------------------------------------------------------------------------
 
+from web.lib.nwc_data import get_nwc_results, nwc_state_from_session
+
 @callback(
     Output("nwc-table-container", "children"),
     Output("nwc-gpc-container", "children"),
@@ -670,7 +680,7 @@ def render_nwc(pathname, session_data, _load_ts, source_results):
         return no_update, no_update, no_update, no_update
 
     state = _state_from_session(session_data)
-    calc = _compute(session_data, source_results, state)
+    calc = get_nwc_results(session_data, source_results)
     inputs = calc["inputs"]
 
     title = (
@@ -737,14 +747,14 @@ def _harvest(ids, values, fallback: List[str], count: int) -> List[str]:
     Input("nwc-proj-years", "value"),
     Input("nwc-cash-treatment", "value"),
     Input("nwc-basis", "value"),
-    Input("nwc-selected-pct", "value"),
+    Input("nwc-selected-pct", "value", allow_optional=True),
     Input({"type": "nwc-ca-select", "slot": ALL}, "value"),
     Input({"type": "nwc-cl-select", "slot": ALL}, "value"),
     Input({"type": "nwc-gpc-exclude", "slot": ALL}, "value"),
-    Input("nwc-ca-add", "n_clicks"),
-    Input("nwc-ca-sub", "n_clicks"),
-    Input("nwc-cl-add", "n_clicks"),
-    Input("nwc-cl-sub", "n_clicks"),
+    Input("nwc-ca-add", "n_clicks", allow_optional=True),
+    Input("nwc-ca-sub", "n_clicks", allow_optional=True),
+    Input("nwc-cl-add", "n_clicks", allow_optional=True),
+    Input("nwc-cl-sub", "n_clicks", allow_optional=True),
     State({"type": "nwc-ca-select", "slot": ALL}, "id"),
     State({"type": "nwc-cl-select", "slot": ALL}, "id"),
     State({"type": "nwc-gpc-exclude", "slot": ALL}, "id"),

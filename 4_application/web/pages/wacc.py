@@ -39,6 +39,7 @@ from Canneberge.Calculations.wacc import (
     cost_of_equity, after_tax_cost_of_debt, wacc_summary,
 )
 from web.lib.session_io import dict_to_project_inputs
+from web.lib.wacc_data import get_wacc_results, wacc_state_from_session
 
 dash.register_page(__name__, path="/wacc", name="WACC")
 
@@ -109,6 +110,10 @@ def _fmt_col(col: str, val: Optional[float]) -> str:
 # ---------------------------------------------------------------------------
 
 def _state_from_session(session_data: dict) -> dict:
+    return wacc_state_from_session(session_data)
+
+
+def _state_from_session_legacy(session_data: dict) -> dict:
     raw = (session_data or {}).get("wacc_page_state", {}) or {}
 
     def _opt(key, options, default):
@@ -149,6 +154,10 @@ def _exclusion_map(tickers: List[str], flags: list) -> Dict[str, bool]:
 # ---------------------------------------------------------------------------
 
 def _compute(session_data: dict, source_results: dict, state: dict) -> dict:
+    return get_wacc_results(session_data, source_results, state)
+
+
+def _compute_legacy(session_data: dict, source_results: dict, state: dict) -> dict:
     inputs = dict_to_project_inputs(session_data or {})
     tickers = list(inputs.gpc_tickers or [])
 
