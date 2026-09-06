@@ -54,7 +54,7 @@ IS_LINES = [
     ("operating_expenses",         "Operating Expenses",               True,  True),
     ("ebitda",                     "EBITDA (before SBC add-back)",     True,  True),
     ("d&a_for_ebitda",             "Depreciation Expense",             False, False),
-    ("amortization",               "Amortization Expense",             False, False),
+    ("amortization",               "Other Amortization",               False, False),
     ("ebit",                       "EBIT",                             True,  True),
     # --- Below operating income / above pretax (canonical_order_IS zone) ---
     ("interest_expense",           "Interest Expense",                 False, False),
@@ -82,6 +82,7 @@ IS_LINES = [
     ("debt_free_net_income",       "Debt-free Net Income",             True,  True),
     ("capex",                      "Capital Expenditures",             False, False),
     ("acquisitions",               "Acquisitions",                     False, False),
+    ("stock_based_compensation",   "Stock-Based Compensation",         False, False),
     ("adj_ebitda",                 "Adjusted EBITDA (incl. SBC add-back)", True, True),
 ]
 

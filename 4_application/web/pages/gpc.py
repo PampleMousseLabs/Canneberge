@@ -92,6 +92,17 @@ def _basis_key(basis_mode) -> str:
     return "EQUITY" if str(basis_mode or "").upper() == "EQUITY" else "BEV"
 
 
+def _safe_dict(val) -> dict:
+    """Safely convert any stored value to a dictionary, preventing crashes
+    on empty lists, legacy strings, or corrupted states."""
+    if isinstance(val, dict):
+        return dict(val)
+    if isinstance(val, (list, tuple)):
+        # Convert index list back to a string-keyed dictionary
+        return {str(i): v for i, v in enumerate(val) if v is not None}
+    return {}
+
+
 def _default_metric_for_col(idx: int, basis_mode: str = "BEV") -> str:
     options = [
         o for o in dropdown_options(_basis_key(basis_mode))
@@ -111,18 +122,18 @@ def _basis_bucket(gpc_state: dict, basis_mode: str) -> dict:
     gpc_state = gpc_state or {}
     basis = _basis_key(basis_mode)
 
-    basis_state = gpc_state.get("basis_state") or {}
-    bucket = dict(basis_state.get(basis) or {})
+    basis_state = _safe_dict(gpc_state.get("basis_state"))
+    bucket = _safe_dict(basis_state.get(basis))
 
     # Legacy fallback only if the old top-level basis matches requested basis.
     legacy_basis = _basis_key(gpc_state.get("basis_mode", "BEV"))
     if legacy_basis == basis:
         for k in _BASIS_SLICE_KEYS:
             if not bucket.get(k) and gpc_state.get(k):
-                bucket[k] = dict(gpc_state.get(k) or {})
+                bucket[k] = _safe_dict(gpc_state.get(k))
 
     for k in _BASIS_SLICE_KEYS:
-        bucket[k] = dict(bucket.get(k) or {})
+        bucket[k] = _safe_dict(bucket.get(k))
 
     return bucket
 
@@ -130,13 +141,13 @@ def _basis_bucket(gpc_state: dict, basis_mode: str) -> dict:
 def _migrate_gpc_basis_state(prev: dict, legacy_basis: str) -> dict:
     """Build normalized basis_state and migrate old top-level fields once."""
     prev = prev or {}
-    raw_basis_state = prev.get("basis_state") or {}
+    raw_basis_state = _safe_dict(prev.get("basis_state"))
 
     basis_state = {}
     for b in ("BEV", "EQUITY"):
-        old_bucket = dict(raw_basis_state.get(b) or {})
+        old_bucket = _safe_dict(raw_basis_state.get(b))
         basis_state[b] = {
-            k: dict(old_bucket.get(k) or {})
+            k: _safe_dict(old_bucket.get(k))
             for k in _BASIS_SLICE_KEYS
         }
 
@@ -144,7 +155,7 @@ def _migrate_gpc_basis_state(prev: dict, legacy_basis: str) -> dict:
     for k in _BASIS_SLICE_KEYS:
         legacy_val = prev.get(k)
         if legacy_val and not basis_state[legacy_basis].get(k):
-            basis_state[legacy_basis][k] = dict(legacy_val or {})
+            basis_state[legacy_basis][k] = _safe_dict(legacy_val)
 
     return basis_state
 
@@ -177,7 +188,7 @@ layout = dbc.Container([
                         value="BEV",
                         inline=True,
                         inputClassName="btn-check",
-                        labelClassName="btn btn-outline-info size-sm",
+                        labelClassName="btn btn-outline-info btn-sm py-1 px-2",
                         labelCheckedClassName="active",
                         persistence=True,
                         persistence_type="session",
@@ -197,9 +208,9 @@ layout = dbc.Container([
                               style={"width": "80px"}, debounce=True, size="sm",
                               className="d-inline-block"),
                 ], xs=6, md="auto"),
-            ], className="align-items-center g-3"),
-        ])
-    ], color="dark", outline=True, className="mb-3 border-secondary"),
+            ], className="align-items-center g-2"),
+        ], className="py-1 px-2")
+    ], color="dark", outline=True, className="mb-2 border-secondary"),
 
     # ONE shared horizontal-scroll region for every section that shares
     # the same N metric columns. Scrolling anywhere in this region moves
@@ -704,7 +715,11 @@ def restore_gpc_static_state(_load_ts, pathname, session_data):
 
     return (
         gpc_state.get("num_multiples", MAX_COLS_CAP),
-        gpc_state.get("basis_mode", "BEV"),
+        (
+            "EQUITY"
+            if (session_data or {}).get("basis_of_value") == "Equity Value"
+            else "BEV"
+        ),
         gpc_state.get("dloc", "0%"),
         gpc_state.get("control_premium", "0%"),
         gpc_state.get("nwc", "0"),
@@ -745,18 +760,21 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
     triggered = ctx.triggered_id
     trigger_type = triggered.get("type") if isinstance(triggered, dict) else triggered
 
+    # Determine basis contexts
     prev_basis = _basis_key(prev.get("basis_mode", basis_mode or "BEV"))
     current_basis = _basis_key(basis_mode or prev.get("basis_mode", "BEV"))
 
-    # Preserve old sessions and separate BEV / EQUITY dynamic table state.
+    # Hydrate current per-basis state buckets
     basis_state = _migrate_gpc_basis_state(prev, prev_basis)
     bucket = dict(basis_state.get(current_basis) or {})
     for k in _BASIS_SLICE_KEYS:
         bucket[k] = dict(bucket.get(k) or {})
 
-    # Only update the dynamic family that actually triggered this callback.
-    # This prevents a basis-toggle event from overwriting the destination
-    # basis with the old basis's still-mounted dropdown/input values.
+    # SLICE-AWARE RECALCULATION:
+    # We only update the dynamic GPC slice that actually triggered this callback.
+    # If the trigger was a basis toggle, page navigation, or static control,
+    # we preserve the saved selections for that basis exactly, preventing
+    # unmounted/temporary dropdown states from wiping them.
     if trigger_type == "gpc-metric-col" and metric_col_ids:
         valid_options = set(dropdown_options(current_basis))
         bucket["metric_cols"] = {
@@ -765,13 +783,13 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
             if id_dict is not None and val in valid_options
         }
 
-    if trigger_type in ("gpc-selected-high", "gpc-selected-low"):
+    elif trigger_type in ("gpc-selected-high", "gpc-selected-low"):
         if selected_highs is not None and len(selected_highs) > 0:
             bucket["selected_high"] = {str(i): v for i, v in enumerate(selected_highs)}
         if selected_lows is not None and len(selected_lows) > 0:
             bucket["selected_low"] = {str(i): v for i, v in enumerate(selected_lows)}
 
-    if trigger_type == "gpc-weight" and weight_ids:
+    elif trigger_type == "gpc-weight" and weight_ids:
         bucket["weights"] = {
             str(id_dict["index"]): val
             for val, id_dict in zip(weight_values or [], weight_ids or [])
@@ -780,7 +798,7 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
 
     basis_state[current_basis] = bucket
 
-    # Exclusions are shared across BEV / Equity.
+    # Exclusions are shared across both bases
     saved_exclude_map = (
         exclude_map
         if trigger_type == "gpc-exclude-store" and exclude_map is not None
@@ -794,16 +812,11 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
         "control_premium": control_premium if control_premium is not None else prev.get("control_premium", "0%"),
         "nwc": nwc if nwc is not None else prev.get("nwc", "0"),
         "non_op": non_op if non_op is not None else prev.get("non_op", "0"),
-
-        # New canonical per-basis state.
         "basis_state": basis_state,
-
-        # Backward-compatible mirror of the currently active basis.
         "metric_cols": bucket.get("metric_cols", {}),
         "selected_high": bucket.get("selected_high", {}),
         "selected_low": bucket.get("selected_low", {}),
         "weights": bucket.get("weights", {}),
-
         "exclude_map": saved_exclude_map,
     }
     return session_data

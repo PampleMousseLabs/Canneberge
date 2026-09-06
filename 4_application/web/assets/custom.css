@@ -14,3 +14,28 @@
     background-color: #9b85d6;
 }
 
+/* Compact financial-model control strips.
+   Tables/numbers are the primary content; slicers should not consume
+   several rows' worth of vertical space. */
+.model-control-strip .card-body {
+    padding: 0.35rem 0.5rem !important;
+}
+
+.model-control-strip .btn {
+    padding: 0.2rem 0.5rem !important;
+    font-size: 0.78rem !important;
+    line-height: 1.2 !important;
+}
+
+.model-control-strip .form-control,
+.model-control-strip .form-select {
+    min-height: 27px !important;
+    height: 27px;
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
+    font-size: 0.78rem;
+}
+
+.model-control-strip label {
+    font-size: 0.78rem;
+}

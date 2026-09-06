@@ -231,6 +231,7 @@ class SubjectFinancialsPage(QWidget):
             if ticker and self._current_statement == "IS"
             else {}
         )
+
         for key, label, is_calc, bold in lines:
             if is_calc and not (self._current_statement == "BS" and key in BS_DIRECT_PULL_KEYS):
                 continue
@@ -249,6 +250,23 @@ class SubjectFinancialsPage(QWidget):
                 if v is not None and sign_flip:
                     v = -v
                 raw_by_period[period][key] = v
+
+        # These are CFS-sourced inputs used by calculated IS rows but are
+        # intentionally not standalone rows in IS_LINES.
+        if self._current_statement == "IS":
+            for extra_key in ("stock_based_compensation", "other_amortization"):
+                row_data = {}
+                for sa_label in get_sa_labels(extra_key):
+                    candidate = cfs_lookup.get(sa_label, {})
+                    if candidate:
+                        row_data = candidate
+                        break
+
+                for period in periods:
+                    raw_by_period[period][extra_key] = _parse_val(
+                        row_data.get(period, "")
+                    )
+
         return raw_by_period
 
     def _gather_raw_private(self, lines, periods, pf) -> Dict[str, Dict[str, Optional[float]]]:
@@ -261,6 +279,14 @@ class SubjectFinancialsPage(QWidget):
                     raw_by_period[period][key] = pf.get_is(key, period)
                 else:
                     raw_by_period[period][key] = pf.get_bs(key, period)
+
+        if self._current_statement == "IS":
+            for extra_key in ("stock_based_compensation", "other_amortization"):
+                for period in periods:
+                    raw_by_period[period][extra_key] = pf.get_is(
+                        extra_key, period
+                    )
+
         return raw_by_period
 
     def _resolve_value(self, key, is_calc, period, raw_by_period, calc_by_period):
@@ -296,11 +322,31 @@ class SubjectFinancialsPage(QWidget):
 
         display_row = 1
         for key, label, is_calc, bold in lines:
+            # Spacers are display-only (not IS_LINES keys).
+            if key == "capex":
+                for _ in range(2):
+                    grid.addWidget(QLabel(""), display_row, 0)
+                    display_row += 1
+            if key == "stock_based_compensation":
+                grid.addWidget(QLabel(""), display_row, 0)
+                display_row += 1
+
             # Auto-hide non-bold component rows that are empty across all
             # historical/TTM periods. Bold rows (subtotals/totals) always show.
             if not bold:
                 has_val = False
-                for period in check_periods:
+
+                # Most component rows are hidden if empty across historical/TTM.
+                # But some projection-only rows, especially projected Other
+                # Amortization, need to remain visible so EBITDA -> EBIT ties out.
+                periods_to_check = list(check_periods)
+                if self._current_statement == "IS" and key in (
+                    "amortization",
+                    "stock_based_compensation",
+                ):
+                    periods_to_check = list(periods)
+
+                for period in periods_to_check:
                     if self._resolve_value(key, is_calc, period, raw_by_period, calc_by_period) is not None:
                         has_val = True
                         break
@@ -394,8 +440,15 @@ class SubjectFinancialsPage(QWidget):
                 if rev is not None and gp is not None:
                     raw_by_period[period]["cogs"] = rev - gp
                 if gp is not None and ebitda_mod is not None:
-                    # Put residual opex into other_operating so opex sum = GP - EBITDA
-                    raw_by_period[period]["other_operating"] = gp - ebitda_mod
+                    # pd.ebitda is Adjusted EBITDA.
+                    # Seed OpEx so GP - OpEx = EBIT, not Adjusted EBITDA.
+                    ebit_seed = (
+                        ebitda_mod
+                        - (pd.da.get(period) or 0.0)
+                        - (pd.other_amort.get(period) or 0.0)
+                        - (pd.sbc.get(period) or 0.0)
+                    )
+                    raw_by_period[period]["other_operating"] = gp - ebit_seed
 
                 if callable(self.get_debt_interest):
                     val = self.get_debt_interest(period)
@@ -409,12 +462,18 @@ class SubjectFinancialsPage(QWidget):
                 # Prefer module GP/EBITDA when present (they are the planning drivers)
                 if gp is not None:
                     calc["gross_profit"] = gp
+                # pd.ebitda = Adjusted EBITDA. Do not write it onto "ebitda".
                 if ebitda_mod is not None:
-                    calc["ebitda"] = ebitda_mod
+                    sbc_p = pd.sbc.get(period) or 0.0
+                    da_p = pd.da.get(period) or 0.0
+                    oa_p = pd.other_amort.get(period) or 0.0
+                    calc["adj_ebitda"] = ebitda_mod
+                    calc["ebitda"] = ebitda_mod - sbc_p
+                    calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
                 if pd.net_income.get(period) is not None:
                     calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
-                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+                calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
                 # Projected tax: no separate forecast line — apply subject statutory rate
                 pretax = calc.get("pretax_income")
@@ -426,11 +485,16 @@ class SubjectFinancialsPage(QWidget):
                     if gp is not None:
                         calc["gross_profit"] = gp
                     if ebitda_mod is not None:
-                        calc["ebitda"] = ebitda_mod
+                        sbc_p = pd.sbc.get(period) or 0.0
+                        da_p = pd.da.get(period) or 0.0
+                        oa_p = pd.other_amort.get(period) or 0.0
+                        calc["adj_ebitda"] = ebitda_mod
+                        calc["ebitda"] = ebitda_mod - sbc_p
+                        calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
                     if pd.net_income.get(period) is not None:
                         calc["net_income"] = pd.net_income.get(period)
                     calc["cost_of_goods_sold"] = _sub(rev, gp)
-                    calc["operating_expenses"] = _sub(gp, ebitda_mod)
+                    calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
                 calc_by_period[period] = calc
 
@@ -484,9 +548,16 @@ class SubjectFinancialsPage(QWidget):
                 # can rebuild the same waterfall as historicals.
                 if rev is not None and gp is not None:
                     raw_by_period[period]["cogs"] = rev - gp
+                # pd.ebitda is Adjusted EBITDA. Seed OpEx so GP - OpEx = EBIT,
+                # not so GP - OpEx = Adjusted EBITDA.
                 if gp is not None and ebitda_mod is not None:
-                    # Put residual opex into other_operating so opex sum = GP - EBITDA
-                    raw_by_period[period]["other_operating"] = gp - ebitda_mod
+                    ebit_seed = (
+                        ebitda_mod
+                        - (pd.da.get(period) or 0.0)
+                        - (pd.other_amort.get(period) or 0.0)
+                        - (pd.sbc.get(period) or 0.0)
+                    )
+                    raw_by_period[period]["other_operating"] = gp - ebit_seed
 
                 if callable(self.get_debt_interest):
                     val = self.get_debt_interest(period)
@@ -501,11 +572,18 @@ class SubjectFinancialsPage(QWidget):
                 if gp is not None:
                     calc["gross_profit"] = gp
                 if ebitda_mod is not None:
-                    calc["ebitda"] = ebitda_mod
+                    sbc_p = pd.sbc.get(period) or 0.0
+                    da_p = pd.da.get(period) or 0.0
+                    oa_p = pd.other_amort.get(period) or 0.0
+
+                    # pd.ebitda = Adjusted EBITDA from the Projection Module.
+                    calc["adj_ebitda"] = ebitda_mod
+                    calc["ebitda"] = ebitda_mod - sbc_p
+                    calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
                 if pd.net_income.get(period) is not None:
                     calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
-                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+                calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
                 # Projected tax: no separate forecast line — apply subject statutory rate
                 pretax = calc.get("pretax_income")
@@ -517,11 +595,18 @@ class SubjectFinancialsPage(QWidget):
                     if gp is not None:
                         calc["gross_profit"] = gp
                     if ebitda_mod is not None:
-                        calc["ebitda"] = ebitda_mod
+                        sbc_p = pd.sbc.get(period) or 0.0
+                        da_p = pd.da.get(period) or 0.0
+                        oa_p = pd.other_amort.get(period) or 0.0
+
+                        # pd.ebitda = Adjusted EBITDA from the Projection Module.
+                        calc["adj_ebitda"] = ebitda_mod
+                        calc["ebitda"] = ebitda_mod - sbc_p
+                        calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
                     if pd.net_income.get(period) is not None:
                         calc["net_income"] = pd.net_income.get(period)
                     calc["cost_of_goods_sold"] = _sub(rev, gp)
-                    calc["operating_expenses"] = _sub(gp, ebitda_mod)
+                    calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
                 calc_by_period[period] = calc
 
@@ -627,13 +712,41 @@ class SubjectFinancialsPage(QWidget):
                     if v is not None and sign_flip:
                         v = -v
                     raw_by_period[period][k2] = v
+
+            # CFS-sourced historical add-backs are not standalone IS_LINES,
+            # but Projection Module and Adjusted EBITDA require them.
+            if statement == "IS":
+                for extra_key in ("stock_based_compensation", "other_amortization"):
+                    row_data = {}
+                    for sa_label in get_sa_labels(extra_key):
+                        candidate = cfs_lookup.get(sa_label, {})
+                        if candidate:
+                            row_data = candidate
+                            break
+
+                    for period in periods:
+                        raw_by_period[period][extra_key] = _parse_val(
+                            row_data.get(period, "")
+                        )
+
         else:
             pf = self.get_private_financials()
             for k2, l2, c2, b2 in lines:
                 if c2 and not (statement == "BS" and k2 in BS_DIRECT_PULL_KEYS):
                     continue
                 for period in periods:
-                    raw_by_period[period][k2] = pf.get_is(k2, period) if statement == "IS" else pf.get_bs(k2, period)
+                    raw_by_period[period][k2] = (
+                        pf.get_is(k2, period)
+                        if statement == "IS"
+                        else pf.get_bs(k2, period)
+                    )
+
+            if statement == "IS":
+                for extra_key in ("stock_based_compensation", "other_amortization"):
+                    for period in periods:
+                        raw_by_period[period][extra_key] = pf.get_is(
+                            extra_key, period
+                        )
 
         compute_fn = compute_is_calculated if statement == "IS" else compute_bs_calculated
         result: Dict[str, Optional[float]] = {}
@@ -759,7 +872,14 @@ class SubjectFinancialsPage(QWidget):
             if rev is not None and gp is not None:
                 raw["cogs"] = rev - gp
             if gp is not None and ebitda_mod is not None:
-                raw["other_operating"] = gp - ebitda_mod
+                # pd.ebitda is Adjusted EBITDA.
+                ebit_seed = (
+                    ebitda_mod
+                    - (pd.da.get(period) or 0.0)
+                    - (pd.other_amort.get(period) or 0.0)
+                    - (pd.sbc.get(period) or 0.0)
+                )
+                raw["other_operating"] = gp - ebit_seed
             if callable(self.get_debt_interest):
                 val = self.get_debt_interest(period)
                 raw["interest_expense"] = -abs(val) if val is not None else None
@@ -769,11 +889,18 @@ class SubjectFinancialsPage(QWidget):
             if gp is not None:
                 calc["gross_profit"] = gp
             if ebitda_mod is not None:
-                calc["ebitda"] = ebitda_mod
+                sbc_p = pd.sbc.get(period) or 0.0
+                da_p = pd.da.get(period) or 0.0
+                oa_p = pd.other_amort.get(period) or 0.0
+
+                # pd.ebitda = Adjusted EBITDA from the Projection Module.
+                calc["adj_ebitda"] = ebitda_mod
+                calc["ebitda"] = ebitda_mod - sbc_p
+                calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
             if pd.net_income.get(period) is not None:
                 calc["net_income"] = pd.net_income.get(period)
             calc["cost_of_goods_sold"] = _sub(rev, gp)
-            calc["operating_expenses"] = _sub(gp, ebitda_mod)
+            calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
             pretax = calc.get("pretax_income")
             if pretax is not None and tax_rate is not None:
@@ -782,11 +909,18 @@ class SubjectFinancialsPage(QWidget):
                 if gp is not None:
                     calc["gross_profit"] = gp
                 if ebitda_mod is not None:
-                    calc["ebitda"] = ebitda_mod
+                    sbc_p = pd.sbc.get(period) or 0.0
+                    da_p = pd.da.get(period) or 0.0
+                    oa_p = pd.other_amort.get(period) or 0.0
+
+                    # pd.ebitda = Adjusted EBITDA from the Projection Module.
+                    calc["adj_ebitda"] = ebitda_mod
+                    calc["ebitda"] = ebitda_mod - sbc_p
+                    calc["ebit"] = ebitda_mod - da_p - oa_p - sbc_p
                 if pd.net_income.get(period) is not None:
                     calc["net_income"] = pd.net_income.get(period)
                 calc["cost_of_goods_sold"] = _sub(rev, gp)
-                calc["operating_expenses"] = _sub(gp, ebitda_mod)
+                calc["operating_expenses"] = _sub(gp, calc.get("ebit"))
 
             if key in raw and raw.get(key) is not None:
                 return raw.get(key)

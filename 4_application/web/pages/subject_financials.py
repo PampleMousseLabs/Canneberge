@@ -43,7 +43,7 @@ layout = dbc.Container([
                         value="IS",
                         inline=True,
                         inputClassName="btn-check",
-                        labelClassName="btn btn-outline-info size-sm",
+                        labelClassName="btn btn-outline-info btn-sm py-1 px-2",
                         labelCheckedClassName="active",
                         persistence=True,
                         persistence_type="session"
@@ -55,8 +55,8 @@ layout = dbc.Container([
                     html.Div(id="subject-stmt-source-info", className="text-md-end text-muted fw-bold")
                 ], xs=12, md=True, className="d-flex align-items-center justify-content-md-end"),
             ], className="align-items-center")
-        ])
-    ], color="dark", outline=True, className="mb-3 border-secondary"),
+        ], className="py-1 px-2")
+    ], color="dark", outline=True, className="mb-2 border-secondary"),
 
     # Grid Container — table drives height via style_table calc (see callback).
     dbc.Card([
@@ -114,7 +114,19 @@ def render_subject_statement(stmt_type, session_data, source_results):
     rows_data = []
     bold_indices = []
 
+    def _blank_row():
+        row = {"Line Item": ""}
+        for p in periods:
+            row[p] = ""
+        return row
+
     for key, label, is_calc, bold in lines:
+        if key == "capex":
+            rows_data.append(_blank_row())
+            rows_data.append(_blank_row())
+        if key == "stock_based_compensation":
+            rows_data.append(_blank_row())
+
         # Resolve all period values for this row
         period_vals = {}
         has_any_val = False
@@ -131,6 +143,11 @@ def render_subject_statement(stmt_type, session_data, source_results):
         row_dict = {"Line Item": label}
         for p in periods:
             v = period_vals.get(p)
+            if key == "interest_expense" and v is not None:
+                # Sign flip for display consistency: show projected interest
+                # expense as negative (matching StockAnalysis historicals)
+                # without altering the positive cost in plumbing.
+                v = -abs(v)
             row_dict[p] = f"{v:,.0f}" if v is not None else "-"
 
         if bold:

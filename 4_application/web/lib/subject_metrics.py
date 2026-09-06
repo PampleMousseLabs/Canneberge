@@ -29,6 +29,11 @@ from Canneberge.Calculations.subject_is_bs_calc import (
     BS_DIRECT_PULL_KEYS,
 )
 from Canneberge.Calculations.projection_resolve import resolve_projection_waterfall
+from Canneberge.Calculations.debt_schedule import (
+    parse_date,
+    build_period_boundaries,
+    compute_debt_schedule,
+)
 from web.lib.session_io import dict_to_project_inputs
 
 # =====================================================================
@@ -102,13 +107,82 @@ def _parse_val(value) -> Optional[float]:
         return None
 
 
+def _interest_map_from_debt_state(session_data: dict) -> dict:
+    """Positive interest expense by period from debt_page_state.
+
+    Prefer cached maps. If a session only has tranche rows (desktop-shaped
+    save, or persist ran before maps were added), recompute from the notes.
+    """
+    debt_state = (session_data or {}).get("debt_page_state", {}) or {}
+    cached = debt_state.get("interest_expense_by_period") or {}
+    if not cached:
+        cached = debt_state.get("projected_interest") or {}
+    if cached:
+        return cached
+
+    rows = debt_state.get("rows") or []
+    if not rows:
+        return {}
+
+    inputs = dict_to_project_inputs(session_data)
+    lfy_end = parse_date(inputs.last_fiscal_year)
+    nfy_end = parse_date(inputs.next_fiscal_year)
+    if lfy_end is None or nfy_end is None:
+        return {}
+
+    try:
+        projection_years = max(1, min(20, int(inputs.projection_years or 1)))
+    except (TypeError, ValueError):
+        projection_years = 1
+
+    boundaries = build_period_boundaries(
+        lfy_end=lfy_end,
+        nfy_end=nfy_end,
+        nfy1_end=parse_date(inputs.nfy_1),
+        nfy2_end=parse_date(inputs.nfy_2),
+        projection_years=projection_years,
+        hist_years=1,
+    )
+    rate_key = (
+        "effective_rate"
+        if debt_state.get("rate_basis", "Effective Rate") == "Effective Rate"
+        else "coupon_rate"
+    )
+
+    def _pct(v):
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return float(str(v).replace("%", "").replace(",", "").strip()) / 100.0
+        except (TypeError, ValueError):
+            return None
+
+    def _num(v):
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return float(str(v).replace(",", "").replace("$", "").strip())
+        except (TypeError, ValueError):
+            return None
+
+    tranches = []
+    for row in rows:
+        tranches.append({
+            "name": (row or {}).get("name", ""),
+            "issuance": parse_date((row or {}).get("issuance")),
+            "maturity": parse_date((row or {}).get("maturity")),
+            "coupon_rate": _pct((row or {}).get("coupon")),
+            "effective_rate": _pct((row or {}).get("effective")),
+            "principal": _num((row or {}).get("principal")),
+        })
+
+    results = compute_debt_schedule(tranches, boundaries, rate_key=rate_key)
+    return results.get("interest_expense_by_period") or {}
+
+
 def _get_projected_interest_expense(session_data: dict, period: str) -> Optional[float]:
     """Return the Debt Schedule's POSITIVE interest-expense amount for a period."""
-    debt_state = (session_data or {}).get("debt_page_state", {}) or {}
-    projected_interest = debt_state.get("interest_expense_by_period", {}) or {}
-    if not projected_interest:
-        projected_interest = debt_state.get("projected_interest", {}) or {}
-    return _parse_val(projected_interest.get(period))
+    return _parse_val(_interest_map_from_debt_state(session_data).get(period))
 
 
 def _normalise_rate(value) -> Optional[float]:
