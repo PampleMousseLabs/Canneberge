@@ -1,13 +1,15 @@
+```markdown
 # Phase 4: Canneberge Multi-Surface Application (Desktop & Web/PWA)
 
-> **Current Status:** Step 8 (GPC Page) and Step 11a (Debt Schedule) are 100% complete, fully integrated, and mathematically validated. Core income-statement definitions (EBIT, EBITDA, Adjusted EBITDA, Net Interest) have been consolidated inside the shared calculations layer. Projected waterfalls across Subject Financials and the Projection Module are completely unified. 
+> **Current Status:** Web page migration is complete for Home, Source Data, Subject Financials, Projection Module, Debt Schedule, NWC, WACC, DCF (including Reverse-DCF), GT, GPC, and Dashboard. Shared calculation engines now exist for NWC, WACC, DCF, and GT. Remaining work is web↔desktop session-schema parity, pointing desktop UIs at the new `Canneberge/Calculations` modules, and Dash input-remount UX.
 > **Active Branch:** `main`
 > **Active Directory:** `4_application/`
-> **Last Updated:** September 5, 2026
+> **Last Updated:** September 6, 2026
 
 ---
 
 ## 1. Project Overview & North Star
+
 **Project Canneberge** is a Python-based financial valuation workstation (GPC multiples, DCF modeling, Debt Schedules, FRED/StockAnalysis/yfinance data aggregators, and WACC analysis).
 
 * **Phase 1 & 2 (Frozen):** Excel prototype and model refinement. Excel is stale relative to current StockAnalysis page structure — not maintained as a live cross-check anymore.
@@ -19,168 +21,249 @@
 ---
 
 ## 2. Core Architectural Principles
+
 1. **Single Source of Truth (Core):** All business logic, valuation math, scrapers, and transforms live strictly in `Canneberge/`.
-2. **Thin UI Adapters:** Neither the PyQt UI nor the Dash UI contains business calculations. They only import from `Canneberge.Calculations`, `Canneberge.Sources`, etc. — confirmed holding true in practice (`web/lib/subject_metrics.py`, `web/pages/gpc.py`, `web/pages/debt_schedule.py` all delegate to `Canneberge.Calculations.*`, not reimplementing math).
-3. **No Dual Logic Maintenance:** If a formula or data source changes, it is edited **once** in `Canneberge/` and automatically updates both UIs.
-   * **Working rule adopted this session:** any change that touches definitions, schema (`IS_LINES`/`BS_LINES`), or resolvers goes into `Canneberge/` first; `web/` only gets "make it render" edits. The Web App and Desktop Subject Financials are now fully consolidated under this rule. The Desktop Projection Module is the sole legacy exception awaiting port-back (see Step 7d).
-4. **Local Network Privacy:** No public cloud servers, no port forwarding. Tailscale connects tablet/other devices to the Chromebook host over the home network only.
+2. **Thin UI Adapters:** Neither the PyQt UI nor the Dash UI should contain business calculations. They import from `Canneberge.Calculations`, `Canneberge.Sources`, etc.
+   * **Web is largely there:** `web/lib/subject_metrics.py`, `web/lib/nwc_data.py`, `web/lib/wacc_data.py`, `web/lib/dcf_data.py`, `web/lib/gt_data.py`, `web/lib/dashboard_data.py`, and the corresponding pages all delegate to `Canneberge.Calculations.*`.
+   * **Desktop is not fully there yet:** `Canneberge/Ui/nwc_page.py`, `wacc_page.py`, `dcf_page.py`, and `gt_page.py` still contain local copies of math that now also lives in `Canneberge/Calculations/`. Port-back is an explicit next step — do not rip desktop math until that page matches the shared engine on the same session.
+3. **No Dual Logic Maintenance:** If a formula or data source changes, it is edited **once** in `Canneberge/` and should update both UIs.
+   * **Working rule:** any change that touches definitions, schema (`IS_LINES` / `BS_LINES`), or resolvers goes into `Canneberge/` first; `web/` only gets “make it render” edits.
+4. **Headless page resolvers (web):** Dashboard and DCF must **never** `import web.pages.*` inside a callback. Importing a Dash page re-runs `dash.register_page()` and crashes. Cross-page reads go through `web/lib/*_data.py`.
+5. **Local Network Privacy:** No public cloud servers, no port forwarding. Tailscale connects tablet/other devices to the Chromebook host over the home network only.
 
 ---
 
 ## 3. Directory Layout (`4_application/`) — corrected to match reality
 
-**Correction from earlier drafts of this doc:** the planned `desktop/` folder move never happened, and won't. `3_code-migration/` is frozen and untouched going forward; its contents were copied into `4_application/Canneberge/` once, and that copy is now the only actively-edited version. The PyQt6 desktop app runs directly from `4_application/Canneberge/`, same package the web app's `Canneberge.Calculations`/`Sources`/etc. imports pull from. There is no separate `desktop/` wrapper layer.
+**Correction from earlier drafts of this doc:** the planned `desktop/` folder move never happened, and won't. `3_code-migration/` is frozen and untouched going forward; its contents were copied into `4_application/Canneberge/` once, and that copy is now the only actively-edited version. The PyQt6 desktop app runs directly from `4_application/Canneberge/`, same package the web app's `Canneberge.Calculations` / `Sources` / etc. imports pull from. There is no separate `desktop/` wrapper layer.
 
 ```text
 4_application/
 │
 ├── Canneberge/                   # SHARED CORE ENGINE + PyQt6 desktop UI
-│   ├── Calculations/             # Math, DCF, GPC, WACC, debt schedules — shared by both UIs
-│   │   ├── subject_is_bs_calc.py #   ✎ EBITDA definition corrected, adj_ebitda & net_interest added
-│   │   ├── projection_resolve.py #   ✎ resolve_projection_waterfall() — the unified projected IS waterfall
-│   │   ├── debt_schedule.py      #   Pure engine, unchanged — consumed as-is by web/pages/debt_schedule.py
-│   │   └── gpc_metrics.py        #   ✎ forward EBITDA metrics renamed "Adjusted EBITDA" + toggle conversion maps
-│   ├── Sources/                  # yfinance, FRED, StockAnalysis, MarketScreener — all live, none stubbed
+│   ├── Calculations/
+│   │   ├── subject_is_bs_calc.py # EBIT / EBITDA / Adj EBITDA / net_interest
+│   │   ├── projection_resolve.py # resolve_projection_waterfall() — projected IS
+│   │   ├── debt_schedule.py      # Tranche interest / ending debt / net borrowing
+│   │   ├── nwc.py                # ✎ NEW — subject NWC, peer DFCFNWC, stats, bridge
+│   │   ├── wacc.py               # ✎ NEW — betas, Ke, Kd, rounded WACC
+│   │   ├── dcf.py                # ✎ NEW — waterfall, TV models, sensitivity re-discount
+│   │   ├── gt.py                 # ✎ NEW — transaction multiples, indicated BEV, equity bridge
+│   │   ├── gpc_metrics.py        # Forward metrics named Adjusted EBITDA + maps
+│   │   ├── gpc_multiples.py      # Comp-side multiples
+│   │   ├── ratio_catalogue.py    # Debt/TIC, historic structure, effective tax
+│   │   ├── reverse_dcf.py        # Reverse-DCF solvers (Gordon / H-Model)
+│   │   ├── valuation_surface.py  # Sensitivity / surface FV evaluator
+│   │   └── chart_helper.py       # MethodRow bridge + football-field inputs
+│   ├── Sources/                  # yfinance, FRED, StockAnalysis, MarketScreener
 │   ├── Services/                 # Multi-source coordination
-│   ├── Transforms/                # Data normalization / mappings (sa_key.py — SBC/other_amortization are CFS-sourced)
-│   ├── utils/                    # Shared helper functions
-│   ├── Workers/                  # Async / Threading helpers
-│   ├── Ui/                       # PyQt6 desktop pages — run directly, not moved to a separate folder
-│   ├── app_state.py              # Application dataclasses · ✎ IS_LINES: ebitda relabeled, net_interest added, adj_ebitda added at bottom, sbc added
-│   └── config.py                 # API keys & configuration
+│   ├── Transforms/               # sa_key.py — SBC / other_amortization are CFS-sourced
+│   ├── utils/
+│   ├── Workers/
+│   ├── Ui/                       # PyQt6 desktop pages (still contain local math; port-back pending)
+│   ├── app_state.py              # IS_LINES / BS_LINES / dataclasses
+│   └── config.py
 │
 ├── web/                          # SURFACE B: Dash tablet/browser UI
 │   ├── assets/
-│   │   ├── manifest.json         # PWA install config (Android home-screen)
-│   │   ├── custom.css            # Scrollbar overrides, compact control classes, misc CSS fixes
-│   │   └── (cert.pem / key.pem — leftover from an abandoned HTTPS test, unused by app.run(); candidate for deletion)
-│   ├── lib/                      # Thin-adapter layer — where "single source of truth" is actually enforced
-│   │   ├── subject_metrics.py    #   ✎ projection branch rewritten onto resolve_projection_waterfall(); CFS add-backs loaded; fallback debt-recalculator
+│   │   ├── manifest.json
+│   │   └── custom.css            # Compact control strips
+│   ├── lib/                      # Headless adapters — no Dash page imports
+│   │   ├── subject_metrics.py    # Historical + projection metric resolver
 │   │   ├── session_io.py
-│   │   ├── gpc_data.py
+│   │   ├── nwc_data.py           # ✎ NEW — Residual revenue + NWC schedule
+│   │   ├── wacc_data.py          # ✎ NEW — on-the-fly WACC / Ke
+│   │   ├── dcf_data.py           # ✎ NEW — on-the-fly DCF (Dashboard-safe)
+│   │   ├── gt_data.py            # ✎ NEW — GT adapter + formatters
+│   │   ├── dashboard_data.py     # ✎ NEW — recon, bridge, football-field rows
 │   │   └── ui_layout.py
 │   ├── pages/
-│   │   ├── home.py               # ✅ Built — full 1:1 conversion of desktop Home page
-│   │   ├── source_data.py        # ✅ Built — real multi-source pipeline (see Step 7 note below)
-│   │   ├── subject_financials.py # ✅ Built — Adjusted EBITDA + Net Interest rows now come from IS_LINES, no page-local math, compact toggle controls
-│   │   ├── gpc.py                # ✅ Built — single shared <table>, basis_state.BEV/EQUITY isolation, compact controls, home basis default hydration
-│   │   ├── debt_schedule.py      # ✅ Built — tranche grid, ReFi, +/- rows, totals; writes debt_page_state
-│   │   └── dcf.py                # Empty placeholder file (proves nav routing only). Real DCF page not yet built.
+│   │   ├── home.py
+│   │   ├── source_data.py
+│   │   ├── subject_financials.py
+│   │   ├── debt_schedule.py
+│   │   ├── nwc.py                # ✎ NEW
+│   │   ├── wacc.py               # ✎ NEW
+│   │   ├── dcf.py                # ✎ NEW — was a placeholder
+│   │   ├── gt.py                 # ✎ NEW
+│   │   ├── gpc.py                # NWC surplus wired; range chart; Equity indicated parse fix
+│   │   └── dashboard.py          # ✎ NEW — control dashboard, not a report
 │   ├── components/
-│   │   └── projection_modal.py   # ✅ Built — full EBITDA→NI waterfall, Debt Schedule interest expense, pre-tax plug
-│   └── app.py                    # Web entry (`python -m web.app`) — nav now includes Debt Schedule
+│   │   ├── projection_modal.py
+│   │   ├── reverse_dcf_modal.py  # ✎ NEW
+│   │   └── gt_range_chart.py     # ✎ NEW — Plotly candlestick reused by GT + GPC
+│   └── app.py                    # Nav: Home, Dashboard, Subject Financials, Source Data,
+│                                 #      Debt Schedule, NWC, WACC, GT, GPC, DCF
 │
 ├── requirements.txt
 └── 4_application.md              # This document
+```
 
 ---
 
-4. Execution Roadmap (Step-by-Step)
-Phase 4.1: Foundation & Scaffolding — Complete
- Step 1: Dependencies & Environment Setup
- Step 2: Scaffolding — (corrected: no desktop/ split happened — see Directory Layout above)
-Phase 4.2: Web Skeleton & Tablet Access — Complete
- Step 3: Core Dash Shell (web/app.py) — multi-page, use_pages=True, running on 0.0.0.0:8050.
- Step 4: Android PWA Configuration — manifest.json in place.
- Step 5: Tablet Connectivity — resolved via Tailscale, not raw LAN IP as originally planned. Tested working from Chromebook's own browser and from tablet Chrome, both over the Tailscale tunnel. HTTPS (cert.pem/key.pem) was tried and abandoned — plain HTTP over Tailscale's already-encrypted tunnel was sufficient and simpler.
-Phase 4.3: Page Migration (PyQt → Dash) — In Progress
- Step 6: Home Page — complete.
- Step 7: Real Source Data Pipeline — complete, not a placeholder. web/pages/source_data.py is fully wired to Canneberge.Services.source_data_service with per-source refresh buttons, a combined "Refresh All," background execution via DiskcacheManager, and live progress callbacks.
- Step 7b: Subject Financials — complete. Public/private branching through shared Calculations.subject_is_bs_calc.
-This session: the page-local "Adjusted EBITDA" block (which duplicated math and briefly rendered the row twice) was removed; adj_ebitda and net_interest now render natively through the normal IS_LINES loop like every other calculated row. Projected columns (EBIT, Net Interest, Pretax, Taxes, Net Income) tie to the Projection Module to the dollar because both read resolve_projection_waterfall().
-Vertical Compactness: Vertical padding on control elements reduced; radio buttons shrunk (btn-sm py-1 px-2) to maximize screen estate for financials.
-Projected Interest Expense display: Flipped to negative (-abs(v)) in display layer only, ensuring visual parity with historical negative interest while preserving positive cost math in the core calculations.
- Step 7c: Projection Module — complete. Row set matches and exceeds desktop:
-Rows added this session: Taxes, Net Income, Net Income Margin (%). Projected Other Amortization $ and SBC $ now display as % × Revenue (previously only historicals showed).
-Waterfall reordered into a true statement: Adjusted EBITDA → Less D&A → Less Other Amort → Less SBC → EBIT → Net Interest Income/(Expense) → +Other Adjustments → Taxes → Net Income → CapEx.
-+Other Adjustments is now a PRE-tax plug on public NFY–NFY+2 (analyst_NI / (1−t) − EBT_before_adj), so the column actually foots top-to-bottom and the residual the user reads off NFY+2 to hand-enter in NFY+3 is an interpretable pre-tax number. Desktop's version computed it after-tax while displaying it above the Taxes row — that inconsistency is fixed on web and desktop.
-Historical Taxes now show the actual reported figure, not pretax × Home tax rate.
-Net Interest is signed: historical = Interest Income − |Interest Expense|; projected = −(Debt Schedule interest expense) with projected interest income deliberately assumed zero (no defensible basis to forecast it yet).
-All projected display values come straight from resolve_projection_dollars() — the modal no longer maintains a second local waterfall.
- Step 7d: Income-Statement Definition Consolidation (shared core) — complete. Root cause found this session: compute_is_calculated was labelling Gross Profit − Operating Expenses as "ebitda", and since StockAnalysis OpEx already includes D&A, that figure was really EBIT. Meanwhile MarketScreener forward EBITDA is SBC-adjusted. Net effect was a silent definition change at TTM→NFY (Adobe: 36.7% → 47.8% "margin expansion" that was purely definitional, then compounded through every projected year). Fix — edited once in Canneberge/:
-subject_is_bs_calc.py: EBIT = GP − OpEx; EBITDA = EBIT + D&A + Other Amortization; adj_ebitda = EBITDA + SBC; net_interest (signed) added to the return dict.
-app_state.py IS_LINES: "ebitda" relabeled "EBITDA (before SBC add-back)"; ("net_interest", …, True, True) inserted after interest_income; ("stock_based_compensation", ..., False, False) inserted before adj_ebitda; ("adj_ebitda", …, True, True) appended at the very bottom (derived row, keeps historical statements tying to the 10-K).
-projection_resolve.py: new resolve_projection_waterfall(); resolve_projection_dollars() extended with ms_net_income, tax_rate, net_interest_by_period and now returns other_amort/sbc/ebit/net_interest/other_adj/pretax_income/taxes/net_income per period.
-web/lib/subject_metrics.py: SBC and other_amortization (both CFS-sourced per sa_key.py) are now loaded into the historical raw dict so the calculated EBITDA rows can use them; projection branch rewritten to call the shared waterfall; _normalise_rate() accepts 0.21/21/"21%".
-Desktop app synchronized: Both subject_financials_page.py and projection_module_page.py refactored. Desktop historical Adjusted EBITDA now correctly computes and renders with CFS-sourced SBC (ADBE LFY-4 Adjusted EBITDA = EBITDA + 1,069). Projected EBITDA, EBIT, and Taxes match the web implementation.
- Step 8: GPC Page — complete.
- Compacted Control Strip: Vertical dead space compressed significantly. Input widths minimized, labels sized down, and radio toggle buttons shrunk (btn-sm py-1 px-2) to keep the focus entirely on valuation data.
- State Persistence (BEV / Equity separation): Split-basis state buckets fully operational. metric_cols, selected_high, selected_low, and weights are saved independently under basis_state.BEV and basis_state.EQUITY. Switching modes protects dynamic data against unmounted state-wiping (via ctx.triggered_id checking). Type-safe _safe_dict() wrapper prevents page crashes on legacy list-to-dict sessions.
- Home Default Hydration: GPC page automatically reads Home’s basis_of_value on page load. If Home is set to "Equity Value", GPC loads with Equity toggled; otherwise, defaults to BEV. Local toggle remains fully functional.
- Column alignment solved for real this session. Root cause: header and body were two separate <table> elements, so the browser sized their columns independently. Fix: one shared <table> with <colgroup> + <thead id=gpc-header-container> + <tbody id=gpc-body-container>; tableLayout: fixed; a _col_style() helper setting width/minWidth/maxWidth together; Statistics/Selected/Subject/Weighting tables use the same four leading columns (_leading_cells()) instead of one wide cell trying to emulate four. The split header/body callback design (dropdowns don't remount on exclude toggles) was preserved.
- DuplicateCallback crash on startup fixed — restore_gpc_static_state needed prevent_initial_call='initial_duplicate' because it writes gpc-exclude-store with allow_duplicate=True.
- Weighting inputs verified live-wired (Input({"type":"gpc-weight","index":ALL},"value") already in the render callback — earlier note in this doc was stale). Fixed a latent bug where FMV High/Low rows had 2 cells vs. 1+N in the weight row.
- Forward metrics renamed "NFY / NFY+1 / NFY+2 Adjusted EBITDA" in gpc_metrics.py (+ toggle conversion maps). gpc.py requests "adj_ebitda" for the subject on those periods only — comps come from MarketScreener (adjusted), so this is apples-to-apples; TTM stays conventional on both sides. gpc_multiples.py unchanged (its comp-side source routing was already correct).
- ⚠️ Bridge — BEV-mode formula chain only. Desktop's Equity-mode branch (eq_nctrl → eq_mkt_ctrl → eq_nonmkt_ctrl) not ported.
- ⚠️ Private-company cash path stubbed to None in the Bridge.
- ⚠️ NWC Surplus/Deficit and Non-Operating Assets, Net remain manual placeholder inputs — NWC page (Step 11b) should feed the first one.
- ⚠️ Company Name column in the ticker grid still blank on the live page even though gpc_company_names is read — trace whether Home is actually writing names into the session (yfinance lookups may be failing silently).
- ⚠️ "TTM EBITDA" label: comps use the raw StockAnalysis ebitda row, subject now uses conventional EBITDA from compute_is_calculated. If SA's row is EBIT-like for a given ticker the label is misleading. Low priority — historical multiples are rarely used.
- Step 9: Theme System — not started. Web's dark styling (Bootstrap DARKLY) coincidentally resembles desktop's One Dark Pro, not the true default (Slate & Gold). Extract theme.py color roles into CSS custom properties before more pages accumulate hardcoded hex. Add to scope: a shared scroll-container helper in ui_layout.py (overflowX/Y: auto, minWidth: 0, optional maxHeight) so every wide table scrolls internally the way the Projection Module now does — currently only the modal has the visible/grabbable scrollbar treatment.
- Step 10: DCF Page — not started beyond the placeholder. Inputs it needs are now largely available in session: projected Adjusted EBITDA / EBIT / taxes / net income (Projection Module), interest & net borrowing (Debt Schedule). Still missing: NWC (Step 11b), WACC. Two bugs fixed earlier in the desktop's valuation_surface.py/dcf_page.py (EBITDA-multiple TV used final_fcf; H-Model sensitivity used approximated residual FCF) apply automatically via shared Calculations/.
- Step 11: Debt Schedule, NWC, WACC, GT pages
- 11a: Debt Schedule — built this session. web/pages/debt_schedule.py reuses Calculations/debt_schedule.py unchanged. Rate Basis select, up to 20 tranche rows, +/− row buttons, per-row ↻ ReFi (issues at prior maturity, +5 yrs), per-tranche interest by period, Total Interest / Ending Debt / Net Borrowing rows. Persists to session-store["debt_page_state"] in the same shape desktop writes (rate_basis, row_count, rows) plus cached engine outputs (interest_expense_by_period, ending_debt_by_period, net_borrowing_by_period, projected_interest) so consumers don't recompute. Totals verified equal to desktop. Wired into the Projection Module and subject_metrics.py (signed net interest) — the $500–600M/yr that was hiding inside +Other Adjustments now sits on its own row and the plug shrank accordingly. Known limitation: intentionally elementary (no amortizing principal, no revolver, no rate curves) — upgrade candidate after the remaining pages exist.
-Plumbing Resilience: If a loaded session only carries tranche rows (saved prior to engine caches), subject_metrics.py automatically reconstructs periods/boundaries and re-calculates the debt schedule on the fly using _interest_map_from_debt_state so the waterfall never breaks.
- 11b: NWC — next.
- 11c: GT — after DCF; fairly independent.
- 11d: WACC — needed before DCF can produce a value; sequence TBD (may slot between NWC and DCF).
-Phase 4.4: Hardening & Parity Check — Not Started
- State synchronization confirmed working for Home/Subject Financials/Source Data/GPC/Debt Schedule via dcc.Store — extend to remaining pages as built.
- Desktop regression pass after this session's shared-core edits completed — verified 100% functional, no crashes.
- Final multi-machine sync check (brother's Windows machine) — not yet re-verified against the current 4_application/ structure.
-5. Known Issues / Technical Debt Log
-Item	Status
-cert.pem / key.pem in web/assets/	Unused leftovers from an abandoned HTTPS test. Candidate for deletion.
-web/components/navbar.py	Empty file — app.py builds its navbar inline. Dead scaffolding, not a bug.
-GPC Weighting inputs not live	Resolved — were already wired; doc was stale. FMV row cell-count bug fixed.
-GPC header/body column drift	Resolved — single shared table + colgroup + fixed widths.
-GPC DuplicateCallback on startup	Resolved — prevent_initial_call='initial_duplicate'.
-GPC selections lost on BEV↔Equity toggle	Resolved — per-basis basis_state buckets.
-Projection Module missing Taxes / NI / NI margin rows	Resolved.
-Projected OA $ / SBC $ not shown	Resolved.
-EBITDA definition flips at TTM→NFY	Resolved in shared core (Step 7d).
-Subject Financials Adjusted EBITDA rendered twice	Resolved — page-local block removed; row comes from IS_LINES.
-Desktop projection_module_page.py out of sync	Resolved — desktop successfully ported to shared core math.
-Oversized Web Toggles and Control Bars	Resolved — shrunk GPC and Subject Financials control cards. CSS class added.
-Projected interest expense blank on Subject Financials page load	Resolved — fallback notes-driven recalculator added.
-GPC Bridge — Equity mode	Not ported; only BEV chain exists.
-GPC Bridge — private-company cash	Stubbed to None.
-GPC ticker grid — Company Name column	Blank on live page; investigate Home → session write path.
-GPC "TTM EBITDA" label vs. definition	Comps raw SA row, subject conventional EBITDA. Low priority.
-Projected interest income	Assumed zero by design; revisit if a cash-balance model is added.
-Debt Schedule depth	No amortization / revolver / rate curves. Upgrade after NWC/DCF/GT.
-Scrollbar consistency	Only the Projection Module has the explicit ::-webkit-scrollbar + overflow treatment. Standardize via ui_layout.py helper (folded into Step 9).
-Theme system	Not started — see Step 9.
-dcc.Dropdown dark-theme styling	Resolved earlier via dbc.min.css + className="dbc" — reuse on any page with dropdowns.
-Input-in-table-cell right-alignment	Resolved earlier — marginLeft: "auto" on the input's own style.
-Dash allow_duplicate pattern	Reminder: any callback with allow_duplicate=True must set prevent_initial_call=True or 'initial_duplicate'. Bit us once; will again on new pages.
-6. Developer Cheatsheet / Common Commands
-Running the Desktop App
-Bash
+## 4. Execution Roadmap (Step-by-Step)
 
+### Phase 4.1: Foundation & Scaffolding — Complete
+
+- [X] **Step 1: Dependencies & Environment Setup**
+- [X] **Step 2: Scaffolding** — *(corrected: no `desktop/` split happened — see Directory Layout above)*
+
+### Phase 4.2: Web Skeleton & Tablet Access — Complete
+
+- [X] **Step 3: Core Dash Shell (`web/app.py`)** — multi-page, `use_pages=True`, running on `0.0.0.0:8050`.
+- [X] **Step 4: Android PWA Configuration** — `manifest.json` in place.
+- [X] **Step 5: Tablet Connectivity** — Tailscale, plain HTTP. HTTPS abandoned.
+
+### Phase 4.3: Page Migration (PyQt → Dash) — Substantially Complete
+
+- [X] **Step 6: Home Page** — complete.
+- [X] **Step 7: Real Source Data Pipeline** — complete. Wired to `Canneberge.Services.source_data_service`, per-source refresh, Refresh All, `DiskcacheManager`, live progress.
+- [X] **Step 7b: Subject Financials** — complete. Shared `compute_is_calculated` / `IS_LINES`. Compact IS/BS toggles. Projected interest expense displayed negative in the **display layer only**; plumbing stays a positive cost so Projection Module EBIT math is unchanged. CFS SBC and Other Amortization feed Adjusted EBITDA.
+- [X] **Step 7c: Projection Module** — complete. True statement waterfall: Adjusted EBITDA → Less D&A → Less Other Amort → Less SBC → EBIT → Net Interest → +Other Adjustments (pre-tax plug) → Taxes → Net Income → CapEx. Debt Schedule interest wired. Historical taxes = reported, not statutory × pretax.
+- [X] **Step 7d: Income-Statement Definition Consolidation** — complete in shared core.
+  - `EBIT = GP − OpEx`
+  - `EBITDA (before SBC add-back) = EBIT + D&A + Other Amortization`
+  - `Adjusted EBITDA = EBITDA + SBC`
+  - Desktop Subject Financials picks this up automatically. Desktop Projection Module / DCF still have residual definition drift vs web (see Known Issues).
+- [X] **Step 8: GPC Page** — complete for BEV workflow; remaining gaps listed under ⚠️.
+  - Compact control strip; Home `basis_of_value` hydrates the starting toggle; local BEV/Equity still works.
+  - `basis_state.BEV` / `basis_state.EQUITY` isolate `metric_cols`, selected multiples, and weights. Slice-aware persist (`ctx.triggered_id`) so a basis toggle cannot wipe the destination bucket.
+  - `_safe_dict()` prevents crashes on legacy list-shaped session data.
+  - Single shared `<table>` + `<colgroup>` for header/body alignment.
+  - Forward subject metrics request `"adj_ebitda"` for NFY / NFY+1 / NFY+2.
+  - **NWC Surplus/(Deficit)** is now read-only and sourced from `nwc_page_state["surplus_deficit"]` (no longer a manual placeholder).
+  - **GPC Multiples Range Chart** pop-out (Plotly candlestick: Open=Q3, High=Max, Low=Min, Close=Q1). Reuses `web/components/gt_range_chart.py`.
+  - Selected-multiple parser now strips `"x"` so Equity indicated values calculate (`"15.00x"` no longer becomes `0.0` / NA).
+  - ⚠️ Bridge — BEV-mode formula chain only. Desktop Equity-mode branch (`eq_nctrl` → `eq_mkt_ctrl` → `eq_nonmkt_ctrl`) not ported.
+  - ⚠️ Private-company cash path stubbed to `None`.
+  - ⚠️ Non-Operating Assets, Net remains a manual placeholder.
+  - ⚠️ Company Name column can still be blank if Home never wrote `gpc_company_names`.
+- [X] **Step 11a: Debt Schedule** — complete. Shared `Calculations/debt_schedule.py`. Desktop-compatible `debt_page_state` plus cached `interest_expense_by_period` / `ending_debt_by_period` / `net_borrowing_by_period`. Fallback recompute from tranche rows if caches missing.
+- [X] **Step 11b: NWC** — complete.
+  - Shared `Canneberge/Calculations/nwc.py`; desktop page left untouched.
+  - **Option A preserved:** Cash Treatment affects GPC peer NWC only. Subject NWC is always selected CA − selected CL.
+  - Local Historical Years; global Projection Years (synced with Home).
+  - TTM is a real column so NFY ΔNWC = NFY NWC − TTM NWC.
+  - Residual column exists; Residual Revenue = final projected revenue × (1 + DCF LTGR) via `dcf.residual_revenue()` so DCF can consume `changes_in_nwc["Residual"]` without a circular page import.
+  - Turnover Ratios basis blanks projected NWC (no projected BS).
+  - GPC peer table, stats, Selected %, Normalized / Actual / Surplus/(Deficit), combo chart.
+  - State compatible with desktop `collect_state()` plus web caches (`changes_in_nwc`, `surplus_deficit`, …).
+- [X] **Step 11d: WACC** — complete.
+  - Shared `Canneberge/Calculations/wacc.py`; desktop page left untouched.
+  - Comp table, stats, Selected Debt%TIC / Tax (read-only Home rate) / Re-Levered Beta.
+  - MCAPM Ke, FRED pretax Kd, after-tax Kd, We/Wd, WACC **rounded to 4 decimals** (2 dp as a percent) — that rounded value is what DCF consumes.
+  - Preserved: magnitude percent parse (`5` → 5%, `0.5` → 50%); book vs market Debt/TIC by Capital Structure dropdown; Ke requires all four terms (blank Size Premium → NA, not 0).
+  - `web/lib/wacc_data.py` is page-independent so DCF/Dashboard never import `web.pages.wacc`.
+- [X] **Step 10: DCF Page** — complete (was a placeholder).
+  - Shared `Canneberge/Calculations/dcf.py` + `web/lib/dcf_data.py` (Dashboard-safe; no `web.pages.dcf` import).
+  - 25-row waterfall, no TTM column, Residual column, four TV models (Gordon / EBITDA Multiple / Revenue Multiple / H-Model), FV bridge, 5×5 sensitivity heatmap.
+  - **Approved deviations from current desktop:**
+    - EBITDA row is **Adjusted EBITDA** (matches Projection Module, MarketScreener, GPC forward).
+    - Full precision (desktop rounds via label re-parse).
+    - Sensitivity **re-discounts explicit-period FCFs** at the column rate (desktop held that sum fixed — heatmap was lopsided).
+  - FCFE shows Net Interest and Projection Module **+Other Adjustments** so EBT − SBC + OA − Taxes foots to Net Income. Those rows hidden in FCFF.
+  - FCF `Less: Other Adjustments` remains the cash-flow add-on (acquisitions / user plug), distinct from the P&L OA row.
+  - Home Basis of Value overrides Cash Flows to (Equity → FCFE, BEV → FCFF).
+  - Reverse-DCF modal (`web/components/reverse_dcf_modal.py`): ticker universe = subject + GPCs; each ticker’s **own observed beta** × WACC ERP; FCFE bridge; Gordon implied LTGR; H-Model solver; combo / H-bar / indexed-range charts.
+  - 3D Valuation Surface omitted (desktop hyperlink is dead tech debt).
+- [X] **Step 11c: GT Page** — complete.
+  - Shared `Canneberge/Calculations/gt.py` + `web/lib/gt_data.py`.
+  - GPC-style layout: split header/body callbacks, sibling Statistics / Selected / Subject / Weighting tables, separate Bridge card.
+  - Transactions owned by Home; analysis only on GT.
+  - DLOC field is read-only; Dashboard Control Premium is source of truth (`DLOC = CP / (1 + CP)`). Until Dashboard writes it, saved `gt_page_state.dloc` is used.
+  - Range chart modal (Q3/Max/Min/Q1 candlestick).
+- [X] **Step 12: Dashboard** — complete as a **control dashboard**, not a report.
+  - Income Approach: WACC fields (Debt/TIC + Beta with Median/Custom stats, ERP, Size, CSRP, pretax series, WACC output) and DCF options (TV model, LTGR, multiple / H-Model fields, Dep % of CapEx).
+  - Market Approach: GPC (up to 7) and GT (up to 3) metric / low / high / weight rows; How Many resets even weights.
+  - Reconciliation: DCF / GPC / GT / GIPO / NAV; Control Premium → Implied DLOC; Display BEV / Equity / $/Share; Concluded FV; Observed EV / Market Cap / Share Price.
+  - Cost Approach: layout + persisted inputs only (NAV not calculated).
+  - Football-field chart (Plotly): one bar per method line, observed marker, concluded FV line.
+  - Two-way last-edit-wins via **session-store** (`wacc_page_state`, `dcf_page_state`, `gpc_page_state`, `gt_page_state`, `dashboard_page_state`). Dash cannot bind live PyQt widgets across unmounted pages.
+  - Illegal `import web.pages.dcf` inside callbacks was the blank-Dashboard crash (`dash.register_page() can't be called within a callback`). Fixed by `web/lib/dcf_data.py`.
+- [ ] **Step 9: Theme System** — not started. Web DARKLY ≈ desktop One Dark Pro, not Slate & Gold. Extract `theme.py` roles to CSS custom properties. Shared scroll-container helper still pending.
+
+### Phase 4.4: Hardening & Parity Check — In Progress
+
+- [X] Web pages listed above persist through `dcc.Store` / `session-store`.
+- [ ] **Web ↔ desktop session JSON is not equivalent.** Saving on one surface and opening on the other resets GPC (and likely GT/WACC/DCF) to defaults. See §7 item 1.
+- [ ] Desktop UIs still duplicate math now living in `Canneberge/Calculations/{nwc,wacc,dcf,gt}.py`.
+- [ ] Dash input-remount UX (Tab destroys focused cells). GitHub issue filed; `focus_keeper.js` was tried and discarded.
+- [ ] Final multi-machine sync check (brother's Windows machine) — not re-verified against current `4_application/`.
+
+---
+
+## 5. Known Issues / Technical Debt Log
+
+| Item | Status |
+|---|---|
+| `cert.pem` / `key.pem` in `web/assets/` | Unused leftovers from abandoned HTTPS test. Candidate for deletion. |
+| `web/components/navbar.py` | Empty file — `app.py` builds navbar inline. Dead scaffolding. |
+| ~~GPC Weighting / column drift / DuplicateCallback / BEV↔Equity wipe~~ | **Resolved** earlier. |
+| ~~EBITDA definition flip TTM→NFY~~ | **Resolved** in shared core (Step 7d). |
+| ~~NWC / WACC / DCF / GT / Dashboard missing on web~~ | **Resolved** this stretch. |
+| ~~GPC NWC Surplus placeholder~~ | **Resolved** — read-only from NWC page. |
+| ~~GPC Equity indicated NA~~ | **Resolved** — `_num()` now strips `"x"`. |
+| ~~Dashboard `dash.register_page()` crash~~ | **Resolved** — `web/lib/dcf_data.py`; never import pages from libs/callbacks. |
+| **Web ↔ desktop save/load schema** | **Open — next.** GPC: desktop lists (`metric_selections`, `selected_low`) vs web dicts (`metric_cols` keyed `"0"`); `per_basis_state` vs `basis_state`; `excluded_rows` vs `exclude_map`. Same class of mismatch likely on GT/WACC/DCF/Dashboard. Canonical format TBD; load-time adapter both directions. |
+| Desktop UI still has local math | `nwc_page.py`, `wacc_page.py`, `dcf_page.py`, `gt_page.py`, `projection_module_page.py` not yet importing the new Calculation modules. Port only after numeric gold-standard match. |
+| DCF definition drift desktop vs web | Web: Adj EBITDA row; full precision; sensitivity re-discounts explicit FCFs. Desktop: mixed EBITDA sourcing; label-rounded intermediates; sensitivity held explicit PV sum fixed. Conscious alignment required — not a silent import side effect. |
+| Dash table remount on Tab | Recalc callbacks return a new `<table>` containing the inputs → cursor lost. Correct fix: structural render vs in-place calc cell updates. Issue filed on GitHub. |
+| GPC Bridge — Equity mode | Not ported. |
+| GPC Bridge — private cash | Stubbed to `None`. |
+| GPC Company Name column | Can be blank; Home write path. |
+| Non-Operating Assets on GPC Bridge | Still manual. |
+| Projected interest income | Assumed zero by design. |
+| Debt Schedule depth | No amortization / revolver / rate curves. |
+| Reverse-DCF on desktop vs web | Web modal complete; desktop dialog already existed. Not a save-format issue. |
+| 3D Valuation Surface | Omitted on web; desktop hyperlink is unreachable tech debt. |
+| Analytics page | Desktop only. Not on web. |
+| Theme / scrollbar standardization | Not started — Step 9. |
+| Dash `allow_duplicate` | Must pair with `prevent_initial_call=True` or `'initial_duplicate'`. Dynamic IDs need `allow_optional=True` until mounted (`dcf-residual-amortization`, NWC +/− buttons). |
+| Home hydrate wildcard `ALL` | Returning a scalar `no_update` for `gpc-ticker-input` ALL is invalid; must return a list of 15 `no_update`s. |
+
+---
+
+## 6. Developer Cheatsheet / Common Commands
+
+### Running the Desktop App
+
+```bash
 cd ~/PampleMousseLabs/ProjectCanneberge/4_application
 python -m Canneberge.main
-Running the Web / Tablet App (Local Host)
-Bash
+```
 
+### Running the Web / Tablet App (Local Host)
+
+```bash
 cd ~/PampleMousseLabs/ProjectCanneberge/4_application
 python -m web.app
 # Access locally: http://127.0.0.1:8050
 # Access on tablet/other devices: http://<tailscale-ip>:8050
-Session-state keys now in use (session-store)
-projection_page_state · gpc_page_state (incl. basis_state.BEV/EQUITY) · debt_page_state · private_is_data / private_bs_data · reserved: nwc_page_state, wacc_page_state, dcf_page_state, gt_page_state, dashboard_page_state (all preserved by Home autosync already).
+```
 
-Git Routine (End of Day)
-Bash
+### Session-state keys now in use (`session-store`)
 
+`projection_page_state` · `gpc_page_state` (incl. `basis_state.BEV/EQUITY`) · `debt_page_state` · `nwc_page_state` · `wacc_page_state` · `dcf_page_state` (incl. `reverse_dcf_state`) · `gt_page_state` · `dashboard_page_state` · `private_is_data` / `private_bs_data`
+
+Web writes extra cached outputs (`wacc_value`, `changes_in_nwc`, `surplus_deficit`, `fv_base`, …). Desktop should ignore unknown keys. Desktop-shaped keys that web does not read on load are the actual round-trip bug.
+
+### Git Routine (End of Day)
+
+```bash
 git add .
-git commit -m "Progress update: Phase 4 Step X"
+git commit -m "Progress update: Phase 4 web NWC/WACC/DCF/GT/Dashboard"
 git push
+```
 
-7. Next Steps (Prioritized)
-Step 11b — NWC page. Send Canneberge/Ui/nwc_page.py + any Calculations/ module it imports. Build web/pages/nwc.py on the same pattern as Debt Schedule (pure engine reuse, nwc_page_state, cached outputs). Wire its surplus/deficit into the GPC Bridge placeholder.
-Step 11d — WACC page (or confirm DCF can start with a manual WACC input).
-Step 10 — DCF page. Consumes Projection Module (via subject_metrics), Debt Schedule (interest, net borrowing), NWC, WACC. Terminal value panel, sensitivity table, reverse-DCF.
-Step 11c — GT page.
-Step 9 — Theme + scroll standardization once page count stabilizes.
-Close remaining GPC gaps: Equity-mode bridge, private cash, Company Name column.
+---
+
+## 7. Next Steps (Prioritized)
+
+1. **Web ↔ desktop session adapter.** Dump one JSON from web and one from desktop on the same deal. Diff `gpc_page_state`, `gt_page_state`, `wacc_page_state`, `projection_page_state`, `nwc_page_state`, `dcf_page_state`, `dashboard_page_state`. Implement load-time mapping both directions. Prefer desktop list-shaped GPC as the on-disk canonical format (existing sessions). Prove GPC multiples survive web→desktop and desktop→web before anything else.
+2. **Point desktop UIs at shared engines** — one page at a time (GT or WACC first; DCF last). Do not delete desktop math until that page ties out on the same session.
+3. **DCF definition alignment (conscious desktop change):** Adj EBITDA row; whether sensitivity re-discounts explicit FCFs; intermediate rounding.
+4. **Dash input-remount UX** (GitHub issue): stop returning input-bearing tables from ordinary recalc callbacks. Projection Module first as the proof case.
+5. **Remaining GPC gaps:** Equity-mode bridge, private cash, Company Name, Non-Op Assets.
+6. **Step 9 — Theme + scroll standardization** once the two surfaces share a file format.
+7. Analytics on web — not blocking.
+```

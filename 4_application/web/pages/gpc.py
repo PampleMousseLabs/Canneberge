@@ -27,6 +27,7 @@ from web.lib.session_io import dict_to_project_inputs
 from web.lib.subject_metrics import get_subject_metric_value
 from Canneberge.Calculations.gpc_multiples import compute_all_gpc_multiples, get_subject_cash
 from Canneberge.Calculations.gpc_metrics import GPC_METRICS, dropdown_options, get_metric, CUSTOM_MULTIPLE_LABEL
+from web.components.gt_range_chart import gt_range_chart
 
 dash.register_page(__name__, path="/gpc", name="GPC Metrics")
 
@@ -220,7 +221,13 @@ layout = dbc.Container([
     dbc.Card([
         dbc.CardBody([
             html.Div([
-                html.Div(className="fw-bold text-light mb-1", children="Guideline Public Company Multiple(s)"),
+                dbc.Row([
+                    dbc.Col(html.Div(className="fw-bold text-light mb-1",
+                                     children="Guideline Public Company Multiple(s)")),
+                    dbc.Col(html.A("GPC Multiples Range Chart →", id="gpc-chart-link",
+                                   href="#", className="text-warning small"),
+                            xs="auto", className="d-flex align-items-center"),
+                ], className="justify-content-between g-1 mb-1"),
                 html.Table(
                     [
                         html.Colgroup(id="gpc-colgroup"),
@@ -265,6 +272,14 @@ layout = dbc.Container([
 
     # memory: source of truth is session-store["gpc_page_state"]["exclude_map"]
     # (session storage here fought disk load and looked like "saves don't stick")
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Range of Selected Multiples")),
+        dbc.ModalBody([html.Div(id="gpc-chart-container")]),
+        dbc.ModalFooter([
+            dbc.Button("Close", id="gpc-chart-close", color="secondary", size="sm", n_clicks=0),
+        ]),
+    ], id="gpc-chart-modal", is_open=False, size="lg"),
+
     dcc.Store(id="gpc-exclude-store", data={}, storage_type="memory"),
 ], fluid=True, className="px-2")
 
@@ -502,7 +517,19 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
                                      session_data, source_results):
     inputs = dict_to_project_inputs(session_data or {})
     metric_col_values = metric_col_values or []
+    selected_highs = selected_highs or []
+    selected_lows = selected_lows or []
     n_cols = len(metric_col_values)
+
+    # Selected Multiples are dynamically mounted by render_body. During
+    # a BEV/Equity switch this callback can briefly receive an empty
+    # pattern-match list even while the saved values are already visible
+    # in the remounted inputs. Use the active basis bucket as fallback.
+    basis_mode = _basis_key(basis_mode)
+    active_gpc_state = (session_data or {}).get("gpc_page_state", {}) or {}
+    active_basis_bucket = _basis_bucket(active_gpc_state, basis_mode)
+    saved_selected_high = active_basis_bucket.get("selected_high", {})
+    saved_selected_low = active_basis_bucket.get("selected_low", {})
 
     if n_cols == 0:
         empty = dbc.Alert("Configure GPC multiples above first.", color="secondary")
@@ -515,10 +542,26 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
             return 0.0
 
     def _num(s):
+        if s is None:
+            return None
+
+        text = (
+            str(s)
+            .replace(",", "")
+            .replace("$", "")
+            .replace("x", "")
+            .replace("X", "")
+            .strip()
+        )
+        if not text:
+            return None
+
         try:
-            return float(str(s).replace(",", "").strip())
+            value = float(text)
         except (TypeError, ValueError):
-            return 0.0
+            return None
+
+        return value if value == value else None
 
     # --- Subject metric per column, via the single shared source
     # of truth (same function subject_financials.py already uses) ---
@@ -547,15 +590,31 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
         subject_row.append(html.Td(f"{v:,.1f}" if v is not None else "NA",
                                    style=_col_style("metric", textAlign="right")))
 
+    indicated_basis = "Equity" if basis_mode == "EQUITY" else "BEV"
+
     indicated_low, indicated_high = [], []
-    ind_low_row = _leading_cells("Indicated BEV — Low")
-    ind_high_row = _leading_cells("Indicated BEV — High")
+    ind_low_row = _leading_cells(f"Indicated {indicated_basis} — Low")
+    ind_high_row = _leading_cells(f"Indicated {indicated_basis} — High")
+
     for i in range(n_cols):
         subj = subject_vals[i]
-        sel_low = _num(selected_lows[i]) if i < len(selected_lows) else None
-        sel_high = _num(selected_highs[i]) if i < len(selected_highs) else None
-        val_low = subj * sel_low if (subj is not None and sel_low) else None
-        val_high = subj * sel_high if (subj is not None and sel_high) else None
+
+        live_low = selected_lows[i] if i < len(selected_lows) else None
+        live_high = selected_highs[i] if i < len(selected_highs) else None
+
+        # On component-remount callback waves, live lists can be empty.
+        # Fall back to the selected values stored for this specific basis.
+        if live_low is None or str(live_low).strip() == "":
+            live_low = saved_selected_low.get(str(i))
+        if live_high is None or str(live_high).strip() == "":
+            live_high = saved_selected_high.get(str(i))
+
+        sel_low = _num(live_low)
+        sel_high = _num(live_high)
+
+        # Zero is mathematically valid; invalid/blank is None.
+        val_low = subj * sel_low if (subj is not None and sel_low is not None) else None
+        val_high = subj * sel_high if (subj is not None and sel_high is not None) else None
         indicated_low.append(val_low)
         indicated_high.append(val_high)
         ind_low_row.append(html.Td(f"{val_low:,.0f}" if val_low is not None else "NA",
@@ -832,3 +891,81 @@ def persist_gpc_state(num_multiples, basis_mode, dloc, control_premium, nwc, non
         "exclude_map": saved_exclude_map,
     }
     return session_data
+
+# -------------------------------------------------------------
+# CALLBACK — GPC range chart modal
+# -------------------------------------------------------------
+@callback(
+    Output("gpc-chart-modal", "is_open"),
+    Input("gpc-chart-link", "n_clicks"),
+    Input("gpc-chart-close", "n_clicks"),
+    State("gpc-chart-modal", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_gpc_chart(open_clicks, close_clicks, is_open):
+    trig = ctx.triggered_id
+    if trig == "gpc-chart-link":
+        return True
+    if trig == "gpc-chart-close":
+        return False
+    return bool(is_open)
+
+
+@callback(
+    Output("gpc-chart-container", "children"),
+    Input("gpc-chart-modal", "is_open"),
+    State({"type": "gpc-metric-col", "index": ALL}, "value"),
+    State("gpc-basis-toggle", "value"),
+    State("gpc-exclude-store", "data"),
+    State("session-store", "data"),
+    State("source-results-store", "data"),
+)
+def render_gpc_chart(is_open, metric_col_values, basis_mode, exclude_map,
+                     session_data, source_results):
+    if not is_open:
+        return no_update
+
+    inputs = dict_to_project_inputs(session_data or {})
+    tickers = inputs.gpc_tickers or []
+    exclude_map = exclude_map or {}
+    metric_col_values = metric_col_values or []
+    basis_mode = _basis_key(basis_mode)
+
+    if not tickers or not metric_col_values:
+        return dbc.Alert("No GPC data to chart yet.", color="secondary")
+
+    sa = (source_results or {}).get("stockanalysis", {}) if source_results else {}
+    is_rows = sa.get("IS", [])
+    bs_rows = sa.get("BS", [])
+    ratio_rows = sa.get("Ratios", [])
+    ms_rows = (source_results or {}).get("marketscreener", []) if source_results else []
+
+    all_multiples = compute_all_gpc_multiples(
+        is_rows, ms_rows, ratio_rows, bs_rows, tickers, basis_mode=basis_mode
+    )
+    included = [t for t in tickers if not exclude_map.get(t, False)]
+
+    labels, q3, mx, mn, q1 = [], [], [], [], []
+    for col_metric in metric_col_values:
+        vals = [all_multiples.get(t, {}).get(col_metric) for t in included]
+        stats = _compute_stats(vals)
+        labels.append(col_metric)
+        q3.append(stats["Third Quartile"])
+        mx.append(stats["Maximum"])
+        mn.append(stats["Minimum"])
+        q1.append(stats["First Quartile"])
+
+    fig = gt_range_chart(
+        labels=labels,
+        q3=q3,
+        max_vals=mx,
+        min_vals=mn,
+        q1=q1,
+        title="Range of Selected Multiples",
+    )
+
+    return dcc.Graph(
+        figure=fig,
+        config={"displayModeBar": False},
+        style={"height": "520px"},
+    )

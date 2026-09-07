@@ -169,8 +169,22 @@ def _state_from_session(session_data: dict) -> dict:
         "residual_amortization": raw.get("residual_amortization", ""),
         "bridge_other_adj": raw.get("bridge_other_adj", ""),
         "tv_inputs": tv_inputs,
-        "sens_wacc": dict(raw.get("sens_wacc") or {}),
-        "sens_ltgr": dict(raw.get("sens_ltgr") or {}),
+        # v1 persisted every generated sensitivity header during Dash
+        # remounts, which froze auto WACC/LTGR values permanently.
+        #
+        # v2 stores only values the user intentionally overrides.
+        # Existing v1 sensitivity maps are intentionally discarded once;
+        # they were auto-generated values, not reliable user selections.
+        "sens_wacc": (
+            dict(raw.get("sens_wacc") or {})
+            if raw.get("sensitivity_override_version") == 2
+            else {}
+        ),
+        "sens_ltgr": (
+            dict(raw.get("sens_ltgr") or {})
+            if raw.get("sensitivity_override_version") == 2
+            else {}
+        ),
         "nols": raw.get("nols", "No"),
         "nwc_by_mgmt": raw.get("nwc_by_mgmt", "No"),
         "valuation_approach": raw.get("valuation_approach", "DCF"),
@@ -896,15 +910,11 @@ def persist_dcf(tv_model, ltg_input, capex_dep_pct, bridge_other_adj,
             if m in tv_inputs and k:
                 tv_inputs[m][k] = "" if val is None else str(val)
 
+    # Only explicitly user-modified sensitivity headers become saved
+    # overrides. Generated/default cells must remain auto-linked to the
+    # current Ke/WACC and LTGR.
     sens_wacc = dict(state["sens_wacc"])
-    for cid, val in zip(sens_w_ids or [], sens_w_vals or []):
-        if isinstance(cid, dict) and cid.get("offset") is not None and val is not None:
-            sens_wacc[cid["offset"]] = str(val)
-
     sens_ltgr = dict(state["sens_ltgr"])
-    for cid, val in zip(sens_l_ids or [], sens_l_vals or []):
-        if isinstance(cid, dict) and cid.get("offset") is not None and val is not None:
-            sens_ltgr[cid["offset"]] = str(val)
 
     new_state = {
         "ltg_input": ltg_input if ltg_input is not None else state["ltg_input"],
@@ -917,12 +927,75 @@ def persist_dcf(tv_model, ltg_input, capex_dep_pct, bridge_other_adj,
         "tv_inputs": tv_inputs,
         "sens_wacc": sens_wacc,
         "sens_ltgr": sens_ltgr,
+        "sensitivity_override_version": 2,
         "nols": state["nols"],
         "nwc_by_mgmt": state["nwc_by_mgmt"],
         "valuation_approach": state["valuation_approach"],
     }
 
     calc = _compute(session_data, source_results, new_state)
+
+    # A sensitivity grid is callback-generated. When the table remounts,
+    # Dash supplies every default cell value again. Compare each visible
+    # value with its current auto-generated value:
+    #
+    #   same as auto value -> do not save an override
+    #   different          -> user intentionally overrode that cell
+    #
+    # This is the Dash equivalent of desktop's _sens_*_auto_text logic.
+    triggered = ctx.triggered_id
+    trigger_type = triggered.get("type") if isinstance(triggered, dict) else triggered
+
+    if trigger_type == "dcf-sens-wacc" and sens_w_ids:
+        manual_wacc = {}
+        current_rate = calc["discount_rate"]
+        if current_rate is not None:
+            for cid, value in zip(sens_w_ids or [], sens_w_vals or []):
+                if not isinstance(cid, dict):
+                    continue
+                offset_text = cid.get("offset")
+                try:
+                    offset = float(offset_text)
+                except (TypeError, ValueError):
+                    continue
+
+                entered = parse_pct(value)
+                auto_value = current_rate + offset
+
+                # Blank restores automatic behavior. Numeric values equal
+                # to the generated default are also automatic.
+                if entered is None:
+                    continue
+                if abs(entered - auto_value) > 1e-10:
+                    manual_wacc[str(offset_text)] = str(value)
+
+        sens_wacc = manual_wacc
+        new_state["sens_wacc"] = sens_wacc
+
+    if trigger_type == "dcf-sens-ltgr" and sens_l_ids:
+        manual_ltgr = {}
+        current_ltgr = calc["ltgr"]
+        if current_ltgr is not None:
+            for cid, value in zip(sens_l_ids or [], sens_l_vals or []):
+                if not isinstance(cid, dict):
+                    continue
+                offset_text = cid.get("offset")
+                try:
+                    offset = float(offset_text)
+                except (TypeError, ValueError):
+                    continue
+
+                entered = parse_pct(value)
+                auto_value = current_ltgr + offset
+
+                if entered is None:
+                    continue
+                if abs(entered - auto_value) > 1e-10:
+                    manual_ltgr[str(offset_text)] = str(value)
+
+        sens_ltgr = manual_ltgr
+        new_state["sens_ltgr"] = sens_ltgr
+
     new_state.update({
         "effective_cash_flows_to": calc["cash_flows_to"],
         "discount_rate": calc["discount_rate"],
