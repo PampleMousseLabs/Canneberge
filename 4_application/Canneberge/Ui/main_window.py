@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
             get_nwc_change_callback=self._get_nwc_change,
             get_reverse_dcf_inputs_callback=self._get_reverse_dcf_inputs,
             get_gpc_tickers_callback=self._get_gpc_tickers,
+            get_projected_interest_expense_callback=self._get_projected_interest_expense,
         )
 
         self.nwc_page = NWCPage(
@@ -1072,6 +1073,12 @@ class MainWindow(QMainWindow):
         self._apply_dcf_page_state(data.get("dcf_page_state", {}))
         self._apply_nwc_page_state(data.get("nwc_page_state", {}))
         self._apply_debt_schedule_state(data.get("debt_page_state", {}))
+
+        # DCF was initially applied before the loaded NWC and Debt Schedule
+        # states existed. Refresh once more so the shared engine receives the
+        # final NWC changes and projected interest from this session.
+        self.dcf_page.refresh()
+
         self._apply_dashboard_page_state(data.get("dashboard_page_state", {}))
 
         # 2. Restore cached web results

@@ -1031,7 +1031,8 @@ class DCFPage(QWidget):
                  get_nwc_change_callback=None,
                  get_ke_value_callback=None,
                  get_reverse_dcf_inputs_callback=None,
-                 get_gpc_tickers_callback=None):
+                 get_gpc_tickers_callback=None,
+                 get_projected_interest_expense_callback=None):
         super().__init__()
         self.get_project_inputs = get_project_inputs_callback
         self.get_wacc_value = get_wacc_value_callback
@@ -1042,6 +1043,9 @@ class DCFPage(QWidget):
         self._get_nwc_change = get_nwc_change_callback or (lambda _period: None)
         self._get_reverse_dcf_inputs_callback = get_reverse_dcf_inputs_callback
         self._get_gpc_tickers_callback = get_gpc_tickers_callback
+        self._get_projected_interest_expense = (
+            get_projected_interest_expense_callback or (lambda _period: None)
+        )
 
         self._calc_labels = {}
         self._input_fields = {}
@@ -1070,6 +1074,12 @@ class DCFPage(QWidget):
             "FCFE": {"EBITDA Multiple": None, "Revenue Multiple": None},
         }
         self._last_cf_mode = None
+
+        # Full-precision output from Canneberge.Calculations.dcf.build_dcf().
+        # The PyQt page renders this result; it no longer recomputes the DCF
+        # by reading rounded values back from QLabel text.
+        self._shared_calc = None
+
         self._build_ui()
         self._recalculate()
         theme_manager.theme_changed.connect(self._apply_theme)
@@ -1442,6 +1452,7 @@ class DCFPage(QWidget):
             ("EBIT", True, False, False, False),
             ("EBIT Margin", False, False, False, True),
             ("Stock-Based Compensation", False, False, False, False),
+            ("+Other Adjustments", False, False, False, False),
             ("Taxes", False, False, False, False),
             ("Net Operating Profit After Tax (NOPAT)", True, False, False, False),
             ("Plus: Depreciation", False, False, True, False),
@@ -1822,6 +1833,158 @@ class DCFPage(QWidget):
         out("H-Model", "pv_factor", f"{h_pv_factor:.2f}" if h_pv_factor is not None else "-")
         out("H-Model", "pv_residual_value", _fmt_currency(h_pv_residual_value))
 
+    def _render_shared_dcf_rows(self, calc: dict):
+        """Render build_dcf()['rows'] into the existing PyQt table."""
+        rows = calc.get("rows", {}) or {}
+        is_hist = calc.get("is_hist", []) or []
+
+        key_to_label = {
+            "revenue": "Revenue",
+            "revenue_growth": "Revenue Growth",
+            "cogs": "Cost of Goods Sold",
+            "gross_profit": "Gross Profit",
+            "gp_margin": "Gross Profit Margin",
+            "operating_expenses": "Operating Expenses",
+            "ebitda": "EBITDA",
+            "ebitda_margin": "EBITDA Margin",
+            "depreciation": "Depreciation",
+            "amortization": "Amortization",
+            "net_interest": "Net Interest Expense",
+            "ebit": "EBIT",
+            "ebit_margin": "EBIT Margin",
+            "sbc": "Stock-Based Compensation",
+            "other_adj": "+Other Adjustments",
+            "taxes": "Taxes",
+            "nopat": "Net Operating Profit After Tax (NOPAT)",
+            "plus_dep": "Plus: Depreciation",
+            "less_nwc": "Less: Increase/(Decrease) in DFCFNWC",
+            "less_capex": "Less: Capital Expenditures (CapEx)",
+            "less_other_adj": "Less: Other Adjustments",
+            "fcf": "Free Cash Flow",
+            "ppa": "Partial Period Adjustment",
+            "pvp": "Present Value Period",
+            "pvf": "Present Value Factor",
+            "pv_fcf": "Present Value of Free Cash Flows",
+        }
+
+        pct_keys = {
+            "revenue_growth",
+            "gp_margin",
+            "ebitda_margin",
+            "ebit_margin",
+        }
+        historical_blank_keys = {"ppa", "pvp", "pvf", "pv_fcf"}
+
+        for row_key, row_values in rows.items():
+            row_label = key_to_label.get(row_key)
+            if row_label is None or not isinstance(row_values, dict):
+                continue
+
+            for data_idx, period in enumerate(self._headers):
+                value = row_values.get(period)
+
+                if (
+                    data_idx < len(is_hist)
+                    and is_hist[data_idx]
+                    and row_key in historical_blank_keys
+                ):
+                    text = ""
+                elif value is None:
+                    text = "-"
+                elif row_key in pct_keys:
+                    text = _fmt_pct(value)
+                elif row_key == "ppa":
+                    text = f"{value:.4f}"
+                elif row_key == "pvp":
+                    text = f"{value:.2f}"
+                elif row_key == "pvf":
+                    text = f"{value:.4f}"
+                else:
+                    text = _fmt_currency(value)
+
+                # _set() naturally skips cells represented by QLineEdit,
+                # including projected Less: Other Adjustments and the
+                # Residual Amortization input.
+                self._set(row_label, data_idx, text)
+
+        # Keep the internal row key as "EBITDA" for compatibility with
+        # Reverse-DCF and other desktop code, but present the correct label.
+        ebitda_idx = self._row_idx.get("EBITDA")
+        ebitda_label = self._row_labels.get(ebitda_idx)
+        if ebitda_label is not None:
+            ebitda_label.setText("Adjusted EBITDA")
+
+        # Web displays the Projection Module P&L plug only in FCFE.
+        other_adj_idx = self._row_idx.get("+Other Adjustments")
+        if other_adj_idx is not None:
+            visible = bool(calc.get("is_fcfe"))
+            row_label_widget = self._row_labels.get(other_adj_idx)
+            if row_label_widget is not None:
+                row_label_widget.setVisible(visible)
+
+            for widget in self._calc_labels.get(other_adj_idx, {}).values():
+                widget.setVisible(visible)
+
+            for widget in self._input_fields.get(other_adj_idx, {}).values():
+                widget.setVisible(visible)
+
+    def _render_shared_terminal_values(self):
+        """Render shared terminal-value outputs into existing TV panels."""
+        calc = self._shared_calc or {}
+        tv = calc.get("tv", {}) or {}
+
+        output_aliases = {
+            "cashflow": "cash_flow",
+            "cashflowvalue": "cash_flow",
+            "residualcashflow": "cash_flow",
+            "metric": "metric",
+            "metricvalue": "metric",
+            "multiple": "multiple",
+            "caprate": "cap_rate",
+            "capitalizationrate": "cap_rate",
+            "residualvalue": "residual_value",
+            "pvfactor": "pv_factor",
+            "presentvaluefactor": "pv_factor",
+            "pvresidual": "pv_residual",
+            "pvresidualvalue": "pv_residual",
+            "discountedresidualvalue": "pv_residual",
+        }
+
+        for model, model_values in tv.items():
+            outputs = self._tv_outputs.get(model, {}) or {}
+            if not isinstance(model_values, dict):
+                continue
+
+            for output_key, widget in outputs.items():
+                if widget is None:
+                    continue
+
+                semantic_key = output_key if output_key in model_values else None
+                if semantic_key is None:
+                    normalized = (
+                        str(output_key)
+                        .lower()
+                        .replace("_", "")
+                        .replace(" ", "")
+                        .replace("-", "")
+                    )
+                    semantic_key = output_aliases.get(normalized)
+
+                if semantic_key is None:
+                    continue
+
+                value = model_values.get(semantic_key)
+                if value is None:
+                    widget.setText("-")
+                elif semantic_key == "cap_rate":
+                    widget.setText(f"{value * 100:.2f}%")
+                elif semantic_key == "pv_factor":
+                    widget.setText(f"{value:.4f}")
+                elif semantic_key == "multiple":
+                    widget.setText(f"{value:.2f}x")
+                else:
+                    widget.setText(_fmt_currency(value))
+
     def _sf_get(self, key: str, period_label: str) -> Optional[float]:
         return self._get_subject_financials(key, period_label)
 
@@ -1840,9 +2003,15 @@ class DCFPage(QWidget):
         self._set(row_label, data_idx, _fmt_currency(value))
 
     def _recalculate(self):
+        from Canneberge.Calculations.dcf import (
+            build_dcf,
+            calculate_ppa,
+            normalise_rate,
+        )
+
         inputs = self.get_project_inputs()
-        
-        # Sync cash flows mode with basis of value if set
+
+        # Home Basis of Value remains authoritative.
         if getattr(inputs, "basis_of_value", None) == "Equity Value":
             new_cf = "FCFE"
         elif getattr(inputs, "basis_of_value", None) == "Business Enterprise Value":
@@ -1851,51 +2020,159 @@ class DCFPage(QWidget):
             new_cf = self._cash_flows_to
 
         if self._last_cf_mode is not None and new_cf != self._last_cf_mode:
-            # Save outgoing mode's multiples
+            # Save the outgoing cash-flow mode's terminal multiples.
             for model in ("EBITDA Multiple", "Revenue Multiple"):
-                w = self._tv_inputs.get(model, {}).get("multiple")
-                if w is not None:
-                    self._per_cf_tv_multiples[self._last_cf_mode][model] = w.text()
-            # Restore incoming (blank on first visit)
+                widget = self._tv_inputs.get(model, {}).get("multiple")
+                if widget is not None:
+                    self._per_cf_tv_multiples[self._last_cf_mode][model] = (
+                        widget.text()
+                    )
+
+            # Restore the incoming mode's multiples.
             for model in ("EBITDA Multiple", "Revenue Multiple"):
-                w = self._tv_inputs.get(model, {}).get("multiple")
-                if w is None:
+                widget = self._tv_inputs.get(model, {}).get("multiple")
+                if widget is None:
                     continue
+
                 saved = self._per_cf_tv_multiples[new_cf][model]
-                w.blockSignals(True)
-                w.setText(saved if saved is not None else "")
-                w.blockSignals(False)
+                widget.blockSignals(True)
+                widget.setText(saved if saved is not None else "")
+                widget.blockSignals(False)
 
         self._cash_flows_to = new_cf
         self._last_cf_mode = new_cf
-            
+
         self._rebuild_table_if_needed()
-        wacc_val = self._get_discount_rate()
+
+        historical_periods = list(inputs.historical_period_columns)
+        projection_periods = list(inputs.projection_period_columns)
+        is_fcfe = self._cash_flows_to == "FCFE"
+        discount_rate = self._get_discount_rate()
+
+        # Cash-flow Other Adjustments are user inputs and are separate from
+        # Projection Module +Other Adjustments.
+        other_adj_inputs: Dict[str, str] = {}
+        less_other_adj_idx = self._row_idx.get("Less: Other Adjustments")
+        for data_idx, period in enumerate(self._headers):
+            widget = self._input_fields.get(
+                less_other_adj_idx, {}
+            ).get(data_idx)
+            if widget is not None:
+                other_adj_inputs[period] = widget.text()
+
+        # Residual amortization remains a user input.
+        residual_amortization = ""
+        amortization_idx = self._row_idx.get("Amortization")
+        if "Residual" in self._headers:
+            residual_idx = self._headers.index("Residual")
+            residual_widget = self._input_fields.get(
+                amortization_idx, {}
+            ).get(residual_idx)
+            if residual_widget is not None:
+                residual_amortization = residual_widget.text()
+
+        tv_inputs = {
+            model: {
+                key: widget.text()
+                for key, widget in fields.items()
+            }
+            for model, fields in self._tv_inputs.items()
+        }
+        tv_model = self.tv_model_combo.currentText()
+
+        # Same signed convention as web:
+        # positive interest income, negative interest expense.
+        net_interest_by_period: Dict[str, Optional[float]] = {}
+        for period in self._headers:
+            if period in historical_periods:
+                interest_income = self._sf_get("interest_income", period)
+                interest_expense = self._sf_get("interest_expense", period)
+
+                if interest_income is None and interest_expense is None:
+                    net_interest_by_period[period] = None
+                else:
+                    net_interest_by_period[period] = (
+                        (interest_income or 0.0)
+                        - abs(interest_expense or 0.0)
+                    )
+            elif period in projection_periods:
+                try:
+                    interest_cost = self._get_projected_interest_expense(period)
+                except Exception:
+                    interest_cost = None
+
+                net_interest_by_period[period] = (
+                    -abs(interest_cost)
+                    if interest_cost is not None
+                    else None
+                )
+
+        changes_in_nwc: Dict[str, Optional[float]] = {}
+        for period in self._headers:
+            try:
+                changes_in_nwc[period] = self._get_nwc_change(period)
+            except Exception:
+                changes_in_nwc[period] = None
+
+        def sf(key: str, period: str) -> Optional[float]:
+            return self._sf_get(key, period)
+
+        calc = build_dcf(
+            historical_period_columns=historical_periods,
+            projection_period_columns=projection_periods,
+            sf=sf,
+            changes_in_nwc=changes_in_nwc,
+            net_interest_by_period=net_interest_by_period,
+            other_adj_inputs=other_adj_inputs,
+            residual_amortization=residual_amortization,
+            tax_rate=normalise_rate(
+                getattr(inputs, "subject_tax_rate", None)
+            ),
+            discount_rate=discount_rate,
+            ltgr=self._get_ltgr(),
+            dep_pct_of_capex=self._get_dep_pct_of_capex(),
+            ppa=calculate_ppa(
+                inputs.next_fiscal_year,
+                inputs.valuation_date,
+            ),
+            is_fcfe=is_fcfe,
+            tv_model=tv_model,
+            tv_inputs=tv_inputs,
+            bridge_other_adj=self.bridge_other_adj_input.text(),
+        )
+
+        # Required by shared fv_for_assumptions() during sensitivity.
+        calc["tv_model"] = tv_model
+        calc["tv_inputs"] = tv_inputs
+        self._shared_calc = calc
+
         self.lbl_client.setText(inputs.client)
         self.lbl_subject.setText(inputs.subject_company_name)
         self.lbl_date.setText(f"As of {inputs.valuation_date}")
-        rate_label = "Ke" if self._cash_flows_to == "FCFE" else "WACC"
-        pct_str = f"{wacc_val * 100:.2f}%" if wacc_val is not None else "N/A%"
+
+        rate_label = "Ke" if is_fcfe else "WACC"
+        pct_str = (
+            f"{discount_rate * 100:.2f}%"
+            if discount_rate is not None
+            else "N/A%"
+        )
         if self.pv_factor_row_label is not None:
-            self.pv_factor_row_label.setText(f"Present Value Factor @ {rate_label} = {pct_str}")
+            self.pv_factor_row_label.setText(
+                f"Present Value Factor @ {rate_label} = {pct_str}"
+            )
+
         fye_years = self._compute_fye_years(inputs)
-        for label, lbl_widget in self._fye_labels.items():
-            lbl_widget.setText(fye_years.get(label, ""))
+        for label, label_widget in self._fye_labels.items():
+            label_widget.setText(fye_years.get(label, ""))
+
+        self._render_shared_dcf_rows(calc)
         self._update_ebit_row_label()
         self._apply_net_int_proj_visibility()
-        self._populate_revenue_and_growth(inputs)
-        self._populate_cogs_through_ebitda()
-        self._populate_dep_amort_net_int()
-        self._populate_ebit_and_ebit_margin()
-        self._populate_sbc()
-        self._populate_taxes(inputs)
-        self._populate_nopat()
-        self._populate_capex_other_nwc()
-        self._populate_fcf()
-        self._populate_pv_chain(wacc_val, inputs)
-        self._populate_residual_column(inputs)
-        self._populate_terminal_value(wacc_val, inputs)
+        self._render_shared_terminal_values()
         self._populate_fv_bridge(inputs)
+
+        # Existing table renderer remains, but its evaluator is redirected
+        # to shared fv_for_assumptions() by the next patch.
         self._populate_sensitivity_table(inputs)
 
     def refresh(self):
@@ -2426,6 +2703,19 @@ class DCFPage(QWidget):
         )
 
     def _compute_fv_base_for(self, wacc_override: float, ltgr_text_override: str) -> Optional[float]:
+        shared_calc = getattr(self, "_shared_calc", None)
+        if shared_calc is not None:
+            from Canneberge.Calculations.dcf import (
+                fv_for_assumptions,
+                normalise_rate,
+                parse_pct,
+            )
+
+            return fv_for_assumptions(
+                normalise_rate(wacc_override),
+                parse_pct(ltgr_text_override),
+                shared_calc,
+            )
         """Legacy wrapper — sensitivity table still uses this signature."""
         try:
             ltgr_val = float(ltgr_text_override.strip().replace("%", "")) / 100.0
@@ -2539,31 +2829,22 @@ class DCFPage(QWidget):
         )
 
     def _populate_fv_bridge(self, inputs):
-        pv_fcf_idx = self._row_idx.get("Present Value of Free Cash Flows")
-        sum_pv_fcf = 0.0
-        any_val = False
-        for data_idx, label in enumerate(self._headers):
-            if self._is_historical[data_idx] or label == "Residual":
-                continue
-            v = _read_label(self._calc_labels, pv_fcf_idx, data_idx)
-            if v is not None:
-                sum_pv_fcf += v
-                any_val = True
-        sum_pv_fcf = sum_pv_fcf if any_val else None
+        calc = getattr(self, "_shared_calc", None) or {}
+
+        sum_pv_fcf = calc.get("sum_pv_fcf")
+        pv_residual = calc.get("pv_residual")
+        fv_base = calc.get("fv_base")
+
         self.bridge_sum_pv_label.setText(_fmt_currency(sum_pv_fcf))
-        model = self.tv_model_combo.currentText()
-        disc_resid_lbl = self._tv_outputs.get(model, {}).get("pv_residual_value")
-        disc_resid = _parse_label_as_float(disc_resid_lbl.text()) if disc_resid_lbl is not None else None
-        self.bridge_disc_residual_label.setText(_fmt_currency(disc_resid))
-        other_adj_text = self.bridge_other_adj_input.text().strip()
-        other_adj = _parse_label_as_float(other_adj_text) if other_adj_text else 0.0
-        if sum_pv_fcf is None and disc_resid is None:
-            fv_base = None
-        else:
-            fv_base = (sum_pv_fcf or 0.0) + (disc_resid or 0.0) + (other_adj or 0.0)
+        self.bridge_disc_residual_label.setText(_fmt_currency(pv_residual))
         self.bridge_fv_base_label.setText(_fmt_currency(fv_base))
-        is_fcff = (self._cash_flows_to == "FCFF")
-        self.bridge_fv_base_row_label.setText("Fair Value of Business Enterprise (Base):" if is_fcff else "Fair Value of Equity (Base):")
+
+        is_fcff = self._cash_flows_to == "FCFF"
+        self.bridge_fv_base_row_label.setText(
+            "Fair Value of Business Enterprise (Base):"
+            if is_fcff
+            else "Fair Value of Equity (Base):"
+        )
 
     def _get_ltgr(self) -> Optional[float]:
         text = self.ltg_input.text().strip().replace("%", "")
@@ -2672,9 +2953,21 @@ class DCFPage(QWidget):
         self._set_currency("Free Cash Flow", data_idx, fcf)
 
     def get_residual_revenue(self) -> Optional[float]:
+        calc = getattr(self, "_shared_calc", None) or {}
+        rows = calc.get("rows", {}) or {}
+        revenue = rows.get("revenue", {}) or {}
+
+        if "Residual" in revenue:
+            return revenue.get("Residual")
+
         if "Residual" not in self._headers:
             return None
-        return _read_label(self._calc_labels, self._row_idx.get("Revenue"), self._headers.index("Residual"))
+
+        return _read_label(
+            self._calc_labels,
+            self._row_idx.get("Revenue"),
+            self._headers.index("Residual"),
+        )
 
     def collect_state(self) -> dict:
         other_adj_idx = self._row_idx.get("Less: Other Adjustments")
@@ -2696,6 +2989,7 @@ class DCFPage(QWidget):
             "cash_flows_to": self._cash_flows_to,
             "other_adj_inputs": other_adj,
             "residual_amortization": residual_amortization,
+            "bridge_other_adj": self.bridge_other_adj_input.text(),
             "per_cf_tv_multiples": self._per_cf_tv_multiples,
             "last_cf_mode": self._last_cf_mode,
         }
@@ -2703,32 +2997,83 @@ class DCFPage(QWidget):
     def apply_state(self, state: dict):
         if not state:
             return
+
         self.ltg_input.setText(state.get("ltg_input", "3.0%"))
-        self.capex_dep_pct.setText(state.get("capex_dep_pct", "100.0%"))
+        self.capex_dep_pct.setText(
+            state.get("capex_dep_pct", "100.0%")
+        )
+        self.bridge_other_adj_input.setText(
+            state.get("bridge_other_adj", "")
+        )
+
         self._cash_flows_to = state.get("cash_flows_to", "FCFF")
+
         if isinstance(state.get("per_cf_tv_multiples"), dict):
             self._per_cf_tv_multiples = state["per_cf_tv_multiples"]
-        self._last_cf_mode = state.get("last_cf_mode", self._cash_flows_to)
+
+        self._last_cf_mode = state.get(
+            "last_cf_mode",
+            self._cash_flows_to,
+        )
+
         tv_model = state.get("tv_model", "Gordon Growth")
-        idx = self.tv_model_combo.findText(tv_model)
-        if idx >= 0:
-            self.tv_model_combo.setCurrentIndex(idx)
+        tv_model_idx = self.tv_model_combo.findText(tv_model)
+        if tv_model_idx >= 0:
+            blocked = self.tv_model_combo.blockSignals(True)
+            self.tv_model_combo.setCurrentIndex(tv_model_idx)
+            self.tv_model_combo.blockSignals(blocked)
+
         self._apply_tv_model_visibility()
+
         for model, fields in state.get("tv_inputs", {}).items():
             for key, text in fields.items():
                 widget = self._tv_inputs.get(model, {}).get(key)
                 if widget is not None:
-                    widget.setText(text)
-        self._recalculate()
+                    blocked = widget.blockSignals(True)
+                    widget.setText("" if text is None else str(text))
+                    widget.blockSignals(blocked)
+
+        # Ensure the input-bearing table exists before restoring its cells.
+        self._rebuild_table_if_needed()
+
         other_adj_idx = self._row_idx.get("Less: Other Adjustments")
-        other_adj = state.get("other_adj_inputs", {})
-        for data_idx, label in enumerate(self._headers):
-            inp = self._input_fields.get(other_adj_idx, {}).get(data_idx)
-            if inp is not None and label in other_adj:
-                inp.setText(other_adj[label])
-        amort_idx = self._row_idx.get("Amortization")
-        residual_idx = self._headers.index("Residual") if "Residual" in self._headers else None
-        amort_inp = self._input_fields.get(amort_idx, {}).get(residual_idx) if residual_idx is not None else None
-        if amort_inp is not None and "residual_amortization" in state:
-            amort_inp.setText(state["residual_amortization"])
+        other_adj = state.get("other_adj_inputs", {}) or {}
+        for data_idx, period in enumerate(self._headers):
+            widget = self._input_fields.get(
+                other_adj_idx, {}
+            ).get(data_idx)
+            if widget is not None and period in other_adj:
+                blocked = widget.blockSignals(True)
+                widget.setText(
+                    ""
+                    if other_adj[period] is None
+                    else str(other_adj[period])
+                )
+                widget.blockSignals(blocked)
+
+        amortization_idx = self._row_idx.get("Amortization")
+        residual_idx = (
+            self._headers.index("Residual")
+            if "Residual" in self._headers
+            else None
+        )
+        residual_widget = (
+            self._input_fields.get(amortization_idx, {}).get(residual_idx)
+            if residual_idx is not None
+            else None
+        )
+        if (
+            residual_widget is not None
+            and "residual_amortization" in state
+        ):
+            blocked = residual_widget.blockSignals(True)
+            residual_widget.setText(
+                ""
+                if state["residual_amortization"] is None
+                else str(state["residual_amortization"])
+            )
+            residual_widget.blockSignals(blocked)
+
+        # Calculate once, after every saved input has been restored.
+        self._recalculate()
         self._recalculate()
