@@ -457,6 +457,7 @@ class MainWindow(QMainWindow):
             projection_data=self._projection_data,
             get_project_inputs=self.home_page.get_project_inputs,
             get_marketscreener_results=self._get_marketscreener_results,
+            get_projected_interest_expense=self._get_projected_interest_expense,
             get_subject_historical_line=self._get_subject_historical_line,
             parent=self,
         )
@@ -785,6 +786,7 @@ class MainWindow(QMainWindow):
             "sbc_pct":             dict(pd.sbc_pct),
             "other_amort":         dict(pd.other_amort),
             "other_amort_pct":     dict(pd.other_amort_pct),
+            "other_adj":           dict(pd.other_adj),
             "net_income":          dict(pd.net_income),
             "net_income_margin":   dict(pd.net_income_margin),
             "capex":               dict(pd.capex),
@@ -809,9 +811,10 @@ class MainWindow(QMainWindow):
         pd.sbc_pct             = {k: v for k, v in state.get("sbc_pct", {}).items()}
         pd.other_amort         = {k: v for k, v in state.get("other_amort", {}).items()}
         pd.other_amort_pct     = {k: v for k, v in state.get("other_amort_pct", {}).items()}
+        pd.other_adj           = {k: v for k, v in state.get("other_adj", {}).items()}
         pd.net_income          = {k: v for k, v in state.get("net_income", {}).items()}
         pd.net_income_margin   = {k: v for k, v in state.get("net_income_margin", {}).items()}
-        pd.capex                = {k: v for k, v in state.get("capex", {}).items()}
+        pd.capex               = {k: v for k, v in state.get("capex", {}).items()}
         pd.capex_pct           = {k: v for k, v in state.get("capex_pct", {}).items()}
         pd.last_edited_revenue = {k: v for k, v in state.get("last_edited_revenue", {}).items()}
         pd.last_edited_ni      = {k: v for k, v in state.get("last_edited_ni", {}).items()}

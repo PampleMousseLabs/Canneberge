@@ -53,6 +53,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from Canneberge.app_state import ProjectInputs, ProjectionData
+from Canneberge.Calculations.projection_resolve import resolve_projection_waterfall
 from Canneberge.Ui.theme import theme_manager
 
 
@@ -167,6 +168,7 @@ class ProjectionModulePage(QDialog):
         get_project_inputs,
         get_marketscreener_results,
         get_subject_historical_line,
+        get_projected_interest_expense=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -177,6 +179,7 @@ class ProjectionModulePage(QDialog):
         self._get_project_inputs = get_project_inputs
         self._get_ms_results = get_marketscreener_results
         self._get_hist_line = get_subject_historical_line
+        self._get_projected_interest_expense = get_projected_interest_expense
 
         inputs = self._get_project_inputs()
         self._historical_periods: List[str] = inputs.historical_period_columns + ["TTM"]
@@ -193,7 +196,10 @@ class ProjectionModulePage(QDialog):
         # Historical raw line values, pulled from Subject Financials
         self._hist_revenue      = self._get_hist_line("revenue")
         self._hist_gross_profit = self._get_hist_line("gross_profit")
-        self._hist_ebitda       = self._get_hist_line("ebitda")
+        self._hist_ebitda       = self._get_hist_line("adj_ebitda")
+        self._hist_ebit         = self._get_hist_line("ebit")
+        self._hist_net_interest = self._get_hist_line("net_interest")
+        self._hist_taxes        = self._get_hist_line("taxes")
         self._hist_net_income   = self._get_hist_line("net_income")
 
         # D&A Resolution: Fallback chain matching updated sa_key blueprint
@@ -414,6 +420,8 @@ class ProjectionModulePage(QDialog):
         gr = self._build_da_section(grid, gr)
         gr = self._build_other_amort_section(grid, gr)
         gr = self._build_sbc_section(grid, gr)
+        gr = self._build_ebit_section(grid, gr)
+        gr = self._build_net_interest_section(grid, gr)
         gr = self._build_other_adj_section(grid, gr)
         gr = self._build_taxes_section(grid, gr)
         gr = self._build_net_income_section(grid, gr)
@@ -536,6 +544,40 @@ class ProjectionModulePage(QDialog):
 
         return gr
 
+    def _build_ebit_section(self, grid: QGridLayout, gr: int) -> int:
+        self._labels.setdefault("ebit", {})
+
+        ebit_lbl = QLabel("EBIT / Operating Income")
+        ebit_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(ebit_lbl, gr, 0)
+
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            lbl = self._make_calc_label(sourced=is_hist)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_ebit.get(period)))
+            self._labels["ebit"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+
+        return gr + 1
+
+    def _build_net_interest_section(self, grid: QGridLayout, gr: int) -> int:
+        self._labels.setdefault("net_interest", {})
+
+        ni_lbl = QLabel("Net Interest Income / (Expense)")
+        ni_lbl.setStyleSheet(get_bold_style())
+        grid.addWidget(ni_lbl, gr, 0)
+
+        for col_idx, period in enumerate(self._all_periods):
+            is_hist = period in self._historical_periods
+            lbl = self._make_calc_label(sourced=is_hist)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_net_interest.get(period)))
+            self._labels["net_interest"][period] = lbl
+            grid.addWidget(lbl, gr, col_idx + 1)
+
+        return gr + 1
+
     def _build_other_adj_section(self, grid: QGridLayout, gr: int) -> int:
         """
         +Other Adjustments — spill between (EBITDA − D&A − OA − SBC) and Taxes.
@@ -570,13 +612,16 @@ class ProjectionModulePage(QDialog):
         tax_lbl = QLabel("Taxes")
         tax_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(tax_lbl, gr, 0)
+
         for col_idx, period in enumerate(self._all_periods):
             is_hist = period in self._historical_periods
             lbl = self._make_calc_label(sourced=is_hist)
+            if is_hist:
+                lbl.setText(_fmt_dollars(self._hist_taxes.get(period)))
             self._labels["taxes"][period] = lbl
             grid.addWidget(lbl, gr, col_idx + 1)
-        gr += 1
-        return gr
+
+        return gr + 1
 
     def _build_net_income_section(self, grid: QGridLayout, gr: int) -> int:
         """
@@ -914,21 +959,54 @@ class ProjectionModulePage(QDialog):
                 self._set_label("sbc", period, _fmt_dollars(sbc))
                 self._set_label("other_amort", period, _fmt_dollars(other_amort))
 
-                # --- Net Income ---
-                # Analyst-wins for MS-covered periods; user $ or margin %
-                # (two-way bound, same pattern as Revenue) beyond that.
-                ni = self._resolve_net_income(period, resolved_revenue)
+                # --- EBIT / Net Interest / +Other Adjustments / Taxes / Net Income ---
+                interest_cost = None
+                if callable(self._get_projected_interest_expense):
+                    interest_cost = self._get_projected_interest_expense(period)
+
+                # Resolver convention:
+                #   positive = net interest income
+                #   negative = net interest expense
+                net_interest = -abs(interest_cost) if interest_cost is not None else None
+
+                is_ms_period = self._is_public and period in MS_COVERED_PERIODS
+                analyst_ni = self._ms_net_income.get(period) if is_ms_period else None
+
+                if is_ms_period:
+                    other_adj_input = None
+                    solve_plug = True
+                else:
+                    other_adj_input = _parse_float(self._get_input_text("other_adj", period)) or 0.0
+                    solve_plug = False
+
+                inputs = self._get_project_inputs()
+                tax_rate = getattr(inputs, "subject_tax_rate", None)
+
+                waterfall = resolve_projection_waterfall(
+                    adjusted_ebitda=ebitda,
+                    da=da,
+                    other_amort=other_amort,
+                    sbc=sbc,
+                    net_interest=net_interest,
+                    other_adj=other_adj_input,
+                    tax_rate=tax_rate,
+                    analyst_net_income=analyst_ni,
+                    solve_other_adjustment=solve_plug,
+                )
+
+                ebit = waterfall.get("ebit")
+                other_adj = waterfall.get("other_adj")
+                taxes = waterfall.get("taxes")
+                ni = waterfall.get("net_income")
+
+                self._set_label("ebit", period, _fmt_dollars(ebit))
+                self._set_label("net_interest", period, _fmt_dollars(net_interest))
+                self._set_label("other_adj", period, _fmt_dollars(other_adj))
+                self._set_label("taxes", period, _fmt_dollars(taxes))
+
                 ni_margin = _div(ni, rev)
                 self._display_ni_margin(period, ni_margin)
                 self._set_label("net_income", period, _fmt_dollars(ni))
-
-                # --- +Other Adjustments (MS-covered periods: computed plug) ---
-                other_adj = None
-                if self._is_public and period in MS_COVERED_PERIODS:
-                    other_adj = self._resolve_other_adjustment(
-                        period, ebitda, da, other_amort, sbc, ni
-                    )
-                    self._set_label("other_adj", period, _fmt_dollars(other_adj))
 
                 self._resolved[period] = {
                     "revenue": rev,
@@ -938,8 +1016,11 @@ class ProjectionModulePage(QDialog):
                     "sbc": sbc,
                     "other_amort": other_amort,
                     "capex": capex,
-                    "net_income": ni,
+                    "ebit": ebit,
+                    "net_interest": net_interest,
                     "other_adj": other_adj,
+                    "taxes": taxes,
+                    "net_income": ni,
                 }
 
         finally:
@@ -1184,6 +1265,12 @@ class ProjectionModulePage(QDialog):
                 if val_oa is not None:
                     inp_oa.setText(_fmt_pct(val_oa))
 
+            inp_other_adj = self._inputs.get("other_adj", {}).get(period)
+            if inp_other_adj:
+                val_other_adj = pd.other_adj.get(period)
+                if val_other_adj is not None:
+                    inp_other_adj.setText(_fmt_dollars(val_other_adj))
+
             inp_cx = self._inputs.get("capex_pct", {}).get(period)
             if inp_cx:
                 val_cx = pd.capex_pct.get(period)
@@ -1260,6 +1347,12 @@ class ProjectionModulePage(QDialog):
             pd.da[period] = resolved.get("da")
             pd.sbc[period] = resolved.get("sbc")
             pd.other_amort[period] = resolved.get("other_amort")
+            pd.other_adj[period] = resolved.get("other_adj")
+            pd.net_income[period] = resolved.get("net_income")
+            pd.net_income_margin[period] = _div(
+                resolved.get("net_income"),
+                resolved.get("revenue"),
+            )
             pd.capex[period] = resolved.get("capex")
 
         return pd
@@ -1278,7 +1371,8 @@ class ProjectionModulePage(QDialog):
         self._projection_data.sbc_pct             = collected.sbc_pct
         self._projection_data.other_amort         = collected.other_amort
         self._projection_data.other_amort_pct     = collected.other_amort_pct
-        self._projection_data.capex                = collected.capex
+        self._projection_data.other_adj           = collected.other_adj
+        self._projection_data.capex               = collected.capex
         self._projection_data.capex_pct           = collected.capex_pct
         self._projection_data.net_income           = collected.net_income
         self._projection_data.net_income_margin    = collected.net_income_margin
