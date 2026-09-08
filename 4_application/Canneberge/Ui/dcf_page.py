@@ -2114,7 +2114,16 @@ class DCFPage(QWidget):
             except Exception:
                 changes_in_nwc[period] = None
 
+        projection_data = self._get_projection_data()
+
         def sf(key: str, period: str) -> Optional[float]:
+            # Projection Module pre-tax plug lives on ProjectionData, not on
+            # Subject Financials. Same source web reads (pd.other_adj).
+            if key == "other_adj":
+                if period in projection_periods:
+                    other_adj_map = getattr(projection_data, "other_adj", {}) or {}
+                    return other_adj_map.get(period)
+                return None
             return self._sf_get(key, period)
 
         calc = build_dcf(
@@ -2599,6 +2608,25 @@ class DCFPage(QWidget):
         ga_override: Optional[float] = None,
         h_override: Optional[float] = None,
     ) -> Optional[float]:
+        shared_calc = getattr(self, "_shared_calc", None)
+        if shared_calc is not None:
+            from Canneberge.Calculations.dcf import fv_for_assumptions
+
+            _locals = locals()
+            wacc_arg = None
+            ltgr_arg = None
+
+            for _name in ("wacc", "wacc_override", "wacc_val"):
+                if _name in _locals:
+                    wacc_arg = _locals[_name]
+                    break
+
+            for _name in ("ltgr", "ltgr_override", "ltgr_val"):
+                if _name in _locals:
+                    ltgr_arg = _locals[_name]
+                    break
+
+            return fv_for_assumptions(wacc_arg, ltgr_arg, shared_calc)
         """
         Pure mathematical WACC/LTGR override FV calculation.
         Executes entirely in memory with zero Qt widget mutation.

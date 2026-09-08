@@ -510,7 +510,7 @@ class ProjectionModulePage(QDialog):
         self._inputs.setdefault("ebitda_improvement", {})
         self._labels.setdefault("ebitda_improvement_sourced", {})
 
-        ebitda_lbl = QLabel("EBITDA")
+        ebitda_lbl = QLabel("Adjusted EBITDA (incl. SBC add-back)")
         ebitda_lbl.setStyleSheet(get_bold_style())
         grid.addWidget(ebitda_lbl, gr, 0)
         for col_idx, period in enumerate(self._all_periods):
@@ -1347,13 +1347,12 @@ class ProjectionModulePage(QDialog):
             pd.da[period] = resolved.get("da")
             pd.sbc[period] = resolved.get("sbc")
             pd.other_amort[period] = resolved.get("other_amort")
+            pd.capex[period] = resolved.get("capex")
             pd.other_adj[period] = resolved.get("other_adj")
             pd.net_income[period] = resolved.get("net_income")
             pd.net_income_margin[period] = _div(
-                resolved.get("net_income"),
-                resolved.get("revenue"),
+                resolved.get("net_income"), resolved.get("revenue")
             )
-            pd.capex[period] = resolved.get("capex")
 
         return pd
 

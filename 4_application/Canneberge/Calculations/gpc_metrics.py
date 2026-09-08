@@ -25,9 +25,9 @@ GPC_METRICS: list[GPCMetric] = [
     # --- BEV Mode Only ---
     GPCMetric("TTM EBITDA",      "TTM",   "ebitda",       bev_allowed=True,  equity_allowed=False),
     GPCMetric("TTM EBIT",        "TTM",   "ebit",         bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY Adjusted EBITDA",   "NFY",   "ebitda", bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY+1 Adjusted EBITDA", "NFY+1", "ebitda", bev_allowed=True,  equity_allowed=False),
-    GPCMetric("NFY+2 Adjusted EBITDA", "NFY+2", "ebitda", bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY Adjusted EBITDA",   "NFY",   "adj_ebitda", bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY+1 Adjusted EBITDA", "NFY+1", "adj_ebitda", bev_allowed=True,  equity_allowed=False),
+    GPCMetric("NFY+2 Adjusted EBITDA", "NFY+2", "adj_ebitda", bev_allowed=True,  equity_allowed=False),
 
     # --- Equity Mode Only (Market Cap / Aggregate Metric $) ---
     GPCMetric("TTM Net Income",  "TTM",   "net_income",   bev_allowed=False, equity_allowed=True),
