@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from Canneberge.Calculations.chart_helper import (
-    MethodRow,
+from Canneberge.Calculations.chart_helper import weighted_conclusion
+from Canneberge.Calculations.value_bridge import (
     BridgeInputs,
-    compute_bridge,
-    weighted_conclusion,
+    run_bridge,
+    value_for,
+    cp_to_dloc,
+    dloc_to_cp,
 )
 from Canneberge.Calculations.dcf import (
     parse_pct,
@@ -93,25 +95,62 @@ def dashboard_state_from_session(session_data: dict) -> dict:
     recon = raw.get("recon_weights") or {}
     if not isinstance(recon, dict):
         recon = {}
+
     cost_vals = raw.get("cost_values") or {}
     if not isinstance(cost_vals, dict):
         cost_vals = {}
+
     try:
         cost_count = max(1, min(10, int(raw.get("cost_count", 5))))
     except (TypeError, ValueError):
         cost_count = 5
+
     display = raw.get("display_basis", "BEV")
     if display not in ("BEV", "Equity", "$/Share"):
         display = "BEV"
+
+    level = raw.get("value_level", "Controlling")
+    if level not in ("Controlling", "Minority"):
+        level = "Controlling"
+
     debt_stat = raw.get("debt_tic_stat", "Median")
     beta_stat = raw.get("beta_stat", "Median")
     if debt_stat not in STAT_OPTIONS:
         debt_stat = "Median"
     if beta_stat not in STAT_OPTIONS:
         beta_stat = "Median"
+
+    last_discount = raw.get("last_edited_discount", "cp")
+    if last_discount not in ("cp", "dloc"):
+        last_discount = "cp"
+
+    cp_text = raw.get("control_premium", "24.0%")
+    dloc_text = raw.get("dloc", "")
+
+    cp_val = parse_weight(cp_text)
+    dloc_val = parse_weight(dloc_text)
+
+    if last_discount == "dloc" and dloc_val is not None:
+        cp_val = dloc_to_cp(dloc_val)
+        if cp_val is not None:
+            cp_text = f"{cp_val * 100:.1f}%"
+    else:
+        dloc_val = cp_to_dloc(cp_val)
+        if dloc_val is not None:
+            dloc_text = f"{dloc_val * 100:.1f}%"
+
+    gpc_state = (session_data or {}).get("gpc_page_state") or {}
+    non_op = raw.get("non_op")
+    if non_op is None:
+        non_op = gpc_state.get("non_op", "0")
+
     return {
-        "control_premium": raw.get("control_premium", "24.0%"),
+        "control_premium": cp_text,
+        "dloc": dloc_text,
+        "last_edited_discount": last_discount,
+        "value_level": level,
         "display_basis": display,
+        "non_op": non_op,
         "recon_weights": {m: recon.get(m, "") for m in RECON_METHODS},
         "debt_tic_stat": debt_stat,
         "beta_stat": beta_stat,
@@ -281,26 +320,48 @@ def _gt_block(session_data: dict, source_results: dict) -> dict:
 def _bridge_inputs(session_data, source_results, dash_state) -> BridgeInputs:
     inputs = dict_to_project_inputs(session_data or {})
     sa = (source_results or {}).get("stockanalysis", {}) or {}
+
     cash = get_subject_cash(sa.get("BS", []), inputs.subject_ticker)
+
     nwc = get_nwc_results(session_data, source_results)
     surplus = (nwc.get("bridge") or {}).get("surplus_deficit")
     if surplus is None:
         surplus = ((session_data or {}).get("nwc_page_state") or {}).get("surplus_deficit")
+
     shares, price, _cap = _subject_shares_and_price(session_data, source_results)
+
+    cp = parse_weight(dash_state.get("control_premium"))
+    dloc = parse_weight(dash_state.get("dloc"))
+    if dloc is None and cp is not None:
+        dloc = cp_to_dloc(cp)
+    if cp is None and dloc is not None:
+        cp = dloc_to_cp(dloc)
+
     return BridgeInputs(
         cash=cash,
         nwc_surplus=surplus,
+        non_operating=parse_number(dash_state.get("non_op")) or 0.0,
         debt=get_subject_debt(session_data or {}, source_results or {}),
-        liquidation=get_subject_metric_value(
+        preferred_stock=get_subject_metric_value(
             session_data or {}, source_results or {}, "preferred_stock", "TTM"
         ),
-        dloc=dloc_from_cp(dash_state["control_premium"]),
+        minority_interest=get_subject_metric_value(
+            session_data or {}, source_results or {}, "minority_interest", "TTM"
+        ),
+        control_premium=cp,
+        dloc=dloc,
         shares_outstanding=shares,
         share_price=price,
     )
 
 
 def _observed_on_basis(bridge: BridgeInputs, basis: str) -> Optional[float]:
+    """
+    Observed market marker is not level-adjusted. Price is price.
+
+    For BEV display, keep observed EV as market cap + debt + preferred + NCI - cash.
+    Do not gross up observed price for control premium.
+    """
     price = bridge.share_price
     shares = bridge.shares_outstanding
     if price is None:
@@ -309,10 +370,18 @@ def _observed_on_basis(bridge: BridgeInputs, basis: str) -> Optional[float]:
         return price
     if shares is None:
         return None
-    mkt = price * shares
+
+    market_cap = price * shares
     if basis == "Equity":
-        return mkt
-    return mkt + (bridge.debt or 0.0) - (bridge.cash or 0.0)
+        return market_cap
+
+    return (
+        market_cap
+        + (bridge.debt or 0.0)
+        + (bridge.preferred_stock or 0.0)
+        + (bridge.minority_interest or 0.0)
+        - (bridge.cash or 0.0)
+    )
 
 
 def _single_bridged(name, low, high, apply_dloc, bridge, basis, source_basis):
@@ -329,6 +398,7 @@ def _single_bridged(name, low, high, apply_dloc, bridge, basis, source_basis):
 def get_dashboard_results(session_data: dict, source_results: dict) -> dict:
     session_data = session_data or {}
     source_results = source_results or {}
+
     dash = dashboard_state_from_session(session_data)
     wacc = get_wacc_results(session_data, source_results)
     wacc_state = wacc_state_from_session(session_data)
@@ -336,67 +406,99 @@ def get_dashboard_results(session_data: dict, source_results: dict) -> dict:
     dcf_calc, dcf_low, dcf_high = _dcf_fv(session_data, source_results)
     gpc = _gpc_block(session_data, source_results)
     gt = _gt_block(session_data, source_results)
+
     bridge = _bridge_inputs(session_data, source_results, dash)
+
     basis = dash["display_basis"]
-    is_fcfe = bool(dcf_calc.get("is_fcfe"))
-    dcf_source = "Equity" if is_fcfe else "BEV"
-
-    method_rows: List[MethodRow] = [
-        MethodRow(
-            name="Discounted Cash Flow Method",
-            bev_low=dcf_low, bev_high=dcf_high,
-            apply_dloc=(dcf_source == "BEV"),
-            source_basis=dcf_source,
-        )
-    ]
-    for i, name in enumerate(gpc["names"]):
-        method_rows.append(MethodRow(
-            name=f"GPC - {name}",
-            bev_low=gpc["indicated_low"][i] if i < len(gpc["indicated_low"]) else None,
-            bev_high=gpc["indicated_high"][i] if i < len(gpc["indicated_high"]) else None,
-            apply_dloc=False,
-            source_basis=gpc["source_basis"],
-        ))
-    for i, name in enumerate(gt["names"]):
-        method_rows.append(MethodRow(
-            name=f"GT - {name}",
-            bev_low=gt["indicated_low"][i] if i < len(gt["indicated_low"]) else None,
-            bev_high=gt["indicated_high"][i] if i < len(gt["indicated_high"]) else None,
-            apply_dloc=True,
-            source_basis="BEV",
-        ))
-    compute_bridge(method_rows, bridge)
-
-    dcf_pair = (None, None)
-    for row in method_rows:
-        if row.name == "Discounted Cash Flow Method":
-            dcf_pair = row.values_for_basis(basis)
-            break
-
-    gpc_pair = _single_bridged(
-        "GPC (weighted)", gpc["fmv_low"], gpc["fmv_high"],
-        False, bridge, basis, gpc["source_basis"],
+    target_level = (
+        "controlling"
+        if dash.get("value_level") == "Controlling"
+        else "minority"
     )
-    gt_pair = _single_bridged(
-        "GT (weighted)", gt["fmv_low"], gt["fmv_high"],
-        True, bridge, basis, "BEV",
+
+    is_fcfe = bool(dcf_calc.get("is_fcfe"))
+    dcf_source_basis = "Equity" if is_fcfe else "BEV"
+
+    # Natural valuation levels:
+    #   DCF = controlling
+    #   GT  = controlling
+    #   GPC = minority
+    dcf_bridge = run_bridge(
+        dcf_low,
+        dcf_high,
+        natural_level="controlling",
+        source_basis=dcf_source_basis,
+        bi=bridge,
+        equity_mode_includes_cash=False,
+    )
+    gpc_bridge = run_bridge(
+        gpc["fmv_low"],
+        gpc["fmv_high"],
+        natural_level="minority",
+        source_basis=gpc["source_basis"],
+        bi=bridge,
+        equity_mode_includes_cash=False,
+    )
+    gt_bridge = run_bridge(
+        gt["fmv_low"],
+        gt["fmv_high"],
+        natural_level="controlling",
+        source_basis="BEV",
+        bi=bridge,
+        equity_mode_includes_cash=False,
     )
 
     pairs = {
-        "DCF": dcf_pair,
-        "GPC": gpc_pair,
-        "GT": gt_pair,
+        "DCF": value_for(dcf_bridge, target_level, basis),
+        "GPC": value_for(gpc_bridge, target_level, basis),
+        "GT": value_for(gt_bridge, target_level, basis),
         "GIPO": (None, None),
         "NAV": (None, None),
     }
-    weights = [parse_weight(dash["recon_weights"].get(m)) for m in RECON_METHODS]
-    concluded = weighted_conclusion(
-        [pairs[m] for m in RECON_METHODS], weights
-    )
-    football = [
-        (row.name, *row.values_for_basis(basis))
-        for row in method_rows
+
+    weights = [
+        parse_weight(dash["recon_weights"].get(m))
+        for m in RECON_METHODS
     ]
+    concluded = weighted_conclusion(
+        [pairs[m] for m in RECON_METHODS],
+        weights,
+    )
+
+    football = [
+        (
+            "Discounted Cash Flow Method",
+            *value_for(dcf_bridge, target_level, basis),
+        )
+    ]
+
+    for i, name in enumerate(gpc["names"]):
+        row_bridge = run_bridge(
+            gpc["indicated_low"][i] if i < len(gpc["indicated_low"]) else None,
+            gpc["indicated_high"][i] if i < len(gpc["indicated_high"]) else None,
+            natural_level="minority",
+            source_basis=gpc["source_basis"],
+            bi=bridge,
+            equity_mode_includes_cash=False,
+        )
+        football.append((
+            f"GPC - {name}",
+            *value_for(row_bridge, target_level, basis),
+        ))
+
+    for i, name in enumerate(gt["names"]):
+        row_bridge = run_bridge(
+            gt["indicated_low"][i] if i < len(gt["indicated_low"]) else None,
+            gt["indicated_high"][i] if i < len(gt["indicated_high"]) else None,
+            natural_level="controlling",
+            source_basis="BEV",
+            bi=bridge,
+            equity_mode_includes_cash=False,
+        )
+        football.append((
+            f"GT - {name}",
+            *value_for(row_bridge, target_level, basis),
+        ))
 
     return {
         "dash": dash,
@@ -409,11 +511,18 @@ def get_dashboard_results(session_data: dict, source_results: dict) -> dict:
         "gt": gt,
         "bridge": bridge,
         "dloc": bridge.dloc,
+        "control_premium": bridge.control_premium,
         "basis": basis,
+        "target_level": target_level,
         "pairs": pairs,
         "concluded": concluded,
         "observed": _observed_on_basis(bridge, basis),
         "football": football,
         "stats": wacc.get("stats") or {},
         "is_fcfe": is_fcfe,
+        "method_bridges": {
+            "DCF": dcf_bridge,
+            "GPC": gpc_bridge,
+            "GT": gt_bridge,
+        },
     }

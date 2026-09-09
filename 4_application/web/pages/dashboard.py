@@ -292,7 +292,10 @@ layout = dbc.Container([
                 ],
                 html.Hr(style={"borderColor": "#4a5568", "margin": "6px 0"}),
                 _kv("Control Premium:", _inp("dash-cp", 80, "24.0%")),
-                _kv("Implied DLOC:", html.Span("-", id="dash-dloc", style=_LBL)),
+                _kv("DLOC:", _inp("dash-dloc-input", 80, "19.4%")),
+                html.Div(html.Span("-", id="dash-dloc"), style={"display": "none"}),
+                _kv("Level:", _select("dash-level", ["Controlling", "Minority"], "Controlling", 120)),
+                _kv("Non-Op Assets:", _inp("dash-non-op", 80, "0")),
                 _kv("Display:", _select("dash-display", ["BEV", "Equity", "$/Share"], "BEV", 110)),
                 _kv("Concluded FV:", html.Span("-", id="dash-concluded", style=_LBL_B)),
                 html.Div([
@@ -383,7 +386,10 @@ layout = dbc.Container([
     Output("dash-dep-pct", "value"),
     Output("dash-gpc-n", "value"),
     Output("dash-gt-n", "value"),
-    Output("dash-cp", "value"),
+    Output("dash-cp", "value", allow_duplicate=True),
+    Output("dash-dloc-input", "value", allow_duplicate=True),
+    Output("dash-level", "value"),
+    Output("dash-non-op", "value"),
     Output("dash-display", "value"),
     Output("dash-cost-count", "value"),
     Output({"type": "dash-gpc-metric", "i": ALL}, "options"),
@@ -400,11 +406,12 @@ layout = dbc.Container([
     Input("_pages_location", "pathname"),
     Input("session-load-timestamp", "data"),
     State("session-store", "data"),
+    prevent_initial_call='initial_duplicate',
 )
 def hydrate_dashboard(pathname, _ts, session_data):
     if pathname not in ("/dashboard", "/dashboard/"):
         return (
-            *([no_update] * 19),
+            *([no_update] * 22),
             [no_update] * GPC_MAX,
             [no_update] * GPC_MAX,
             [no_update] * GPC_MAX,
@@ -479,6 +486,9 @@ def hydrate_dashboard(pathname, _ts, session_data):
         dcf_s.get("capex_dep_pct", "100.0%"),
         gpc_n, gt_n,
         dash["control_premium"],
+        dash["dloc"],
+        dash["value_level"],
+        dash["non_op"],
         dash["display_basis"],
         dash["cost_count"],
         [gpc_opts] * GPC_MAX,
@@ -595,15 +605,38 @@ def apply_wacc_stat(debt_stat, beta_stat, session_data, source_results):
     Input("session-store", "data"),
     Input("source-results-store", "data"),
     Input("dash-display", "value"),
+    Input("dash-level", "value"),
+    Input("dash-cp", "value"),
+    Input("dash-dloc-input", "value"),
+    Input("dash-non-op", "value"),
 )
-def render_dashboard_outputs(pathname, session_data, source_results, display):
+def render_dashboard_outputs(pathname, session_data, source_results, display, level, cp, dloc, non_op):
     if pathname not in ("/dashboard", "/dashboard/"):
         return (no_update,) * 17
     session_data = dict(session_data or {})
+    dstate = dict(session_data.get("dashboard_page_state") or {})
+
     if display in ("BEV", "Equity", "$/Share"):
-        dstate = dict(session_data.get("dashboard_page_state") or {})
         dstate["display_basis"] = display
-        session_data["dashboard_page_state"] = dstate
+
+    if level in ("Controlling", "Minority"):
+        dstate["value_level"] = level
+
+    if cp is not None:
+        dstate["control_premium"] = cp
+
+    if dloc is not None:
+        dstate["dloc"] = dloc
+
+    if non_op is not None:
+        dstate["non_op"] = non_op
+
+    if ctx.triggered_id == "dash-dloc-input":
+        dstate["last_edited_discount"] = "dloc"
+    elif ctx.triggered_id == "dash-cp":
+        dstate["last_edited_discount"] = "cp"
+
+    session_data["dashboard_page_state"] = dstate
     try:
         res = get_dashboard_results(session_data, source_results)
     except Exception as exc:
@@ -642,6 +675,32 @@ def render_dashboard_outputs(pathname, session_data, source_results, display):
     )
 
 
+@callback(
+    Output("dash-cp", "value", allow_duplicate=True),
+    Output("dash-dloc-input", "value", allow_duplicate=True),
+    Input("dash-cp", "value"),
+    Input("dash-dloc-input", "value"),
+    prevent_initial_call=True,
+)
+def sync_cp_dloc(cp_text, dloc_text):
+    from Canneberge.Calculations.value_bridge import cp_to_dloc, dloc_to_cp
+    from Canneberge.Calculations.dcf import parse_pct
+
+    trig = ctx.triggered_id
+
+    if trig == "dash-cp":
+        cp = parse_pct(cp_text)
+        dloc = cp_to_dloc(cp)
+        return no_update, (f"{dloc * 100:.1f}%" if dloc is not None else "")
+
+    if trig == "dash-dloc-input":
+        dloc = parse_pct(dloc_text)
+        cp = dloc_to_cp(dloc)
+        return (f"{cp * 100:.1f}%" if cp is not None else ""), no_update
+
+    return no_update, no_update
+
+
 # ---------------------------------------------------------------------------
 # Persist → nested session states
 # ---------------------------------------------------------------------------
@@ -665,6 +724,9 @@ def render_dashboard_outputs(pathname, session_data, source_results, display):
     Input("dash-gpc-n", "value"),
     Input("dash-gt-n", "value"),
     Input("dash-cp", "value"),
+    Input("dash-dloc-input", "value"),
+    Input("dash-level", "value"),
+    Input("dash-non-op", "value"),
     Input("dash-display", "value"),
     Input("dash-cost-count", "value"),
     Input({"type": "dash-gpc-metric", "i": ALL}, "value"),
@@ -687,7 +749,7 @@ def render_dashboard_outputs(pathname, session_data, source_results, display):
 def persist_dashboard(
     debt_tic, debt_stat, beta, beta_stat, erp, size_p, csrp, pretax_series,
     tv_model, ltgr, tv_mult, tv_years, tv_stgr, dep_pct,
-    gpc_n, gt_n, cp, display, cost_count,
+    gpc_n, gt_n, cp, dloc, level, non_op, display, cost_count,
     gpc_metrics, gpc_lo, gpc_hi, gpc_wt,
     gt_metrics, gt_lo, gt_hi, gt_wt,
     recon_wts, cost_vals,
@@ -780,10 +842,14 @@ def persist_dashboard(
         gt["weights"] = [even_gt] * gt_n
     else:
         gt["weights"] = list(gt_wt or [])[:gt_n]
-    dloc = dloc_from_cp(cp)
+
+    if cp is not None:
+        gpc["control_premium"] = cp
     if dloc is not None:
-        gt["dloc"] = f"{dloc * 100:.1f}%"
-        gpc["dloc"] = f"{dloc * 100:.1f}%"
+        gpc["dloc"] = dloc
+        gt["dloc"] = dloc
+    if non_op is not None:
+        gpc["non_op"] = non_op
 
     recon = dict(dash.get("recon_weights") or {})
     for cid, val in zip(recon_ids or [], recon_wts or []):
@@ -802,8 +868,18 @@ def persist_dashboard(
     if trig == "dash-beta":
         beta_stat_out = "Custom"
 
+    last_discount_out = dash.get("last_edited_discount", "cp")
+    if trig == "dash-dloc-input":
+        last_discount_out = "dloc"
+    elif trig == "dash-cp":
+        last_discount_out = "cp"
+
     dash.update({
         "control_premium": cp if cp is not None else dash.get("control_premium", "24.0%"),
+        "dloc": dloc if dloc is not None else dash.get("dloc", "19.4%"),
+        "last_edited_discount": last_discount_out,
+        "value_level": level if level in ("Controlling", "Minority") else dash.get("value_level", "Controlling"),
+        "non_op": non_op if non_op is not None else dash.get("non_op", "0"),
         "display_basis": display if display in ("BEV", "Equity", "$/Share") else dash.get("display_basis", "BEV"),
         "recon_weights": recon,
         "debt_tic_stat": debt_stat_out or "Median",

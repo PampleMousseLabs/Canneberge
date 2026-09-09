@@ -27,6 +27,11 @@ from web.lib.session_io import dict_to_project_inputs
 from web.lib.subject_metrics import get_subject_metric_value
 from Canneberge.Calculations.gpc_multiples import compute_all_gpc_multiples, get_subject_cash
 from Canneberge.Calculations.gpc_metrics import GPC_METRICS, dropdown_options, get_metric, CUSTOM_MULTIPLE_LABEL
+from Canneberge.Calculations.gpc_multiples import get_subject_cash
+from Canneberge.Calculations.value_bridge import BridgeInputs, run_bridge
+from Canneberge.Calculations.dcf import parse_number
+from web.lib.dashboard_data import parse_weight, dashboard_state_from_session
+from web.lib.subject_metrics import get_subject_debt, get_subject_metric_value
 from web.components.gt_range_chart import gt_range_chart
 
 dash.register_page(__name__, path="/gpc", name="GPC Metrics")
@@ -683,45 +688,55 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
         className="table table-sm table-dark mb-0", style=TABLE_STYLE,
     )
 
-    # --- Bridge — direct port of desktop's BEV-mode branch.
-    # (Equity-mode branch not yet wired here — this page currently
-    # always renders the BEV bridge, matching what most of today's
-    # session data has been run under. Flag if Equity mode is needed
-    # next: the desktop file's eq_nctrl/eq_mkt_ctrl/eq_nonmkt_ctrl
-    # branch — lines ~1141-1171 — is the one to port next.) ---
-    control_premium = _pct(cp_pct_str)
-    dloc = _pct(dloc_pct_str)
-    non_op = _num(non_op_str)
+    # --- Bridge — shared value_bridge.py engine ---
+    dash_state = dashboard_state_from_session(session_data or {})
 
-    # NWC page is authoritative. Its cached surplus/(deficit) is written
-    # by persist_nwc; fall back to the (disabled) box only if the user has
-    # never opened /nwc in this session.
+    control_premium = parse_weight(dash_state.get("control_premium"))
+    dloc = parse_weight(dash_state.get("dloc"))
+    non_op = parse_number(dash_state.get("non_op")) or 0.0
+
     _nwc_state = (session_data or {}).get("nwc_page_state") or {}
     _nwc_cached = _nwc_state.get("surplus_deficit")
-    nwc = _nwc_cached if _nwc_cached is not None else _num(nwc_str)
+    nwc = _nwc_cached if _nwc_cached is not None else 0.0
 
     if inputs.company_status and inputs.company_status.strip().lower() == "publicly traded":
         sa = (source_results or {}).get("stockanalysis", {}) if source_results else {}
-        bs_rows = sa.get("BS", [])
+        bs_rows = sa.get("BS", []) if isinstance(sa, dict) else []
         cash = get_subject_cash(bs_rows, inputs.subject_ticker)
     else:
-        cash = None  # Private-company cash path (PrivateFinancials) not yet wired here
+        pf = (session_data or {}).get("private_bs_data") or {}
+        cash = pf.get("cash", {}).get("TTM") if isinstance(pf, dict) else None
 
-    bev_nctrl_low, bev_nctrl_high = fmv_low, fmv_high
+    debt = get_subject_debt(session_data or {}, source_results or {})
+    pref = get_subject_metric_value(session_data or {}, source_results or {}, "preferred_stock", "TTM")
+    nci = get_subject_metric_value(session_data or {}, source_results or {}, "minority_interest", "TTM")
 
-    def _sum_or_na(*vals):
-        return None if any(v is None for v in vals) else sum(vals)
+    bi = BridgeInputs(
+        cash=cash,
+        nwc_surplus=nwc,
+        non_operating=non_op,
+        debt=debt,
+        preferred_stock=pref,
+        minority_interest=nci,
+        control_premium=control_premium,
+        dloc=dloc,
+        shares_outstanding=None,
+        share_price=None,
+    )
 
-    ic_nctrl_low = _sum_or_na(bev_nctrl_low, cash, nwc, non_op)
-    ic_nctrl_high = _sum_or_na(bev_nctrl_high, cash, nwc, non_op)
-    ic_ctrl_low = ic_nctrl_low * (1 + control_premium) if ic_nctrl_low is not None else None
-    ic_ctrl_high = ic_nctrl_high * (1 + control_premium) if ic_nctrl_high is not None else None
-    bev_ctrl_low = (ic_ctrl_low - cash - nwc - non_op) if None not in (ic_ctrl_low, cash) else None
-    bev_ctrl_high = (ic_ctrl_high - cash - nwc - non_op) if None not in (ic_ctrl_high, cash) else None
+    source_basis = "Equity" if basis_mode == "EQUITY" else "BEV"
+    bridge_result = run_bridge(
+        fmv_low,
+        fmv_high,
+        natural_level="minority",
+        source_basis=source_basis,
+        bi=bi,
+        equity_mode_includes_cash=False,
+    )
 
     def _row(label, low, high):
         return html.Tr([
-            html.Td(label, style={"minWidth": f"{LEADING_W}px"}),
+            html.Td(label, style={"minWidth": f"{LEADING_W}px", "whiteSpace": "normal"}),
             html.Td(f"{high:,.0f}" if high is not None else "NA",
                     style={"textAlign": "right", "minWidth": f"{COL_W['metric']}px"}),
             html.Td(f"{low:,.0f}" if low is not None else "NA",
@@ -731,18 +746,16 @@ def render_subject_weighting_bridge(metric_col_values, basis_mode, selected_high
     bridge_rows = [
         html.Tr([html.Th("", style={"minWidth": f"{LEADING_W}px"}),
                  html.Th("High", style={"textAlign": "right"}), html.Th("Low", style={"textAlign": "right"})]),
-        _row("FMV of Business Enterprise (marketable, noncontrolling)", bev_nctrl_low, bev_nctrl_high),
-        _row("Plus: Cash", cash, cash),
-        _row("Plus: NWC Surplus (Deficit)", nwc, nwc),
-        _row("Plus: Non-Operating Assets, Net — PLACEHOLDER", non_op, non_op),
-        _row("FMV of Invested Capital (marketable, noncontrolling)", ic_nctrl_low, ic_nctrl_high),
-        _row(f"Plus: Control Premium ({control_premium:.1%})", None, None),
-        _row("FMV of Invested Capital (marketable, controlling)", ic_ctrl_low, ic_ctrl_high),
-        _row("Less: Cash", cash, cash),
-        _row("Less: NWC Surplus (Deficit)", nwc, nwc),
-        _row("Less: Non-Operating Assets, Net — PLACEHOLDER", non_op, non_op),
-        _row("FMV of Business Enterprise (marketable, controlling)", bev_ctrl_low, bev_ctrl_high),
     ]
+    for lbl, lo, hi in bridge_result.get("lines", []):
+        bridge_rows.append(_row(lbl, lo, hi))
+
+    bev_ctrl_lo, bev_ctrl_hi = bridge_result.get("bev_controlling", (None, None))
+    eq_ctrl_lo, eq_ctrl_hi = bridge_result.get("equity_controlling", (None, None))
+    if source_basis == "BEV":
+        bridge_rows.append(_row("BEV (controlling, marketable) --> send to Dashboard", bev_ctrl_lo, bev_ctrl_hi))
+    else:
+        bridge_rows.append(_row("Equity Value (controlling, marketable) --> send to Dashboard", eq_ctrl_lo, eq_ctrl_hi))
 
     bridge_table = html.Table(
         [html.Thead(bridge_rows[0]), html.Tbody(bridge_rows[1:])],

@@ -93,6 +93,8 @@ class MainWindow(QMainWindow):
             get_private_financials_callback=self._get_private_financials,
             get_subject_debt=self.get_subject_debt,
             get_subject_metric_value=self._get_subject_metric_value,
+            get_dashboard_bridge_values_callback=self._get_dashboard_bridge_values,
+            get_nwc_surplus_callback=self._get_nwc_surplus_deficit,
         )
 
         self.wacc_page = WACCPage(
@@ -211,6 +213,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "debt_schedule_page"):
             return self.debt_schedule_page.get_projected_interest_expense(period)
         return None
+
+    def _get_dashboard_bridge_values(self) -> dict:
+        """CP / DLOC / Non-Op / level are Dashboard-owned. Safe before the
+        Dashboard exists (GPC is constructed first) — returns {}."""
+        dp = getattr(self, "dashboard_page", None)
+        if dp is None or not hasattr(dp, "bridge_values"):
+            return {}
+        return dp.bridge_values()
+
+    def _get_nwc_surplus_deficit(self) -> Optional[float]:
+        nwc_page = getattr(self, "nwc_page", None)
+        if nwc_page is None:
+            return None
+        from Canneberge.Ui.dcf_page import _parse_label_as_float
+        return _parse_label_as_float(nwc_page.nwc_surplus_deficit_label.text())
 
     def _get_gpc_tickers(self) -> list:
         """
@@ -922,6 +939,10 @@ class MainWindow(QMainWindow):
         return {
             "gpc_weights": [w.text() for w in dp.gpc_weight_inputs],
             "gt_weights": [w.text() for w in dp.gt_weight_inputs],
+            "dloc": dp.dloc_input.text(),
+            "value_level": dp.level_combo.currentText(),
+            "non_op": dp.non_op_input.text(),
+            "last_edited_discount": getattr(dp, "_last_edited_discount", "cp"),
             "recon_weights": {
                 name: widget.text()
                 for name, widget in dp.recon_weight_inputs.items()
@@ -945,6 +966,7 @@ class MainWindow(QMainWindow):
             if text:
                 widget.setText(text)
 
+        dp.apply_bridge_state(state)
         recon_weights = state.get("recon_weights", {})
         for name, text in recon_weights.items():
             widget = dp.recon_weight_inputs.get(name)

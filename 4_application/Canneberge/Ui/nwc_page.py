@@ -409,6 +409,12 @@ class NWCPage(QWidget):
         self.cash_treatment_combo.currentTextChanged.connect(self._recalculate)
         controls.addWidget(self.cash_treatment_combo)
 
+        self.cash_bridge_warning = QLabel("")
+        self.cash_bridge_warning.setStyleSheet("color: #e06c75; font-weight: bold;")
+        self.cash_bridge_warning.setWordWrap(True)
+        self.cash_bridge_warning.setVisible(False)
+        controls.addWidget(self.cash_bridge_warning)
+
         controls.addSpacing(24)
         controls.addWidget(QLabel("NWC Basis:"))
         self.nwc_basis_combo = QComboBox()
@@ -1251,6 +1257,7 @@ class NWCPage(QWidget):
             lbl_widget.setText(fye_years.get(label, ""))
 
         include_cash = (self.cash_treatment_combo.currentText() == "Including Cash")
+        self._update_cash_bridge_warning(include_cash)
         pct_basis = (self.nwc_basis_combo.currentText() == "% of Revenue")
 
         # --- Total Revenue ---
@@ -1495,6 +1502,21 @@ class NWCPage(QWidget):
                 result["Residual"] = str(nfy_year + len(proj_labels))
 
         return result
+
+    def _update_cash_bridge_warning(self, include_cash: bool):
+        lbl = getattr(self, "cash_bridge_warning", None)
+        if lbl is None:
+            return
+        cash_keys = {"cash", "st_investments", "trading_asset_securities"}
+        selected = {c.currentData() for c in getattr(self, "_ca_combos", [])}
+        flagged = include_cash or bool(selected & cash_keys)
+        lbl.setText(
+            "⚠ Valuation bridges add Cash & Cash Equivalents separately. "
+            "Including cash, ST investments, or trading securities in NWC "
+            "will double-count cash in the GPC / Dashboard bridges."
+            if flagged else ""
+        )
+        lbl.setVisible(flagged)
 
     def collect_state(self) -> dict:
         return {

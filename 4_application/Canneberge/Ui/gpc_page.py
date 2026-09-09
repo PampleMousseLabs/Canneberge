@@ -25,6 +25,7 @@ from Canneberge.Ui.shared_input_widgets import (
 
 from Canneberge.Ui.gpc_candlestick_chart import GPCCandlestickChart
 
+from Canneberge.Calculations.value_bridge import BridgeInputs, run_bridge
 from Canneberge.Calculations.gpc_metrics import (
     GPC_METRICS,
     CUSTOM_MULTIPLE_LABEL,
@@ -198,8 +199,15 @@ class GPCPage(QWidget):
                  get_marketscreener_results_callback,
                  get_private_financials_callback,
                  get_subject_debt,
-                 get_subject_metric_value):
+                 get_subject_metric_value,
+                 get_dashboard_bridge_values_callback=None,
+                 get_nwc_surplus_callback=None):
         super().__init__()
+        self._get_dashboard_bridge_values = (
+            get_dashboard_bridge_values_callback or (lambda: {})
+        )
+        self._get_nwc_surplus = get_nwc_surplus_callback or (lambda: None)
+        self._last_bridge_result = None
         self.get_project_inputs_callback = get_project_inputs_callback
         self._get_stockanalysis_results_callback = get_stockanalysis_results_callback
         self._get_marketscreener_results_callback = get_marketscreener_results_callback
@@ -695,6 +703,8 @@ class GPCPage(QWidget):
         )
         self._current_row += 1
 
+    BRIDGE_ROW_SLOTS = 10
+
     def _build_bridge_section(self):
         self._add_section_label(
             "Bridge",
@@ -715,95 +725,68 @@ class GPCPage(QWidget):
         self._bridge_low_high_headers = [low_hdr, high_hdr]
         self._current_row += 1
 
-        # Storage dicts
+        # Kept for compatibility with any external references; unused now.
         self.bridge_computed_labels_low = {}
         self.bridge_computed_labels_high = {}
         self.bridge_labels_low = {}
         self.bridge_labels_high = {}
 
-        # BEV Mode Rows
-        r = self._current_row
-        lbl = QLabel("FMV of Business Enterprise (marketable, noncontrolling)")
-        self.grid.addWidget(lbl, r, COL_EXCLUDE, 1, 4)
-        low_lbl = QLabel("NA")
-        high_lbl = QLabel("NA")
-        for l in (low_lbl, high_lbl):
-            l.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.grid.addWidget(high_lbl, r, COL_M_START)
-        self.grid.addWidget(low_lbl, r, COL_M_START + 1)
-        self.bridge_computed_labels_low["bev_nctrl"] = low_lbl
-        self.bridge_computed_labels_high["bev_nctrl"] = high_lbl
-        self._current_row += 1
+        # Dashboard-owned inputs shown here read-only (mirrors, not sources).
+        # nwc comes from the NWC page; non_op / CP / DLOC from Dashboard.
+        self.nwc_input = CurrencyInputEdit(placeholder="from NWC page", width=W_METRIC - 10)
+        self.non_op_assets_input = CurrencyInputEdit(placeholder="from Dashboard", width=W_METRIC - 10)
+        for w in (self.nwc_input, self.non_op_assets_input):
+            w.setReadOnly(True)
+            w.setFrame(False)
+            w.setVisible(False)  # values are rendered in the generic rows below
 
-        # Plus: Cash
-        r = self._current_row
-        self.grid.addWidget(QLabel("Plus: Cash"), r, COL_EXCLUDE, 1, 4)
-        self.bridge_cash_low = QLabel("NA")
-        self.bridge_cash_high = QLabel("NA")
-        for l in (self.bridge_cash_low, self.bridge_cash_high):
-            l.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.grid.addWidget(self.bridge_cash_high, r, COL_M_START)
-        self.grid.addWidget(self.bridge_cash_low, r, COL_M_START + 1)
-        self._current_row += 1
-
-        # NWC Placeholder
-        r = self._current_row
-        self.grid.addWidget(QLabel("Plus: NWC Surplus (Deficit) — PLACEHOLDER"), r, COL_EXCLUDE, 1, 4)
-        self.nwc_input = CurrencyInputEdit(placeholder="e.g. 0", width=W_METRIC - 10)
-        self.nwc_input.editingFinished.connect(self._on_inputs_changed)
-        self.grid.addWidget(self.nwc_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
-        self._current_row += 1
-
-        # Non-Op Assets Placeholder
-        r = self._current_row
-        self.grid.addWidget(QLabel("Plus: Non-Operating Assets, Net — PLACEHOLDER"), r, COL_EXCLUDE, 1, 4)
-        self.non_op_assets_input = CurrencyInputEdit(placeholder="e.g. 0", width=W_METRIC - 10)
-        self.non_op_assets_input.editingFinished.connect(self._on_inputs_changed)
-        self.grid.addWidget(self.non_op_assets_input, r, COL_M_START, alignment=Qt.AlignmentFlag.AlignRight)
-        self._current_row += 1
-
-        # BEV Bridge remaining rows
-        bev_rows = [
-            ("FMV of Invested Capital (marketable, noncontrolling)", "ic_nctrl"),
-            ("Plus: Control Premium",                                "control_premium_pct"),
-            ("FMV of Invested Capital (marketable, controlling)",    "ic_ctrl"),
-            ("Less: Cash",                                           "less_cash"),
-            ("Less: NWC Surplus (Deficit) — PLACEHOLDER",            "less_nwc"),
-            ("Less: Non-Operating Assets, Net — PLACEHOLDER",        "less_non_op"),
-            ("FMV of Business Enterprise (marketable, controlling)", "bev_ctrl"),
-        ]
-        for label_text, key in bev_rows:
+        # Generic bridge rows populated from run_bridge()["lines"].
+        self._bridge_row_text = []
+        self._bridge_row_low = []
+        self._bridge_row_high = []
+        for _ in range(self.BRIDGE_ROW_SLOTS):
             r = self._current_row
-            self.grid.addWidget(QLabel(label_text), r, COL_EXCLUDE, 1, 4)
-            low_lbl = QLabel("NA")
-            high_lbl = QLabel("NA")
+            text_lbl = QLabel("")
+            text_lbl.setWordWrap(True)
+            self.grid.addWidget(text_lbl, r, COL_EXCLUDE, 1, 4)
+            low_lbl = QLabel("")
+            high_lbl = QLabel("")
             for lbl in (low_lbl, high_lbl):
                 lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.grid.addWidget(high_lbl, r, COL_M_START)
             self.grid.addWidget(low_lbl, r, COL_M_START + 1)
-            self.bridge_labels_low[key] = low_lbl
-            self.bridge_labels_high[key] = high_lbl
+            for lbl in (text_lbl, low_lbl, high_lbl):
+                lbl.setVisible(False)
+            self._bridge_row_text.append(text_lbl)
+            self._bridge_row_low.append(low_lbl)
+            self._bridge_row_high.append(high_lbl)
             self._current_row += 1
 
-        # Equity Bridge rows (only used in Equity Mode)
-        equity_rows = [
-            ("FMV of Equity (marketable, noncontrolling)",  "eq_mkt_nctrl"),
-            ("FMV of Equity (marketable, controlling)",     "eq_mkt_ctrl"),
-            ("Less: Discount for Lack of Control",          "dloc_pct"),
-            ("FMV of Equity (nonmarketable, controlling)",  "eq_nonmkt_ctrl"),
-        ]
-        for label_text, key in equity_rows:
-            r = self._current_row
-            self.grid.addWidget(QLabel(label_text), r, COL_EXCLUDE, 1, 4)
-            low_lbl = QLabel("NA")
-            high_lbl = QLabel("NA")
-            for lbl in (low_lbl, high_lbl):
-                lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.grid.addWidget(high_lbl, r, COL_M_START)
-            self.grid.addWidget(low_lbl, r, COL_M_START + 1)
-            self.bridge_labels_low[key] = low_lbl
-            self.bridge_labels_high[key] = high_lbl
-            self._current_row += 1
+    def _render_bridge_rows(self, rows):
+        """rows: list of (text, low, high, bold). Fills the generic slots."""
+        for i in range(self.BRIDGE_ROW_SLOTS):
+            if i < len(rows):
+                text, low, high, bold = rows[i]
+                self._bridge_row_text[i].setText(text)
+                self._bridge_row_text[i].setStyleSheet(get_bold_style() if bold else "")
+                self._bridge_row_low[i].setText(_fmt_currency(low) if low is not None else "NA")
+                self._bridge_row_high[i].setText(_fmt_currency(high) if high is not None else "NA")
+                for lbl in (self._bridge_row_text[i], self._bridge_row_low[i], self._bridge_row_high[i]):
+                    lbl.setVisible(True)
+            else:
+                for lbl in (self._bridge_row_text[i], self._bridge_row_low[i], self._bridge_row_high[i]):
+                    lbl.setVisible(False)
+
+    def _lock_dashboard_owned_inputs(self):
+        """CP / DLOC / Non-Op / NWC are owned elsewhere; render as plain text."""
+        for attr in ("control_premium_input", "dloc_input", "nwc_input", "non_op_assets_input"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            if hasattr(w, "setReadOnly"):
+                w.setReadOnly(True)
+            if hasattr(w, "setFrame"):
+                w.setFrame(False)
 
     def _save_basis_state(self, basis_key: str):
         """Snapshot current UI inputs into per-basis memory."""
@@ -1137,90 +1120,85 @@ class GPCPage(QWidget):
         self.fmv_low_label.setText(_fmt_currency(fmv_low) if fmv_low is not None else "NA")
         self.fmv_high_label.setText(_fmt_currency(fmv_high) if fmv_high is not None else "NA")
 
-        # Bridge Section (Streamlined Equity Bridge or Full BEV Bridge)
-        if is_equity_mode:
-            eq_nctrl_low = fmv_low
-            eq_nctrl_high = fmv_high
+        # Bridge Section — shared value_bridge engine. GPC is minority-native.
+        self._lock_dashboard_owned_inputs()
 
-            if "eq_mkt_nctrl" in self.bridge_labels_low:
-                self.bridge_labels_low["eq_mkt_nctrl"].setText(_fmt_currency(eq_nctrl_low) if eq_nctrl_low is not None else "NA")
-                self.bridge_labels_high["eq_mkt_nctrl"].setText(_fmt_currency(eq_nctrl_high) if eq_nctrl_high is not None else "NA")
+        dash_vals = self._get_dashboard_bridge_values() or {}
+        control_premium = dash_vals.get("control_premium")
+        dloc = dash_vals.get("dloc")
+        non_op = dash_vals.get("non_op") or 0.0
 
-            control_premium = _parse_pct(self.control_premium_input.text())
-            cp_str = _fmt_pct_display(control_premium)
-            self.bridge_labels_low["control_premium_pct"].setText(cp_str)
-            self.bridge_labels_high["control_premium_pct"].setText(cp_str)
+        nwc = self._get_nwc_surplus()
 
-            eq_mkt_ctrl_low = eq_nctrl_low * (1.0 + control_premium) if (eq_nctrl_low is not None and control_premium is not None) else None
-            eq_mkt_ctrl_high = eq_nctrl_high * (1.0 + control_premium) if (eq_nctrl_high is not None and control_premium is not None) else None
-
-            if "eq_mkt_ctrl" in self.bridge_labels_low:
-                self.bridge_labels_low["eq_mkt_ctrl"].setText(_fmt_currency(eq_mkt_ctrl_low) if eq_mkt_ctrl_low is not None else "NA")
-                self.bridge_labels_high["eq_mkt_ctrl"].setText(_fmt_currency(eq_mkt_ctrl_high) if eq_mkt_ctrl_high is not None else "NA")
-
-            dloc = _parse_pct(self.dloc_input.text())
-            dloc_str = _fmt_pct_display(dloc)
-            self.bridge_labels_low["dloc_pct"].setText(dloc_str)
-            self.bridge_labels_high["dloc_pct"].setText(dloc_str)
-
-            eq_nonmkt_ctrl_low = eq_mkt_ctrl_low * (1.0 - dloc) if (eq_mkt_ctrl_low is not None and dloc is not None) else None
-            eq_nonmkt_ctrl_high = eq_mkt_ctrl_high * (1.0 - dloc) if (eq_mkt_ctrl_high is not None and dloc is not None) else None
-
-            if "eq_nonmkt_ctrl" in self.bridge_labels_low:
-                self.bridge_labels_low["eq_nonmkt_ctrl"].setText(_fmt_currency(eq_nonmkt_ctrl_low) if eq_nonmkt_ctrl_low is not None else "NA")
-                self.bridge_labels_high["eq_nonmkt_ctrl"].setText(_fmt_currency(eq_nonmkt_ctrl_high) if eq_nonmkt_ctrl_high is not None else "NA")
-
+        if inputs.is_private:
+            pf = self._get_private_financials_callback()
+            cash = pf.get_bs("cash", "TTM") if pf else None
+        elif inputs.is_publicly_traded:
+            cash = get_subject_cash(bs_rows, inputs.subject_ticker)
         else:
-            bev_nctrl_low = fmv_low
-            bev_nctrl_high = fmv_high
-            self.bridge_computed_labels_low["bev_nctrl"].setText(_fmt_currency(bev_nctrl_low) if bev_nctrl_low is not None else "NA")
-            self.bridge_computed_labels_high["bev_nctrl"].setText(_fmt_currency(bev_nctrl_high) if bev_nctrl_high is not None else "NA")
+            cash = None
 
-            if inputs.is_private:
-                pf = self._get_private_financials_callback()
-                cash = pf.get_bs("cash", "TTM") if pf else None
-            elif inputs.is_publicly_traded:
-                cash = get_subject_cash(bs_rows, inputs.subject_ticker)
-            else:
-                cash = None
-            cash_str = _fmt_currency(cash) if cash is not None else "NA"
-            self.bridge_cash_low.setText(cash_str)
-            self.bridge_cash_high.setText(cash_str)
+        try:
+            debt = self._get_subject_debt()
+        except Exception:
+            debt = None
+        preferred = self._get_subject_metric_value("preferred_stock", "TTM")
+        nci = self._get_subject_metric_value("minority_interest", "TTM")
 
-            nwc = _parse_float(self.nwc_input.text()) or 0.0
-            non_op = _parse_float(self.non_op_assets_input.text()) or 0.0
+        bi = BridgeInputs(
+            cash=cash,
+            nwc_surplus=nwc,
+            non_operating=non_op,
+            debt=debt,
+            preferred_stock=preferred,
+            minority_interest=nci,
+            control_premium=control_premium,
+            dloc=dloc,
+            shares_outstanding=None,
+            share_price=None,
+        )
+        source_basis = "Equity" if is_equity_mode else "BEV"
+        result = run_bridge(
+            fmv_low, fmv_high,
+            natural_level="minority",
+            source_basis=source_basis,
+            bi=bi,
+            equity_mode_includes_cash=False,
+        )
+        self._last_bridge_result = result
 
-            def _sum_or_na(*vals):
-                if any(v is None for v in vals):
-                    return None
-                return sum(vals)
+        # Mirror Dashboard-owned values into the (read-only) compat widgets.
+        for widget, text in (
+            (getattr(self, "control_premium_input", None),
+             f"{control_premium * 100:.1f}%" if control_premium is not None else ""),
+            (getattr(self, "dloc_input", None),
+             f"{dloc * 100:.1f}%" if dloc is not None else ""),
+            (getattr(self, "nwc_input", None),
+             _fmt_currency(nwc) if nwc is not None else ""),
+            (getattr(self, "non_op_assets_input", None), _fmt_currency(non_op)),
+        ):
+            if widget is not None:
+                widget.blockSignals(True)
+                widget.setText(text)
+                widget.blockSignals(False)
 
-            ic_nctrl_low = _sum_or_na(bev_nctrl_low, cash, nwc, non_op)
-            ic_nctrl_high = _sum_or_na(bev_nctrl_high, cash, nwc, non_op)
-            self.bridge_labels_low["ic_nctrl"].setText(_fmt_currency(ic_nctrl_low) if ic_nctrl_low is not None else "NA")
-            self.bridge_labels_high["ic_nctrl"].setText(_fmt_currency(ic_nctrl_high) if ic_nctrl_high is not None else "NA")
-
-            control_premium = _parse_pct(self.control_premium_input.text())
-            cp_str = _fmt_pct_display(control_premium)
-            self.bridge_labels_low["control_premium_pct"].setText(cp_str)
-            self.bridge_labels_high["control_premium_pct"].setText(cp_str)
-
-            ic_ctrl_low = ic_nctrl_low * (1 + control_premium) if (ic_nctrl_low is not None and control_premium is not None) else None
-            ic_ctrl_high = ic_nctrl_high * (1 + control_premium) if (ic_nctrl_high is not None and control_premium is not None) else None
-            self.bridge_labels_low["ic_ctrl"].setText(_fmt_currency(ic_ctrl_low) if ic_ctrl_low is not None else "NA")
-            self.bridge_labels_high["ic_ctrl"].setText(_fmt_currency(ic_ctrl_high) if ic_ctrl_high is not None else "NA")
-
-            self.bridge_labels_low["less_cash"].setText(cash_str)
-            self.bridge_labels_high["less_cash"].setText(cash_str)
-            self.bridge_labels_low["less_nwc"].setText(_fmt_currency(nwc))
-            self.bridge_labels_high["less_nwc"].setText(_fmt_currency(nwc))
-            self.bridge_labels_low["less_non_op"].setText(_fmt_currency(non_op))
-            self.bridge_labels_high["less_non_op"].setText(_fmt_currency(non_op))
-
-            bev_ctrl_low = ic_ctrl_low - cash - nwc - non_op if None not in (ic_ctrl_low, cash, nwc, non_op) else None
-            bev_ctrl_high = ic_ctrl_high - cash - nwc - non_op if None not in (ic_ctrl_high, cash, nwc, non_op) else None
-            self.bridge_labels_low["bev_ctrl"].setText(_fmt_currency(bev_ctrl_low) if bev_ctrl_low is not None else "NA")
-            self.bridge_labels_high["bev_ctrl"].setText(_fmt_currency(bev_ctrl_high) if bev_ctrl_high is not None else "NA")
+        bridge_rows = []
+        if not is_equity_mode:
+            bridge_rows.append(("Debt + Preferred Stock + Minority Interest (subject TTM)",
+                                (debt or 0.0) + (preferred or 0.0) + (nci or 0.0),
+                                (debt or 0.0) + (preferred or 0.0) + (nci or 0.0), False))
+            bridge_rows.append(("Cash & Cash Equivalents (subject TTM)", cash, cash, False))
+        bridge_rows.append(("NWC Surplus/(Deficit) (from NWC page)", nwc, nwc, False))
+        bridge_rows.append(("Non-Operating Assets (from Dashboard)", non_op, non_op, False))
+        for text, lo, hi in result.get("lines", []):
+            bridge_rows.append((text, lo, hi, False))
+        if is_equity_mode:
+            lo, hi = result["equity_controlling"]
+            bridge_rows.append(("Equity Value (controlling, marketable) → Dashboard", lo, hi, True))
+        else:
+            lo, hi = result["bev_controlling"]
+            bridge_rows.append(("BEV (controlling, marketable) → Dashboard", lo, hi, True))
+        self._render_bridge_rows(bridge_rows)
 
         chart_labels = [self.metric_combos[i].currentText() for i in range(n_cols)]
         if self._chart_dialog is not None:

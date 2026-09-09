@@ -35,9 +35,14 @@ from Canneberge.Calculations.gpc_metrics import (
 )
 from Canneberge.Calculations.chart_helper import (
     MethodRow,
-    BridgeInputs,
-    compute_bridge,
     weighted_conclusion,
+)
+from Canneberge.Calculations.value_bridge import (
+    BridgeInputs,
+    run_bridge,
+    value_for,
+    cp_to_dloc,
+    dloc_to_cp,
 )
 from Canneberge.Ui.football_field_chart import FootballFieldChart, FootballFieldChartDialog
 
@@ -2110,19 +2115,48 @@ class DashboardPage(QWidget):
         cp_row.addStretch(1)
         outer.addLayout(cp_row)
 
-        # DLOC — derived, never typed: DLOC = CP / (1 + CP)
+        # DLOC — editable, last-edit-wins with Control Premium.
+        # DLOC = CP / (1 + CP)   CP = DLOC / (1 - DLOC)
         dloc_row = QHBoxLayout()
         dloc_row.setSpacing(6)
-        dloc_lbl = QLabel("Implied DLOC:")
+        dloc_lbl = QLabel("DLOC:")
         dloc_lbl.setFixedWidth(140)
         dloc_row.addWidget(dloc_lbl)
-        self.implied_dloc_label = QLabel("19.4%")
-        self.implied_dloc_label.setFixedWidth(70)
-        self.implied_dloc_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        dloc_row.addWidget(self.implied_dloc_label)
+        self.dloc_input = _value_line(70)
+        self.dloc_input.setText("19.4%")
+        self.dloc_input.editingFinished.connect(self._on_dloc_edited)
+        # Backward-compat alias: older code calls .setText()/.text() on this.
+        self.implied_dloc_label = self.dloc_input
+        dloc_row.addWidget(self.dloc_input)
         dloc_row.addStretch(1)
         outer.addLayout(dloc_row)
+        self._last_edited_discount = "cp"
+
+        # Level of value — Dashboard target. DCF/GT are controlling-native,
+        # GPC is minority-native; only the mismatched methods get adjusted.
+        level_row = QHBoxLayout()
+        level_row.setSpacing(6)
+        level_lbl = QLabel("Level:")
+        level_lbl.setFixedWidth(140)
+        level_row.addWidget(level_lbl)
+        self.level_combo = _combo(["Controlling", "Minority"], width=110)
+        self.level_combo.currentTextChanged.connect(self._on_level_changed)
+        level_row.addWidget(self.level_combo)
+        level_row.addStretch(1)
+        outer.addLayout(level_row)
+
+        # Non-Operating Assets — Dashboard-owned bridge input.
+        non_op_row = QHBoxLayout()
+        non_op_row.setSpacing(6)
+        non_op_lbl = QLabel("Non-Op Assets:")
+        non_op_lbl.setFixedWidth(140)
+        non_op_row.addWidget(non_op_lbl)
+        self.non_op_input = _value_line(70)
+        self.non_op_input.setText("0")
+        self.non_op_input.editingFinished.connect(self._on_non_op_edited)
+        non_op_row.addWidget(self.non_op_input)
+        non_op_row.addStretch(1)
+        outer.addLayout(non_op_row)
 
         # Display toggle
         display_row = QHBoxLayout()
@@ -2186,49 +2220,145 @@ class DashboardPage(QWidget):
         return frame
 
     def _derive_dloc(self) -> Optional[float]:
-        """DLOC = CP / (1 + CP). The inverse relationship between a
-        control premium and the discount for lack of control."""
+        """Effective DLOC given last-edit-wins between CP and DLOC."""
         from Canneberge.Ui.shared_input_widgets import _parse_pct
         cp = _parse_pct(self.control_premium_input.text())
-        if cp is None or cp <= -1.0:
-            return None
-        return cp / (1.0 + cp)
+        dloc = _parse_pct(self.dloc_input.text())
+        if getattr(self, "_last_edited_discount", "cp") == "dloc" and dloc is not None:
+            return dloc
+        if cp is not None:
+            return cp_to_dloc(cp)
+        return dloc
+
+    def bridge_values(self) -> dict:
+        """Dashboard-owned bridge inputs, parsed. Consumed by GPC page."""
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
+        from Canneberge.Ui.dcf_page import _parse_label_as_float
+        cp = _parse_pct(self.control_premium_input.text())
+        dloc = _parse_pct(self.dloc_input.text())
+        if getattr(self, "_last_edited_discount", "cp") == "dloc" and dloc is not None:
+            cp = dloc_to_cp(dloc)
+        elif cp is not None:
+            dloc = cp_to_dloc(cp)
+        return {
+            "control_premium": cp,
+            "dloc": dloc,
+            "non_op": _parse_label_as_float(self.non_op_input.text()) or 0.0,
+            "level": self.target_level(),
+        }
+
+    def target_level(self) -> str:
+        return "minority" if self.level_combo.currentText() == "Minority" else "controlling"
+
+    def _push_bridge_inputs_to_pages(self):
+        """Mirror Dashboard-owned CP / DLOC / Non-Op onto the read-only
+        display fields of GPC and GT, then recalc those pages."""
+        cp_text = self.control_premium_input.text()
+        dloc_text = self.dloc_input.text()
+        non_op_text = self.non_op_input.text()
+
+        gpc = self._gpc_page
+        if gpc is not None:
+            for attr, text in (
+                ("control_premium_input", cp_text),
+                ("dloc_input", dloc_text),
+                ("non_op_assets_input", non_op_text),
+            ):
+                widget = getattr(gpc, attr, None)
+                if widget is not None:
+                    widget.setText(text)
+            gpc._recalculate()
+
+        gt = self._gt_page
+        if gt is not None:
+            widget = getattr(gt, "dloc_input", None)
+            if widget is not None:
+                widget.setText(dloc_text)
+            gt._recalculate()
+
+    def _after_bridge_input_change(self):
+        self._syncing = True
+        try:
+            self._push_bridge_inputs_to_pages()
+        finally:
+            self._syncing = False
+        self.refresh_from_pages()
+        self.recompute_reconciliation()
 
     def _on_control_premium_edited(self):
         if self._syncing:
             return
-        dloc = self._derive_dloc()
-        self.implied_dloc_label.setText(
-            f"{dloc * 100:.1f}%" if dloc is not None else "-")
-        if dloc is None:
-            return
-        dloc_text = f"{dloc * 100:.1f}%"
-        cp_text = self.control_premium_input.text()
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
+        self._last_edited_discount = "cp"
+        cp = _parse_pct(self.control_premium_input.text())
+        dloc = cp_to_dloc(cp)
+        self._set_text_silently(
+            self.dloc_input, f"{dloc * 100:.1f}%" if dloc is not None else ""
+        )
+        self._after_bridge_input_change()
 
+    def _on_dloc_edited(self):
+        if self._syncing:
+            return
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
+        self._last_edited_discount = "dloc"
+        dloc = _parse_pct(self.dloc_input.text())
+        cp = dloc_to_cp(dloc)
+        self._set_text_silently(
+            self.control_premium_input, f"{cp * 100:.1f}%" if cp is not None else ""
+        )
+        self._after_bridge_input_change()
+
+    def _on_level_changed(self, _text: str):
+        if self._syncing:
+            return
+        self.recompute_reconciliation()
+
+    def _on_non_op_edited(self):
+        if self._syncing:
+            return
+        self._after_bridge_input_change()
+
+    def apply_bridge_state(self, state: dict):
+        """Session load: restore Dashboard-owned bridge inputs."""
+        from Canneberge.Ui.shared_input_widgets import _parse_pct
+        if not state:
+            return
         self._syncing = True
         try:
-            # Push the SAME derived DLOC everywhere it's consumed.
-            self._gpc_page.control_premium_input.setText(cp_text)
-            self._gpc_page.dloc_input.setText(dloc_text)
-            self._gt_page.dloc_input.setText(dloc_text)
-            self._gpc_page._recalculate()
-            self._gt_page._recalculate()
+            last = state.get("last_edited_discount", "cp")
+            self._last_edited_discount = last if last in ("cp", "dloc") else "cp"
+
+            cp_text = state.get("control_premium")
+            dloc_text = state.get("dloc")
+            if cp_text:
+                self.control_premium_input.setText(str(cp_text))
+            if dloc_text:
+                self.dloc_input.setText(str(dloc_text))
+
+            # Reconcile the pair according to last-edit-wins.
+            if self._last_edited_discount == "dloc" and dloc_text:
+                cp = dloc_to_cp(_parse_pct(str(dloc_text)))
+                if cp is not None:
+                    self.control_premium_input.setText(f"{cp * 100:.1f}%")
+            else:
+                dloc = cp_to_dloc(_parse_pct(self.control_premium_input.text()))
+                if dloc is not None:
+                    self.dloc_input.setText(f"{dloc * 100:.1f}%")
+
+            level = state.get("value_level")
+            if level in ("Controlling", "Minority"):
+                self.level_combo.setCurrentText(level)
+
+            non_op = state.get("non_op")
+            if non_op is not None and str(non_op).strip() != "":
+                self.non_op_input.setText(str(non_op))
         finally:
             self._syncing = False
 
-        self.refresh_from_pages()
-        self.recompute_reconciliation()
-
     def _on_gpc_control_premium_edited(self):
-        """GPC-page CP edited: mirror it into the Dashboard input,
-        then run the normal Dashboard-side derivation/push."""
-        if self._syncing:
-            return
-        self._set_text_silently(
-            self.control_premium_input,
-            self._gpc_page.control_premium_input.text(),
-        )
-        self._on_control_premium_edited()
+        """Legacy hook. GPC's CP field is read-only now; Dashboard owns CP."""
+        return
 
     # ------------------------------------------------------------------
     # RECONCILIATION OF VALUES (bridge + concluded FV)
@@ -2243,30 +2373,33 @@ class DashboardPage(QWidget):
 
         cash = get_subject_cash(sa.get("BS", []), inputs.subject_ticker)
 
-        nwc_surplus = _parse_label_as_float(
-            self._nwc_page.nwc_surplus_deficit_label.text()
-        )
+        nwc_surplus = None
+        if self._nwc_page is not None:
+            nwc_surplus = _parse_label_as_float(
+                self._nwc_page.nwc_surplus_deficit_label.text()
+            )
 
         try:
             debt = self._get_subject_debt()
         except Exception:
             debt = None
 
-        liquidation = self._get_subject_metric_value(
-            "preferred_stock", "TTM"
-        )
+        preferred = self._get_subject_metric_value("preferred_stock", "TTM")
+        nci = self._get_subject_metric_value("minority_interest", "TTM")
 
         shares, price = self._subject_shares_and_price(inputs, sa)
 
-        # DLOC is always derived from the Dashboard's Control Premium.
-        dloc = self._derive_dloc()
+        vals = self.bridge_values()
 
         return BridgeInputs(
             cash=cash,
             nwc_surplus=nwc_surplus,
+            non_operating=vals["non_op"],
             debt=debt,
-            liquidation=liquidation,
-            dloc=dloc,
+            preferred_stock=preferred,
+            minority_interest=nci,
+            control_premium=vals["control_premium"],
+            dloc=vals["dloc"],
             shares_outstanding=shares,
             share_price=price,
         )
@@ -2297,24 +2430,27 @@ class DashboardPage(QWidget):
         shares = (market_cap / price) if (market_cap and price) else None
         return shares, price
 
-    def _collect_method_rows(self):
-        """One MethodRow per chart line: DCF, each active GPC
-        multiple, each active GT multiple.
+    def _method_row_from_bridge(self, name: str, result: dict, level: str) -> MethodRow:
+        """Wrap a run_bridge() result in a MethodRow so the football field
+        (which reads row.values_for_basis) keeps working unchanged."""
+        row = MethodRow(name=name, bev_low=None, bev_high=None, apply_dloc=False)
+        row.bev_low, row.bev_high = value_for(result, level, "BEV")
+        row.equity_low, row.equity_high = value_for(result, level, "Equity")
+        row.per_share_low, row.per_share_high = value_for(result, level, "$/Share")
+        return row
 
-        source_basis must match what the labels actually contain:
-          DCF  -> Equity if _cash_flows_to == FCFE else BEV
-          GPC  -> Equity if Home basis is Equity Value else BEV
-          GT   -> always BEV
+    def _collect_method_rows(self, bridge_inputs: BridgeInputs):
+        """One MethodRow per chart line, all levelled to the Dashboard's
+        target level via the shared value_bridge engine.
+
+        Natural levels: DCF controlling, GT controlling, GPC minority.
         """
         from Canneberge.Ui.dcf_page import _parse_label_as_float as parse
 
+        level = self.target_level()
         inputs = self._get_project_inputs()
-        home_basis = getattr(
-            inputs, "basis_of_value", "Business Enterprise Value"
-        )
-        gpc_source = (
-            "Equity" if home_basis == "Equity Value" else "BEV"
-        )
+        home_basis = getattr(inputs, "basis_of_value", "Business Enterprise Value")
+        gpc_source = "Equity" if home_basis == "Equity Value" else "BEV"
         dcf_source = (
             "Equity"
             if getattr(self._dcf_page, "_cash_flows_to", "FCFF") == "FCFE"
@@ -2323,61 +2459,56 @@ class DashboardPage(QWidget):
 
         rows = []
 
-        rows.append(MethodRow(
-            name="Discounted Cash Flow Method",
-            bev_low=parse(self._dcf_page.bridge_fv_low_label.text()),
-            bev_high=parse(self._dcf_page.bridge_fv_high_label.text()),
-            # FCFE FV is already equity — do not DLOC again.
-            # FCFF FV is BEV — DLOC applies on BEV->Equity bridge.
-            apply_dloc=(dcf_source == "BEV"),
+        dcf_res = run_bridge(
+            parse(self._dcf_page.bridge_fv_low_label.text()),
+            parse(self._dcf_page.bridge_fv_high_label.text()),
+            natural_level="controlling",
             source_basis=dcf_source,
-        ))
+            bi=bridge_inputs,
+        )
+        rows.append(self._method_row_from_bridge("Discounted Cash Flow Method", dcf_res, level))
 
         gpc_count = self._gpc_page.num_multiples_spin.value()
         for i in range(gpc_count):
-            rows.append(MethodRow(
-                name=f"GPC - {self._gpc_page.metric_combos[i].currentText()}",
-                bev_low=parse(
-                    self._gpc_page.indicated_bev_low_labels[i].text()
-                ),
-                bev_high=parse(
-                    self._gpc_page.indicated_bev_high_labels[i].text()
-                ),
-                apply_dloc=False,
+            res = run_bridge(
+                parse(self._gpc_page.indicated_bev_low_labels[i].text()),
+                parse(self._gpc_page.indicated_bev_high_labels[i].text()),
+                natural_level="minority",
                 source_basis=gpc_source,
+                bi=bridge_inputs,
+            )
+            rows.append(self._method_row_from_bridge(
+                f"GPC - {self._gpc_page.metric_combos[i].currentText()}", res, level
             ))
 
         gt_count = self._gt_page.num_multiples_spin.value()
         for i in range(gt_count):
-            rows.append(MethodRow(
-                name=f"GT - {self._gt_page.metric_combos[i].currentText()}",
-                bev_low=parse(
-                    self._gt_page.indicated_bev_low_labels[i].text()
-                ),
-                bev_high=parse(
-                    self._gt_page.indicated_bev_high_labels[i].text()
-                ),
-                apply_dloc=True,
+            res = run_bridge(
+                parse(self._gt_page.indicated_bev_low_labels[i].text()),
+                parse(self._gt_page.indicated_bev_high_labels[i].text()),
+                natural_level="controlling",
                 source_basis="BEV",
+                bi=bridge_inputs,
+            )
+            rows.append(self._method_row_from_bridge(
+                f"GT - {self._gt_page.metric_combos[i].currentText()}", res, level
             ))
 
         return rows
 
-    def _single_bridged_pair(self, name, low, high, apply_dloc,
+    def _single_bridged_pair(self, low, high, natural_level,
                              bridge_inputs, basis, source_basis="BEV"):
-        """Run ONE (low, high) pair through the bridge and return
-        values on the requested display basis."""
+        """Run ONE (low, high) pair through the shared bridge engine and
+        return values at the Dashboard's target level on the display basis."""
         if low is None and high is None:
             return None, None
-        row = MethodRow(
-            name=name,
-            bev_low=low,
-            bev_high=high,
-            apply_dloc=apply_dloc,
+        res = run_bridge(
+            low, high,
+            natural_level=natural_level,
             source_basis=source_basis,
+            bi=bridge_inputs,
         )
-        compute_bridge([row], bridge_inputs)
-        return row.values_for_basis(basis)
+        return value_for(res, self.target_level(), basis)
 
     def _method_pair(self, name, basis):
         """Find a named row in the already-computed bridge rows."""
@@ -2387,8 +2518,8 @@ class DashboardPage(QWidget):
         return None, None
 
     def recompute_reconciliation(self):
-        """Populate the Reconciliation box + concluded FV from the
-        bridge. Chart wiring consumes self._bridge_rows separately."""
+        """Populate the Reconciliation box + concluded FV from the shared
+        value_bridge engine at the Dashboard's target level."""
         if self._gpc_page is None:
             return
 
@@ -2396,41 +2527,28 @@ class DashboardPage(QWidget):
         from Canneberge.Ui.shared_input_widgets import _parse_pct
 
         bridge_inputs = self._collect_bridge_inputs()
-        self._bridge_rows = compute_bridge(
-            self._collect_method_rows(), bridge_inputs
-        )
+        self._bridge_rows = self._collect_method_rows(bridge_inputs)
 
         basis = self.display_combo.currentText()
 
         inputs = self._get_project_inputs()
-        home_basis = getattr(
-            inputs, "basis_of_value", "Business Enterprise Value"
-        )
-        gpc_source = (
-            "Equity" if home_basis == "Equity Value" else "BEV"
-        )
+        home_basis = getattr(inputs, "basis_of_value", "Business Enterprise Value")
+        gpc_source = "Equity" if home_basis == "Equity Value" else "BEV"
 
-        # DCF row comes from _bridge_rows (see _collect_method_rows).
-        # GPC/GT weighted FMV pairs are bridged here with explicit
-        # source_basis tags.
         method_pairs = {
-            "DCF": self._method_pair(
-                "Discounted Cash Flow Method", basis
-            ),
+            "DCF": self._method_pair("Discounted Cash Flow Method", basis),
             "GPC": self._single_bridged_pair(
-                "GPC (weighted)",
                 parse(self._gpc_page.fmv_low_label.text()),
                 parse(self._gpc_page.fmv_high_label.text()),
-                False,
+                "minority",
                 bridge_inputs,
                 basis,
                 source_basis=gpc_source,
             ),
             "GT": self._single_bridged_pair(
-                "GT (weighted)",
                 parse(self._gt_page.fmv_low_label.text()),
                 parse(self._gt_page.fmv_high_label.text()),
-                True,
+                "controlling",
                 bridge_inputs,
                 basis,
                 source_basis="BEV",
@@ -2453,9 +2571,7 @@ class DashboardPage(QWidget):
             self._set_text_silently(self.recon_low_inputs[name], fmt(low))
             self._set_text_silently(self.recon_high_inputs[name], fmt(high))
             pairs.append((low, high))
-            weights.append(
-                _parse_pct(self.recon_weight_inputs[name].text())
-            )
+            weights.append(_parse_pct(self.recon_weight_inputs[name].text()))
 
         concluded = weighted_conclusion(pairs, weights)
         self.fv_value.setText(fmt(concluded))
@@ -2484,9 +2600,13 @@ class DashboardPage(QWidget):
         market_cap = price * shares
         if basis == "Equity":
             return market_cap
-        debt = bridge_inputs.debt or 0.0
-        cash = bridge_inputs.cash or 0.0
-        return market_cap + debt - cash
+        return (
+            market_cap
+            + (bridge_inputs.debt or 0.0)
+            + (bridge_inputs.preferred_stock or 0.0)
+            + (bridge_inputs.minority_interest or 0.0)
+            - (bridge_inputs.cash or 0.0)
+        )
 
     def _update_football_field(self, bridge_inputs, basis, concluded_fv):
         self._push_football_field_data(self.football_chart)
