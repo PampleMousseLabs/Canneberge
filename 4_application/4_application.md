@@ -321,11 +321,12 @@ Utilize the CLI Code Inspection or Precision Slicing methods in asking for files
 #The Map (find where things live)
 ```bash
 grep -n "^class \|^    def \|^def " path/to/file.py
-
+---
 
 #The Scalpel (Pull an exact line range)
 ```bash
 sed -n '1842,1905p' Canneberge/Ui/filename.py
+---
 
 #The Sanity Check (check the file size first)
 ```bash
